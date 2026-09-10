@@ -16,3 +16,5 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 
 .message-link{text-decoration:underline;text-underline-offset:3px}
+
+.auth-form{display:grid;gap:16px;width:100%;text-align:left}.auth-form>.brand{text-align:center;margin-bottom:12px}.auth-form label{display:grid;gap:7px;font-size:14px;font-weight:600}.auth-form input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;color:inherit;background:transparent;font-size:16px}.auth-form small{color:#737373;line-height:1.5}.auth-form [role=alert]{color:#be123c;font-size:14px}.setup-page{min-height:100vh;display:grid;place-items:center;background:#fafafa;padding:24px;color:#171717}.setup-card{width:min(560px,100%);border:1px solid #e5e5e5;border-radius:20px;background:white;padding:36px}.setup-card h1{font-size:30px;margin:24px 0 12px}.setup-card p,.setup-card li{line-height:1.7;color:#666}.setup-card code{font-size:13px;color:#171717}.setup-card .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#d62976}
