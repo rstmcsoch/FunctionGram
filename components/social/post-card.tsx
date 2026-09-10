@@ -1,0 +1,29 @@
+"use client";
+import {useState,useRef,type FormEvent} from 'react';
+import { Heart,MessageCircle,Send,Bookmark,MoreHorizontal,ChevronLeft,ChevronRight,Smile,Link as LinkIcon,EyeOff,UserRound,Trash2 } from 'lucide-react';
+import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator} from '@/components/ui/dropdown-menu';
+import {Avatar,IconButton,count,timeAgo,Busy} from './common';
+import type {Post,Person} from '@/lib/types';
+export type PostActions={react:(p:Post,kind:string,active:boolean)=>Promise<void>;comment:(p:Post,body:string)=>Promise<void>;openPost:(p:Post)=>void;openProfile:(id:string)=>void;share:(p:Post)=>void;deletePost:(p:Post)=>void;copyLink:(p:Post)=>void;me:Person|null};
+export function PostCard({post:p,actions:a,expanded=false}:{post:Post;actions:PostActions;expanded?:boolean}){
+  const [index,setIndex]=useState(0),[body,setBody]=useState(''),[sending,setSending]=useState(false),[heart,setHeart]=useState(false),[pending,setPending]=useState('');const input=useRef<HTMLInputElement>(null);
+  const react=async(kind:string,active:boolean)=>{if(pending)return;setPending(kind);try{await a.react(p,kind,active);}finally{setPending('');}};
+  const submit=async(e:FormEvent)=>{e.preventDefault();if(!body.trim()||sending)return;setSending(true);try{await a.comment(p,body);setBody('');}catch{}finally{setSending(false);}};
+  const doubleLike=()=>{if(!p.liked)void react('like',true);setHeart(true);setTimeout(()=>setHeart(false),750);};
+  return <article className={'post-card '+(expanded?'post-expanded':'')} aria-label={'Post by '+p.author.username}>
+    <header className="post-header"><Avatar person={p.author} size={40} onClick={()=>a.openProfile(p.author_id)}/><div className="post-user"><div><button className="username" onClick={()=>a.openProfile(p.author_id)}>{p.author.username}</button><span className="post-time"> · {timeAgo(p.created_at)}</span></div><span className="post-location">{p.location||p.author.name}</span></div>
+      <DropdownMenu><DropdownMenuTrigger asChild><button className="icon-button" aria-label="Post options"><MoreHorizontal/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="social-menu"><DropdownMenuItem onClick={()=>a.openProfile(p.author_id)}><UserRound/>Go to profile</DropdownMenuItem><DropdownMenuItem onClick={()=>a.copyLink(p)}><LinkIcon/>Copy link</DropdownMenuItem><DropdownMenuItem onClick={()=>void react('save',!p.saved)}><Bookmark/>{p.saved?'Remove from saved':'Save post'}</DropdownMenuItem><DropdownMenuSeparator/>{a.me?.id===p.author_id?<DropdownMenuItem variant="destructive" onClick={()=>a.deletePost(p)}><Trash2/>Delete post</DropdownMenuItem>:<DropdownMenuItem onClick={()=>void react('hidden',true)}><EyeOff/>Hide post</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>
+    </header>
+    <div className={'post-media '+(p.media_type==='video'?'post-video':'')} onDoubleClick={doubleLike}>
+      {p.media_type==='video'?<video src={p.media[0]} controls playsInline preload="metadata" aria-label={p.caption||'Video post'}/>:<img src={p.media[index]||p.media[0]} alt={p.caption||'Photo by '+p.author.username} loading={p.id==='demo_coast'?'eager':'lazy'} onError={e=>{e.currentTarget.alt='This photo could not be loaded. Please refresh.';}}/>}
+      {heart&&<Heart className="double-heart" fill="white"/>}
+      {p.media.length>1&&<><span className="image-number">{index+1}/{p.media.length}</span>{index>0&&<IconButton className="carousel-back" label="Previous photo" onClick={()=>setIndex(index-1)}><ChevronLeft/></IconButton>}{index<p.media.length-1&&<IconButton className="carousel-next" label="Next photo" onClick={()=>setIndex(index+1)}><ChevronRight/></IconButton>}</>}
+    </div>
+    <div className="post-body"><div className="post-actions"><IconButton label={p.liked?'Unlike':'Like'} active={!!p.liked} disabled={!!pending} onClick={()=>void react('like',!p.liked)}><Heart fill={p.liked?'currentColor':'none'}/></IconButton><IconButton label="View comments" onClick={()=>a.openPost(p)}><MessageCircle/></IconButton><IconButton label="Share post" onClick={()=>a.share(p)}><Send/></IconButton>{p.media.length>1&&<div className="carousel-dots">{p.media.map((_,i)=><button aria-label={'Show photo '+(i+1)} key={i} onClick={()=>setIndex(i)} className={i===index?'active':''}/>)}</div>}<IconButton className="save-button" label={p.saved?'Unsave post':'Save post'} disabled={!!pending} onClick={()=>void react('save',!p.saved)}><Bookmark fill={p.saved?'currentColor':'none'}/></IconButton></div>
+      <div className="like-count">{count(p.likes)} {p.likes===1?'like':'likes'}</div><p className="post-caption"><button className="username" onClick={()=>a.openProfile(p.author_id)}>{p.author.username}</button> <Caption text={p.caption}/></p>
+      {!expanded&&<button className="view-comments" onClick={()=>a.openPost(p)}>{p.comment_count?(p.comment_count===1?'View 1 comment':'View all '+p.comment_count+' comments'):'Start the conversation'}</button>}
+      <form onSubmit={submit} className="comment-form"><IconButton label="Add a smile" onClick={()=>{setBody(v=>v+' 😊');input.current?.focus();}}><Smile size={21}/></IconButton><input ref={input} aria-label="Add a comment" value={body} maxLength={1000} onChange={e=>setBody(e.target.value)} placeholder="Add a comment…"/><button className="text-action" disabled={!body.trim()||sending}>{sending?<Busy/>:'Post'}</button></form>
+    </div>
+  </article>;
+}
+function Caption({text}:{text:string}){const [more,setMore]=useState(false);const shortened=!more&&text.length>150;return <>{(shortened?text.slice(0,150):text).split(/(#[\p{L}\p{N}_]+)/u).map((s,i)=>s.startsWith('#')?<span className="hashtag" key={i}>{s}</span>:s)}{shortened&&<>… <button className="muted" onClick={()=>setMore(true)}>more</button></>}</>;}
