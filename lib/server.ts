@@ -1,17 +1,16 @@
-import { env } from 'cloudflare:workers';
-import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { database } from './postgres';
+import { getAppUser } from '@/lib/auth';
 import { seed } from './seed';
 import type { Person, Post, SocialData } from './types';
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
-export function db(){if(!env.DB)throw new AppError('Your feed is temporarily unavailable. Please try again.',503);return env.DB;}
-export function bucket(){if(!env.BUCKET)throw new AppError('Uploads are temporarily unavailable. Please try again.',503);return env.BUCKET;}
+export function db(){return database();}
 export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
 export function sameOrigin(request:Request){const origin=request.headers.get('origin'); if(request.headers.get('sec-fetch-site')==='cross-site'||(origin&&new URL(origin).host!==new URL(request.url).host))throw new AppError('Please open RSTMC to make this change.',403);}
 export function clean(value:unknown,max:number,required=false){if(typeof value!=='string'||value.trim().length>max||(required&&!value.trim()))throw new AppError(required?'Please complete the required fields.':'Please check the length of your text.');return value.trim();}
 export async function readBody(request:Request){if(Number(request.headers.get('content-length')||0)>20000)throw new AppError('This request is too large.',413);try{const body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw new Error();return body as Record<string,unknown>;}catch{throw new AppError('Please check your input.');}}
 export async function identity(required=false){
-  const user=await getChatGPTUser();
+  const user=await getAppUser();
   if(!user){if(required)throw new AppError('Sign in to join the conversation.',401);return null;}
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(user.userId)))).map(n=>n.toString(16).padStart(2,'0')).join('').slice(0,10);
   await db().prepare('INSERT OR IGNORE INTO profiles (id,username,name,bio,avatar,is_demo,created_at) VALUES (?,?,?,?,?,0,?)').bind(user.userId,'rstmc_'+hash,user.fullName?.slice(0,60)||'RSTMC','','',Date.now()).run();
