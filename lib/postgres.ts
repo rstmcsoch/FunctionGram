@@ -7,7 +7,9 @@ types.setTypeParser(1700, value => Number(value));
 let pool: Pool | undefined;
 let ready: Promise<void> | undefined;
 export function getPool() {
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  // Prefer Vercel's managed Postgres/Neon variable when both are present.
+  // A legacy DATABASE_URL may still point at a removed database.
+  const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('FunctionGram requires DATABASE_URL.');
   return pool ??= new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
 }
