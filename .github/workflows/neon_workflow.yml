@@ -27,6 +27,8 @@ jobs:
         uses: neondatabase/create-branch-action@v6
         with:
           project_id: shiny-pine-10318126
+          database: functiongram
+          role: functiongram_owner
           branch_name: preview/pr-${{ github.event.number }}
           api_key: ${{ secrets.NEON_API_KEY }}
       - name: Remove preview branch after closing the PR
