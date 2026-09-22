@@ -6,7 +6,7 @@ async function handle(request:Request) {
   try {
     await ensureSchema();
     const handlers=toNextJsHandler(getAuth());
-    return request.method==='GET'?handlers.GET(request):handlers.POST(request);
+    return await (request.method==='GET'?handlers.GET(request):handlers.POST(request));
   } catch(error) {
     console.error('Authentication is unavailable',error instanceof Error?error.message:'Unknown error');
     return Response.json({message:'Sign-in is temporarily unavailable. Please try again later.'},{status:503});

@@ -1,7 +1,7 @@
 // Translate only SQL authored by the application; values remain bound parameters.
 export function postgresQuery(input: string) {
   const ignore = /^INSERT OR IGNORE INTO /i.test(input);
-  let sql = input.replace(/^INSERT OR IGNORE INTO /i, 'INSERT INTO ');
+  const sql = input.replace(/^INSERT OR IGNORE INTO /i, 'INSERT INTO ');
   let result = '', quoted = false, index = 0;
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];

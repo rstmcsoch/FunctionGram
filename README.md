@@ -47,3 +47,13 @@ Live account registration, durable uploads, cross-account messaging, provider qu
 The earlier Sites implementation is preserved in the repository history at `b61f33a5d64cadfd45aeb634c120a9a45d4a99e7`. The old Drizzle SQLite schema, hosting scripts and configuration are retained only as migration reference; Next.js builds use `next.config.ts` and `vercel.json`, and the current PostgreSQL schema is in `lib/postgres-schema.ts`.
 
 Media credits are in `public/media/photo-credits.json` and `public/media/portrait-credits.json` and the app's About dialog.
+
+## Authentication and database troubleshooting
+
+FunctionGram uses email/password sign-up and sign-in only. No social authentication providers are configured. Passwords must be 12–128 characters. Password reset email delivery is not configured.
+
+Set the Production `DATABASE_URL` to the active Neon production branch. Set Preview to a separate Neon branch before testing. A successful build does not verify a database connection; check `/api/health` after deployment. If `POSTGRES_URL` is also present, it takes precedence and must point to the intended database. Environment changes require a new deployment. Never commit connection strings or auth secrets.
+
+Vercel production, deployment, and branch hostnames are accepted explicitly from system variables. For an extra custom domain, set `AUTH_TRUSTED_ORIGINS` to a comma-separated list of exact HTTPS origins. Local development uses `BETTER_AUTH_URL=http://localhost:3000`; do not copy that value to Vercel.
+
+Run `npm run test:vercel` for PostgreSQL behavior and real Better Auth registration/session/login regression tests. These run in an isolated local PostgreSQL engine and do not write production data.

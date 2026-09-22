@@ -11,7 +11,11 @@ export function getPool() {
   // A legacy DATABASE_URL may still point at a removed database.
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('FunctionGram requires DATABASE_URL.');
-  return pool ??= new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
+  if (!pool) {
+    pool = new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
+    pool.on('error', error => console.error('Idle database connection closed', error.message));
+  }
+  return pool;
 }
 export async function ensureSchema() {
   if (!ready) ready = (async () => {
