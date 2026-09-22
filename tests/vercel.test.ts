@@ -34,7 +34,9 @@ test('PostgreSQL schema supports actual feed, social actions, ownership and tran
   assert.equal(posts.rows.length,1);assert.equal(posts.rows[0].likes,1);assert.equal(posts.rows[0].liked,true);assert.equal(posts.rows[0].saved,false);
   await query('INSERT OR IGNORE INTO follows(follower_id,followee_id) VALUES(?,?)',['bob','alice']);
   const peopleSql=source.match(/db\(\)\.prepare\(`(SELECT p\.\*, \(SELECT COUNT\(\*\)[\s\S]*?)`\)/)![1];
-  const people=await query(peopleSql,['bob']);assert.equal(people.rows.find(p=>p.id==='alice')?.followers,1);
+  const people=await query(peopleSql,['bob','bob']);assert.equal(people.rows.find(p=>p.id==='alice')?.followers,1);
+  await db.exec("INSERT INTO profiles(id,username,name,created_at) SELECT 'extra_'||n,'extra_'||n,'Extra',0 FROM generate_series(1,305) n");
+  assert.equal((await query(peopleSql,['bob','bob'])).rows[0].id,'bob','Signed-in viewer stays available beyond the people list limit');
   await query('INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES(?,?,?,?,?)',['c','p','bob',"What's up?",Date.now()]);
   await query('INSERT INTO messages(id,sender_id,recipient_id,body,created_at) VALUES(?,?,?,?,?)',['m','alice','bob','Private message',Date.now()]);
   const messagesSql='SELECT * FROM messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?) ORDER BY created_at DESC LIMIT 200';

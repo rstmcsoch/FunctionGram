@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "test:vercel": "node --import tsx --test tests/vercel.test.ts"
+    "test:vercel": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
