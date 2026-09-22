@@ -42,9 +42,9 @@ jobs:
         id: create_neon_branch
         uses: neondatabase/create-branch-action@v6
         with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
+          project_id: ${{ vars.shiny-pine-10318126 }}
           branch_name: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
-          api_key: ${{ secrets.NEON_API_KEY }}
+          api_key: ${{ secrets.napi_90cgy41b4kfswfe2wf8lzje290n1azgqeng2ktr25at6hbou17uj9al2ljwrkp4c }}
           expires_at: ${{ env.EXPIRES_AT }}
 
 # The step above creates a new Neon branch.
@@ -92,6 +92,6 @@ jobs:
       - name: Delete Neon Branch
         uses: neondatabase/delete-branch-action@v3
         with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
+          project_id: ${{ vars.shiny-pine-10318126 }}
           branch: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
-          api_key: ${{ secrets.NEON_API_KEY }}
+          api_key: ${{ secrets.napi_90cgy41b4kfswfe2wf8lzje290n1azgqeng2ktr25at6hbou17uj9al2ljwrkp4c }}
