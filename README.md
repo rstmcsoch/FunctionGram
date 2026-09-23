@@ -13,11 +13,27 @@ Responsive feed, stories, reels, image/video uploads, likes, comments, saved pos
 3. Connect a **public Vercel Blob** store. Ensure `BLOB_READ_WRITE_TOKEN` is available to the deployment. Uploaded social media is publicly accessible; messages remain stored in PostgreSQL and are restricted to their participants.
 4. Add `BETTER_AUTH_SECRET` (at least 32 random characters). Generate it locally with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` and paste it into Vercel's encrypted environment-variable settings. Never commit this value.
 5. Set `BETTER_AUTH_URL` to the stable production origin once known. It is optional for previews; Vercel's deployment origin is used automatically.
-6. Select the deployment environments for these variables, then redeploy.
+6. Configure Brevo's server-only `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` (a sender verified in Brevo), and optional `BREVO_SENDER_NAME` (defaults to RSTMC). See the activation steps below.
+7. Select the deployment environments for these variables, then redeploy. Keep production credentials out of preview environments unless explicitly configured for that purpose.
 
 The app shows a setup page while required configuration is missing. `/api/health` returns HTTP 503 until configuration and the database are ready. Database schema creation is automatic, transactional, versioned, and guarded by a PostgreSQL advisory lock on first use. Repeated startup does not reset data.
 
-This is a separate backend from the original Sites deployment. Existing Sites accounts, posts and uploaded media have **not** been migrated. Vercel users register with email and password. Email verification and password-reset email delivery are not configured; the sign-up screen discloses the lack of email recovery. Passwords and session handling use Better Auth. Never trust client-supplied Sites identity headers on Vercel.
+This is a separate backend from the original Sites deployment. Existing Sites accounts, posts and uploaded media have **not** been migrated. Vercel users register with email and password and verify their email through Brevo before signing in. Password-reset delivery is not configured; the sign-up screen discloses the lack of password recovery. Passwords and session handling use Better Auth. Never trust client-supplied Sites identity headers on Vercel.
+
+## Activate Brevo verification
+
+Do not merge/deploy the verification change until a verified Brevo sender and the environment variables are ready. Missing email configuration fails closed rather than issuing unverified sessions.
+
+1. In Brevo, activate transactional email and verify the sender email (and authenticate its domain when available). Use the Free plan; no paid upgrade is required for this integration.
+2. Create a Brevo **API key**, not an SMTP key. Store it directly in Vercel's FunctionGram environment settings as `BREVO_API_KEY`. Never put it in Git, a chat message, or a `NEXT_PUBLIC_` variable.
+3. Set `BREVO_SENDER_EMAIL` to that verified address and optionally `BREVO_SENDER_NAME=RSTMC`. Use the Production scope for the live app. Configure a separate preview sender/key if testing delivery on previews.
+4. Deploy, then register using an inbox you control. Check the inbox/spam folder and Brevo transactional logs. Open the link within 15 minutes and sign in with the same email/password. Also test resend and an expired link.
+
+Sign-up no longer creates a session. An unverified user's password sign-in triggers another verification email; existing unverified sessions cannot access authenticated social actions. Existing users and password hashes are preserved. Verification redirects to `/verify-email`, where success and expired/invalid links have separate screens. No Google, Apple, magic-link sign-in, or other authentication provider is enabled.
+
+Delivery runs through Next.js `after()` so Vercel keeps the function alive after responding. Messages contain plain text and HTML. Send requests are generic to avoid revealing account existence; a request acknowledgement does not guarantee inbox delivery. Provider failures are logged without recipients, tokens, or API keys. The database enforces one reservation per recipient per minute and 300 send reservations per UTC day across this app; failed attempts count conservatively. Brevo's own quota is separate and may also be consumed by other applications on the same account. No retry queue or paid overage is enabled.
+
+The app uses its own Better Auth server with Neon PostgreSQL. Brevo is connected to that server; changing the unused Neon managed-auth console settings alone does not affect the app.
 
 ## Local development
 
@@ -50,10 +66,10 @@ Media credits are in `public/media/photo-credits.json` and `public/media/portrai
 
 ## Authentication and database troubleshooting
 
-FunctionGram uses email/password sign-up and sign-in only. No social authentication providers are configured. Passwords must be 12–128 characters. Password reset email delivery is not configured.
+FunctionGram uses email/password sign-up and sign-in only, with email verification required. No social authentication providers are configured. Passwords must be 12–128 characters. Password reset email delivery is not configured.
 
 Set the Production `DATABASE_URL` to the active Neon production branch. Set Preview to a separate Neon branch before testing. A successful build does not verify a database connection; check `/api/health` after deployment. If `POSTGRES_URL` is also present, it takes precedence and must point to the intended database. Environment changes require a new deployment. Never commit connection strings or auth secrets.
 
 Vercel production, deployment, and branch hostnames are accepted explicitly from system variables. For an extra custom domain, set `AUTH_TRUSTED_ORIGINS` to a comma-separated list of exact HTTPS origins. Local development uses `BETTER_AUTH_URL=http://localhost:3000`; do not copy that value to Vercel.
 
-Run `npm run test:vercel` for PostgreSQL behavior and real Better Auth registration/session/login regression tests. These run in an isolated local PostgreSQL engine and do not write production data.
+Run `npm run test:vercel` for PostgreSQL behavior and real Better Auth registration/verification/session/login regression tests. Tests capture Brevo requests with a fake HTTP transport: they cover verification gating, valid/invalid/expired tokens, resend, duplicate accounts, secure cookies, cross-origin rejection, provider failures, and database-backed sending limits. They run in an isolated local PostgreSQL engine, do not write production data, and do not prove live inbox delivery.
