@@ -37,3 +37,9 @@ export const socialUpgradeStatements: string[] = [
   "CREATE TABLE IF NOT EXISTS story_highlights (post_id text PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE, owner_id text NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, created_at bigint NOT NULL)",
   "CREATE INDEX IF NOT EXISTS idx_story_highlights_owner ON story_highlights(owner_id,created_at DESC)"
 ];
+
+// Version 3: per-item media aspect ratios (width / height) stored as a JSON text
+// array parallel to `media`, so posts can reserve exact space and never crop.
+export const aspectUpgradeStatements: string[] = [
+  "ALTER TABLE \"posts\" ADD COLUMN IF NOT EXISTS \"aspects\" text"
+];

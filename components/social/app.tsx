@@ -1,98 +1,514 @@
 "use client";
-import {AuthForm,SignOutButton} from './auth-form';
-import {useState,useEffect,useCallback,useRef,useSyncExternalStore,type CSSProperties} from 'react';
-import {Home,Search,Compass,Clapperboard,Send,Heart,SquarePlus,UserRound,Menu,Bookmark,Sun,Moon,Info,LogIn,Camera,Link as LinkIcon,Check,Users,RefreshCw,Plus} from 'lucide-react';
-import {SidebarProvider,Sidebar,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton} from '@/components/ui/sidebar';
-import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs';
-import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator} from '@/components/ui/dropdown-menu';
-import {AlertDialog,AlertDialogContent,AlertDialogHeader,AlertDialogTitle,AlertDialogDescription,AlertDialogFooter,AlertDialogAction,AlertDialogCancel} from '@/components/ui/alert-dialog';
-import {Toaster} from '@/components/ui/sonner';
-import {toast} from 'sonner';
-import {Avatar,IconButton,Modal,Empty,Busy,request,timeAgo,count} from './common';
-import {PostCard,type PostActions} from './post-card';
-import {PostViewer} from './post-viewer';
-import {Stories,StoryViewer} from './stories';
-import {CreateDialog,EditProfile} from './create-dialog';
-import {Messages} from './messages';
-import {Reels} from './reels';
-import {SearchPage,ExplorePage} from './discovery';
-import {ProfilePage,ProfileGrid} from './profile';
-import {Notifications} from './notifications';
-import type {SocialData,Post,Person,Comment} from '@/lib/types';
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import {
+  Home, Search, Compass, Clapperboard, Send, Heart, SquarePlus, UserRound, Menu, Bookmark,
+  Sun, Moon, Info, LogIn, Link as LinkIcon, RefreshCw,
+} from "lucide-react";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { Avatar, IconButton, Modal, Empty, Busy, request, subscribeTheme, readTheme, toggleStoredTheme } from "./common";
+import { AuthForm, SignOutButton } from "./auth-form";
+import type { PostActions } from "./post-card";
+import { PostViewer, Relations } from "./post-viewer";
+import { CreateDialog, EditProfile } from "./create";
+import { Messages } from "./messages";
+import { Reels } from "./reels";
+import { StoryViewer } from "./stories";
+import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView } from "./views";
+import type { SocialData, Post, Person, Comment } from "@/lib/types";
 
-const navItems=[{id:'home',label:'Home',icon:Home},{id:'search',label:'Search',icon:Search},{id:'explore',label:'Explore',icon:Compass},{id:'reels',label:'Reels',icon:Clapperboard},{id:'messages',label:'Messages',icon:Send},{id:'notifications',label:'Notifications',icon:Heart},{id:'create',label:'Create',icon:SquarePlus},{id:'profile',label:'Profile',icon:UserRound}] as const;
-const themeEvent='rstmc-theme-change';
-function subscribeTheme(notify:()=>void){window.addEventListener('storage',notify);window.addEventListener(themeEvent,notify);return()=>{window.removeEventListener('storage',notify);window.removeEventListener(themeEvent,notify);};}
-function readTheme(){try{return localStorage.getItem('rstmc-theme')==='dark'?'dark':'light';}catch{return 'light';}}
-const emptyData:SocialData={me:null,people:[],posts:[],notifications:[],unreadMessages:0,hasMore:false};
-type View='home'|'search'|'explore'|'reels'|'messages'|'notifications'|'profile'|'saved';
-const views:View[]=['home','search','explore','reels','messages','notifications','profile','saved'];
+const navItems = [
+  { id: "home", label: "Home", icon: Home },
+  { id: "search", label: "Search", icon: Search },
+  { id: "explore", label: "Explore", icon: Compass },
+  { id: "reels", label: "Reels", icon: Clapperboard },
+  { id: "messages", label: "Messages", icon: Send },
+  { id: "notifications", label: "Notifications", icon: Heart },
+  { id: "create", label: "Create", icon: SquarePlus },
+  { id: "profile", label: "Profile", icon: UserRound },
+] as const;
 
-export default function RstmcApp({initial}:{initial:SocialData|null}){
- const [data,setData]=useState(initial||emptyData),[loading,setLoading]=useState(false),[loadError,setLoadError]=useState(!initial),[view,setView]=useState<View>('home'),[profileId,setProfileId]=useState<string|null>(null),[profileExtra,setProfileExtra]=useState<Person|null>(null),[profileError,setProfileError]=useState(''),[profileRetry,setProfileRetry]=useState(0),[feedTab,setFeedTab]=useState('for-you'),[profileTab,setProfileTab]=useState('posts'),[search,setSearch]=useState(''),[category,setCategory]=useState('For you'),[create,setCreate]=useState<'post'|'story'|'reel'|null>(null),[edit,setEdit]=useState(false),[login,setLogin]=useState(false),[authMode,setAuthMode]=useState<'signin'|'signup'>('signin'),[story,setStory]=useState<{items:Post[];index:number}|null>(null),[highlightVersion,setHighlightVersion]=useState(0),[selectedPost,setSelectedPost]=useState<Post|null>(null),[sharePost,setSharePost]=useState<Post|null>(null),[deleteTarget,setDeleteTarget]=useState<Post|null>(null),[deleteBusy,setDeleteBusy]=useState(false),[recipient,setRecipient]=useState<string|null>(null),[about,setAbout]=useState(false),[followPending,setFollowPending]=useState<string|null>(null),[moreLoading,setMoreLoading]=useState(false),[relation,setRelation]=useState<{person:Person;kind:'followers'|'following'}|null>(null),[postCache,setPostCache]=useState<Record<string,Post>>({}),[personCache,setPersonCache]=useState<Record<string,Person>>({}),[revision,setRevision]=useState(0);
- const theme=useSyncExternalStore(subscribeTheme,readTheme,()=>'light');
- const [now,setNow]=useState(Date.now);
- const routeRef=useRef('home'),positions=useRef<Record<string,number>>({}),postsRef=useRef(data.posts),cacheRef=useRef(postCache),reactionLocks=useRef(new Set<string>()),commentLocks=useRef(new Set<string>()),followLock=useRef(new Set<string>());
- useEffect(()=>{postsRef.current=data.posts;cacheRef.current=postCache;},[data.posts,postCache]);
- useEffect(()=>{const timer=window.setInterval(()=>setNow(Date.now()),60000);return()=>window.clearInterval(timer);},[]);
- useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
- const registerPosts=useCallback((items:Post[])=>{if(items.length)setPostCache(prev=>{const next={...prev};for(const item of items)next[item.id]=item;return next;});},[]);
- const refresh=useCallback(async()=>{try{const value=await request<SocialData>('/api/social');setData(value);setPostCache({});setPersonCache({});setRevision(v=>v+1);setLoadError(false);}catch(e){setLoadError(true);throw e;}finally{setLoading(false);}},[]);
- const navigate=useCallback((next:View,id?:string)=>{const key=next+(id?':'+id:'');positions.current[routeRef.current]=window.scrollY;routeRef.current=key;setView(next);setProfileId(id||null);setProfileError('');setSelectedPost(null);if(next==='messages')setRecipient(id||null);if(next==='profile')setProfileTab('posts');const path=next==='home'?'#/':'#/'+next+(id?'/'+encodeURIComponent(id):'');if(window.location.hash!==path)window.location.hash=path.slice(1);window.requestAnimationFrame(()=>window.scrollTo({top:positions.current[key]||0,behavior:'instant'}));},[]);
- useEffect(()=>{let sequence=0;const update=()=>{const parts=window.location.hash.replace(/^#\/?/,'').split('/');const target=parts[0];let id='';try{id=decodeURIComponent(parts[1]||'');}catch{}if(target==='post'&&id){const known=postsRef.current.find(p=>p.id===id)||cacheRef.current[id];if(known){setSelectedPost(known);return;}const version=++sequence;void request<Post[]>('/api/social?post='+encodeURIComponent(id)).then(items=>{if(version!==sequence)return;if(items[0]){setPostCache(c=>({...c,[id]:items[0]}));setSelectedPost(items[0]);}else toast.error('This post is no longer available.');}).catch(()=>{if(version===sequence)toast.error('Couldn’t load this post.');});return;}sequence++;setSelectedPost(null);if(!target||views.includes(target as View)){const next=(target||'home') as View;const key=next+(id?':'+id:'');if(routeRef.current!==key){positions.current[routeRef.current]=window.scrollY;routeRef.current=key;window.requestAnimationFrame(()=>window.scrollTo({top:positions.current[key]||0,behavior:'instant'}));}setView(next);setProfileId(id||null);setProfileError('');if(next==='messages')setRecipient(id||null);}};update();window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update);},[]);
- useEffect(()=>{if(view!=='profile'||!profileId||data.people.some(p=>p.id===profileId))return;const controller=new AbortController();void request<Person|null>('/api/social?person='+encodeURIComponent(profileId),undefined,controller.signal).then(person=>{if(person){setProfileExtra(person);setPersonCache(c=>({...c,[person.id]:person}));}else setProfileError('This profile is no longer available.');}).catch(e=>{if(!controller.signal.aborted)setProfileError((e as Error).message);});return()=>controller.abort();},[view,profileId,data.people,profileRetry]);
- useEffect(()=>{if(view==='notifications'&&data.me){void request('/api/social',{action:'read_notifications'}).then(()=>setData(d=>({...d,notifications:d.notifications.map(n=>({...n,read_at:n.read_at||Date.now()}))}))).catch(()=>{});}},[view,data.me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
- useEffect(()=>{if(!data.me?.id)return;let active=true;const poll=async()=>{try{const activity=await request<Pick<SocialData,'notifications'|'unreadMessages'>>('/api/social?activity=1');if(active)setData(d=>({...d,...activity}));}catch{}};void poll();const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void poll();},15000);return()=>{active=false;window.clearInterval(timer);};},[data.me?.id]);
- const openAuth=(mode:'signin'|'signup'='signin')=>{setAuthMode(mode);setLogin(true);};
- const needsLogin=()=>{if(!data.me){openAuth();return true;}return false;};
- const openCreate=(kind:'post'|'story'|'reel'='post')=>{if(!needsLogin())setCreate(kind);};
- const patchPerson=(id:string,active:boolean)=>{const update=(p:Person)=>{if(!!p.followed===active)return p;return {...p,followed:active?1:0,followers:Math.max(0,p.followers+(active?1:-1))};};setPersonCache(c=>{const current=c[id]||data.people.find(p=>p.id===id)||profileExtra;return current?{...c,[id]:update(current)}:c;});setProfileExtra(p=>p?.id===id?update(p):p);setData(d=>({...d,people:d.people.map(p=>p.id===id?update(p):p),me:d.me?{...d.me,following:Math.max(0,d.me.following+(active?1:-1))}:null}));};
- const follow=async(p:Person)=>{if(needsLogin()||followLock.current.has(p.id))return;followLock.current.add(p.id);setFollowPending(p.id);const latest=personCache[p.id]||data.people.find(u=>u.id===p.id)||profileExtra||p;const active=!latest.followed;patchPerson(p.id,active);try{await request('/api/social',{action:'follow',id:p.id,active});}catch(e){patchPerson(p.id,!active);toast.error('Couldn’t update follow. Try again.');}finally{followLock.current.delete(p.id);setFollowPending(null);}};
- const patchPost=useCallback((id:string,update:(p:Post)=>Post)=>{setData(d=>({...d,posts:d.posts.map(p=>p.id===id?update(p):p)}));setPostCache(c=>c[id]?{...c,[id]:update(c[id])}:c);setSelectedPost(p=>p?.id===id?update(p):p);},[]);
- const react:PostActions['react']=async(p,kind,active)=>{if(needsLogin())return;const key=p.id+':'+kind;if(reactionLocks.current.has(key))return;reactionLocks.current.add(key);if(kind==='hidden'){try{await request('/api/social',{action:'reaction',id:p.id,kind,active:true});setData(d=>({...d,posts:d.posts.filter(x=>x.id!==p.id)}));setPostCache(c=>{const next={...c};delete next[p.id];return next;});setSelectedPost(null);toast('Post hidden',{action:{label:'Undo',onClick:()=>void request('/api/social',{action:'reaction',id:p.id,kind,active:false}).then(refresh).catch(()=>toast.error('Couldn’t restore the post.'))}});}catch{toast.error('Couldn’t hide post. Try again.');}finally{reactionLocks.current.delete(key);}return;}
-  const previous=kind==='like'?!!p.liked:kind==='save'?!!p.saved:!!p.seen;const update=(value:boolean)=>(post:Post):Post=>kind==='like'?{...post,liked:value?1:0,likes:Math.max(0,post.likes+(Number(value)-Number(!!post.liked)))}:kind==='save'?{...post,saved:value?1:0}:{...post,seen:value?1:0};patchPost(p.id,update(active));try{await request('/api/social',{action:'reaction',id:p.id,kind,active});}catch{patchPost(p.id,update(previous));if(kind!=='seen')toast.error(kind==='save'?'Couldn’t save post. Try again.':'Couldn’t like post. Try again.');}finally{reactionLocks.current.delete(key);}};
- const comment:PostActions['comment']=async(p,body)=>{if(needsLogin())throw new Error('Sign in required');if(commentLocks.current.has(p.id))throw new Error('Comment is already sending');commentLocks.current.add(p.id);const previous=p.comment_preview;patchPost(p.id,post=>({...post,comment_count:post.comment_count+1,comment_preview:{body,username:data.me?.username||''}}));try{return await request<Comment>('/api/social',{action:'comment',id:p.id,body});}catch(e){patchPost(p.id,post=>({...post,comment_count:Math.max(0,post.comment_count-1),comment_preview:previous}));toast.error('Couldn’t post comment. Try again.');throw e;}finally{commentLocks.current.delete(p.id);}};
- const openPost=(p:Post)=>{setPostCache(c=>({...c,[p.id]:p}));setSelectedPost(p);window.location.hash='/post/'+encodeURIComponent(p.id);};
- const openPostId=(id:string)=>{const known=data.posts.find(p=>p.id===id)||postCache[id];if(known){openPost(known);return;}void request<Post[]>('/api/social?post='+encodeURIComponent(id)).then(items=>{if(items[0])openPost(items[0]);else toast.error('This post is no longer available.');}).catch(()=>toast.error('Couldn’t open this post.'));};
- const closePost=()=>{setSelectedPost(null);window.history.replaceState(null,'',view==='home'?'#/':'#/'+view+(profileId?'/'+encodeURIComponent(profileId):''));};
- const copyLink=async(p:Post)=>{try{await navigator.clipboard.writeText(window.location.origin+'/#/post/'+encodeURIComponent(p.id));toast('Link copied to clipboard.');}catch{setSharePost(p);}};
- const actions:PostActions={react,comment,openPost,openProfile:id=>navigate('profile',id),searchTag:tag=>{setSearch(tag);navigate('search');},share:setSharePost,deletePost:setDeleteTarget,copyLink,me:data.me};
- const deletePost=async()=>{if(!deleteTarget||deleteBusy)return;setDeleteBusy(true);try{await request('/api/social',{action:'delete_post',id:deleteTarget.id});setData(d=>({...d,posts:d.posts.filter(p=>p.id!==deleteTarget.id)}));setPostCache(c=>{const next={...c};delete next[deleteTarget.id];return next;});setDeleteTarget(null);closePost();void refresh().catch(()=>toast.error('Post deleted, but the feed could not refresh.'));}catch{toast.error('Couldn’t delete post. Try again.');}finally{setDeleteBusy(false);}};
- const stories=data.posts.filter(p=>p.kind==='story'&&(!p.expires_at||p.expires_at>now));
- const feedPosts=data.posts.filter(p=>p.kind!=='story'&&(feedTab==='for-you'||data.people.find(u=>u.id===p.author_id)?.followed||p.author_id===data.me?.id));
- const profile=profileId?(personCache[profileId]||data.people.find(p=>p.id===profileId)||(profileExtra?.id===profileId?profileExtra:null)):data.me;
- const suggestions=data.people.filter(p=>p.id!==data.me?.id&&!p.followed).slice(0,5).map(p=>personCache[p.id]||p);
- const toggleTheme=()=>{try{localStorage.setItem('rstmc-theme',theme==='light'?'dark':'light');window.dispatchEvent(new Event(themeEvent));}catch{toast.error('Your browser could not save the theme.');}};
- const nav=(id:string)=>{if(id==='create'){openCreate();return;}if(['messages','notifications','profile','saved'].includes(id)&&needsLogin())return;navigate(id as View);};
- const highlight=async(p:Post,active:boolean)=>{try{await request('/api/social',{action:'highlight',id:p.id,active});patchPost(p.id,post=>({...post,highlighted:active}));setHighlightVersion(v=>v+1);}catch(e){toast.error('Couldn’t update highlights. Try again.');throw e;}};
- const shareProfile=async()=>{if(!profile)return;const link=window.location.origin+'/#/profile/'+encodeURIComponent(profile.id);if(navigator.share){try{await navigator.share({title:profile.username+' on RSTMC',url:link});return;}catch{return;}}try{await navigator.clipboard.writeText(link);toast('Profile link copied.');}catch{toast.error('Couldn’t copy the profile link.');}};
- const more=<DropdownMenu><DropdownMenuTrigger asChild><button className="nav-link more-link" aria-label="More"><Menu/><span>More</span></button></DropdownMenuTrigger><DropdownMenuContent side="top" align="start" className="social-menu more-menu"><DropdownMenuItem onClick={()=>nav('saved')}><Bookmark/>Saved</DropdownMenuItem><DropdownMenuItem onClick={toggleTheme}>{theme==='light'?<Moon/>:<Sun/>}{theme==='light'?'Dark mode':'Light mode'}</DropdownMenuItem><DropdownMenuItem onClick={()=>setAbout(true)}><Info/>About RSTMC</DropdownMenuItem>{data.me&&<><DropdownMenuSeparator/><DropdownMenuItem asChild><SignOutButton/></DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu>;
- return <SidebarProvider style={{'--sidebar-width':'246px'} as CSSProperties} className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><Sidebar collapsible="none" className="rstmc-sidebar"><SidebarHeader><button className="brand" onClick={()=>navigate('home')} aria-label="RSTMC home">RSTMC<span>.</span></button><span className="brand-caption">A home for your moments</span></SidebarHeader><SidebarContent><SidebarMenu className="main-nav">{navItems.map(item=><SidebarMenuItem key={item.id}><SidebarMenuButton asChild isActive={view===item.id}><button className={'nav-link '+(view===item.id?'nav-active':'')} onClick={()=>nav(item.id)} aria-label={item.label} aria-current={view===item.id?'page':undefined}><span className="nav-icon"><item.icon fill={view===item.id&&item.id==='home'?'currentColor':'none'}/>{item.id==='messages'&&data.unreadMessages>0&&<i/>}{item.id==='notifications'&&data.notifications.some(n=>!n.read_at)&&<i/>}</span><span>{item.label}</span></button></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarContent><SidebarFooter><button className={'nav-link '+(view==='saved'?'nav-active':'')} onClick={()=>nav('saved')} aria-label="Saved"><Bookmark/><span>Saved</span></button>{more}<div className="sidebar-account">{data.me?<button onClick={()=>nav('profile')}><Avatar person={data.me} size={40}/><span><strong>{data.me.username}</strong><small>View your profile</small></span></button>:<button onClick={()=>openAuth()}><span className="sidebar-login-icon"><LogIn size={19}/></span><span><strong>Join RSTMC</strong><small>Sign in or sign up</small></span></button>}</div></SidebarFooter></Sidebar>
- <header className="mobile-header"><button className="brand" onClick={()=>navigate('home')} aria-label="RSTMC home">RSTMC<span>.</span></button><div><IconButton label="Notifications" className={data.notifications.some(n=>!n.read_at)?'has-dot':''} onClick={()=>nav('notifications')}><Heart/></IconButton><IconButton label="Messages" className={data.unreadMessages?'has-dot':''} onClick={()=>nav('messages')}><Send/></IconButton><DropdownMenu><DropdownMenuTrigger asChild><button className="icon-button" aria-label="More options"><Menu size={22}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="social-menu"><DropdownMenuItem onClick={()=>nav('saved')}><Bookmark/>Saved posts</DropdownMenuItem><DropdownMenuItem onClick={toggleTheme}>{theme==='light'?<Moon/>:<Sun/>}{theme==='light'?'Dark mode':'Light mode'}</DropdownMenuItem><DropdownMenuItem onClick={()=>setAbout(true)}><Info/>About RSTMC</DropdownMenuItem>{data.me?<><DropdownMenuSeparator/><DropdownMenuItem asChild><SignOutButton/></DropdownMenuItem></>:<DropdownMenuItem onClick={()=>openAuth()}><LogIn/>Sign in</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div></header>
- <main id="main-content" className={'main-surface view-'+view}>
- {!data.me&&<div className="guest-auth-bar"><p>More moments together. Make this space yours.</p><div><button className="secondary-button" onClick={()=>openAuth('signin')}>Sign in</button><button className="primary-button" onClick={()=>openAuth('signup')}>Join RSTMC</button></div></div>}
- {loading?<div className="loading-screen"><Busy/><p>Loading your feed…</p></div>:loadError?<Empty icon={<RefreshCw/>} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment." action={<button className="primary-button" onClick={()=>{setLoading(true);void refresh().catch(()=>{});}}>Reload feed</button>}/>:<div className="view-content" key={view}>
- {view==='home'&&<div className="home-layout"><section className="feed-column"><div className="feed-heading"><div><span className="eyebrow">Your world, shared</span><h1>Home<span className="heading-dot">.</span></h1></div><button className="secondary-button" onClick={()=>openCreate()}><Plus size={17}/>Share a moment</button></div><Tabs value={feedTab} onValueChange={setFeedTab}><TabsList variant="line" className="feed-tabs"><TabsTrigger value="for-you">For you</TabsTrigger><TabsTrigger value="following">Following</TabsTrigger></TabsList></Tabs><Stories stories={stories} me={data.me} onOpen={index=>setStory({items:stories,index})} onCreate={()=>openCreate('story')}/><div className="feed-posts">{feedPosts.map(p=><PostCard key={p.id} post={postCache[p.id]||p} actions={actions}/>)}{!feedPosts.length&&<Empty icon={<Users/>} heading={feedTab==='following'?'Make this feed yours':'The first moment starts here'} body={feedTab==='following'?'Follow a few people to see their latest moments here.':'Share something wonderful, or discover new perspectives.'} action={<button className="primary-button" onClick={()=>navigate('search')}>Find people</button>}/>}<div className="feed-end">{data.hasMore?<button className="secondary-button" disabled={moreLoading} onClick={async()=>{setMoreLoading(true);try{const more=await request<Post[]>('/api/social?offset='+data.posts.length);setData(d=>({...d,posts:[...d.posts,...more.filter(p=>!d.posts.some(q=>q.id===p.id))],hasMore:more.length===40}));}catch{toast.error('Couldn’t load more posts. Try again.');}finally{setMoreLoading(false);}}}>{moreLoading?<Busy/>:'Load more posts'}</button>:<><Check size={23}/><strong>You’re all caught up</strong><span>A good moment to make a moment.</span></>}</div></div></section>
- <aside className="suggestions-rail"><div className="account-row"><Avatar person={data.me} size={50} onClick={()=>nav('profile')}/><div><button className="username" onClick={()=>nav('profile')}>{data.me?.username||'Your world, shared'}</button><span>{data.me?.name||'A little more you.'}</span></div><button className="text-action" onClick={()=>data.me?setEdit(true):openAuth()}>{data.me?'Edit':'Sign in'}</button></div><div className="suggestions-heading"><h2>People to discover</h2><button onClick={()=>navigate('search')}>See all</button></div>{suggestions.map(p=><div key={p.id} className="suggestion"><Avatar person={p} size={43} onClick={()=>navigate('profile',p.id)}/><button className="person-detail" onClick={()=>navigate('profile',p.id)}><strong>{p.username}</strong><span>{p.is_demo?'Sample creator':p.name}</span></button><button className="follow-button" onClick={()=>void follow(p)} disabled={followPending===p.id}>{followPending===p.id?<Busy/>:'Follow'}</button></div>)}<footer><div><button onClick={()=>setAbout(true)}>About</button><span>·</span><button onClick={()=>setAbout(true)}>Photo credits</button></div><p>Real moments, your way. Sample profiles are marked.</p><span>© 2026 RSTMC</span></footer></aside></div>}
- {view==='search'&&<SearchPage query={search} setQuery={setSearch} people={data.people} personCache={personCache} meId={data.me?.id} cache={postCache} onLoaded={registerPosts} onPost={openPost} onProfile={id=>navigate('profile',id)} onFollow={p=>void follow(p)} followPending={followPending}/>}
- {view==='explore'&&<ExplorePage category={category} setCategory={setCategory} cache={postCache} onLoaded={registerPosts} onPost={openPost} onSearch={()=>navigate('search')}/>}
- {view==='reels'&&<Reels posts={data.posts} cache={postCache} actions={actions} onLoaded={registerPosts} onCreate={()=>openCreate('reel')} suspended={!!selectedPost||!!sharePost||!!create}/>}
- {view==='profile'&&(profile?<ProfilePage profile={profile} me={data.me} tab={profileTab} setTab={setProfileTab} posts={data.posts} cache={postCache} onLoaded={registerPosts} onPost={openPost} onStory={(items,index)=>setStory({items,index})} onCreate={()=>openCreate()} onEdit={()=>setEdit(true)} onFollow={p=>void follow(p)} followPending={followPending} onMessage={()=>{if(profile.is_demo)toast('Sample profiles don’t receive messages.');else if(!needsLogin())navigate('messages',profile.id);}} onRelations={kind=>setRelation({person:profile,kind})} onShare={()=>void shareProfile()} highlightVersion={highlightVersion} now={now}/>:profileError?<Empty icon={<UserRound/>} heading="Profile unavailable" body={profileError} action={<button className="secondary-button" onClick={()=>setProfileRetry(v=>v+1)}>Retry</button>}/>:profileId?<div className="loading-row"><Busy/></div>:<Empty icon={<UserRound/>} heading="Your own corner of RSTMC" body="Sign in to create a profile and share your world." action={<button className="primary-button" onClick={()=>openAuth()}>Sign in</button>}/>)}
- {view==='saved'&&(data.me?<section className="discovery-view saved-view"><div className="section-heading"><span className="eyebrow">Just for you</span><h1>Saved</h1><p>Little things to come back to. Only you can see this.</p></div><ProfileGrid key={'saved:'+data.me.id+':'+revision} id={data.me.id} tab="saved" posts={data.posts} cache={postCache} onLoaded={registerPosts} onPost={openPost} onCreate={()=>navigate('explore')} own/></section>:<Empty icon={<Bookmark/>} heading="Keep a little inspiration" body="Sign in to save moments to your private collection." action={<button className="primary-button" onClick={()=>openAuth()}>Sign in</button>}/>)}
- {view==='messages'&&(data.me?<Messages key={recipient||'default'} me={data.me} people={profileExtra?[...data.people,profileExtra]:data.people} initialRecipient={recipient} onProfile={id=>navigate('profile',id)}/>:<Empty icon={<Send/>} heading="Your conversations, here" body="Sign in to send messages and save notes to yourself." action={<button className="primary-button" onClick={()=>openAuth()}>Sign in</button>}/>)}
- {view==='notifications'&&(data.me?<Notifications items={data.notifications} onPost={openPostId} onProfile={id=>navigate('profile',id)}/>:<Empty icon={<Heart/>} heading="Your activity, here" body="Sign in to see likes, comments and new followers." action={<button className="primary-button" onClick={()=>openAuth()}>Sign in</button>}/>)}
- </div>}
- </main><nav className="mobile-nav" aria-label="Bottom navigation">{['home','search','explore','create','reels','profile'].map(id=>{const item=navItems.find(n=>n.id===id)!;return <button key={id} onClick={()=>nav(id)} aria-label={item.label} aria-current={view===id?'page':undefined} className={view===id?'active':''}>{id==='profile'&&data.me?<Avatar person={data.me} size={28}/>:<item.icon fill={view===id&&id==='home'?'currentColor':'none'}/>}<span className="sr-only">{item.label}</span></button>;})}</nav>
- {create&&data.me&&<CreateDialog kind={create} me={data.me} people={data.people} onClose={()=>setCreate(null)} onCreated={refresh}/>} {edit&&data.me&&<EditProfile me={data.me} onClose={()=>setEdit(false)} onSaved={refresh}/>}
- {story&&<StoryViewer stories={story.items.map(p=>postCache[p.id]||data.posts.find(x=>x.id===p.id)||p)} start={story.index} onClose={()=>setStory(null)} onSeen={p=>{if(data.me&&!p.seen)void react(p,'seen',true);}} onProfile={id=>navigate('profile',id)} onHighlight={highlight} ownId={data.me?.id}/>}
- {selectedPost&&<PostViewer key={selectedPost.id} post={selectedPost} actions={actions} onClose={closePost} onDeletedComment={id=>patchPost(id,p=>({...p,comment_count:Math.max(0,p.comment_count-1)}))}/>}
- {sharePost&&<ShareDialog post={sharePost} me={data.me} people={data.people} onClose={()=>setSharePost(null)}/>}
- <Modal open={login} onClose={()=>setLogin(false)} title="Make yourself at home" description="Sign in to share your moments, follow people and join the conversation."><div className="sign-in-content"><AuthForm key={authMode} initialMode={authMode}/></div></Modal>
- <AlertDialog open={!!deleteTarget} onOpenChange={v=>!v&&!deleteBusy&&setDeleteTarget(null)}><AlertDialogContent className="delete-dialog"><AlertDialogHeader><AlertDialogTitle>Delete this post?</AlertDialogTitle><AlertDialogDescription>The post, its comments and likes will be permanently removed.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={deleteBusy}>Keep post</AlertDialogCancel><AlertDialogAction className="delete-action" disabled={deleteBusy} onClick={e=>{e.preventDefault();void deletePost();}}>{deleteBusy?<Busy/>:'Delete post'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
- {about&&<About onClose={()=>setAbout(false)}/>}{relation&&<Relations person={relation.person} kind={relation.kind} onClose={()=>setRelation(null)} onProfile={id=>{setRelation(null);navigate('profile',id);}}/>}<Toaster position="bottom-center" closeButton/>
- </SidebarProvider>;
+const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
+type View = "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved";
+
+export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+  const [data, setData] = useState<SocialData>(initial || emptyData);
+  const [loadError, setLoadError] = useState(!initial);
+  const [view, setView] = useState<View>("home");
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [feedTab, setFeedTab] = useState("for-you");
+  const [profileTab, setProfileTab] = useState("posts");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("For you");
+  const [create, setCreate] = useState<"post" | "story" | "reel" | null>(null);
+  const [edit, setEdit] = useState(false);
+  const [login, setLogin] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [story, setStory] = useState<number | null>(null);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [sharePost, setSharePost] = useState<Post | null>(null);
+  const [shareProfile, setShareProfile] = useState<Person | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Post | null>(null);
+  const [recipient, setRecipient] = useState<string | null>(null);
+  const [about, setAbout] = useState(false);
+  const [followPending, setFollowPending] = useState<string | null>(null);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [relation, setRelation] = useState<{ person: Person; kind: "followers" | "following" } | null>(null);
+
+  const theme = useSyncExternalStore(subscribeTheme, readTheme, () => "light" as const);
+  const [now, setNow] = useState(Date.now);
+  const viewerId = data.me?.id;
+  const scrollMemory = useRef<Record<string, number>>({});
+
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+
+  /* --------------------------------- data layer --------------------------------- */
+
+  const refresh = useCallback(async () => {
+    try {
+      const value = await request<SocialData>("/api/social");
+      setData(value); setLoadError(false);
+    } catch (e) { setLoadError(true); throw e; }
+  }, []);
+
+  const patchPost = useCallback((id: string, update: (post: Post) => Post) => {
+    setData(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
+    setSelectedPost(current => (current?.id === id ? update(current) : current));
+  }, []);
+
+  /* --------------------------------- navigation --------------------------------- */
+
+  const navigate = useCallback((next: View | string, id?: string) => {
+    const target = next as View;
+    const fromKey = view + ":" + (profileId || "");
+    const toKey = target + ":" + (id || "");
+    scrollMemory.current[fromKey] = window.scrollY;
+    setView(target); setProfileId(id || null); setSelectedPost(null);
+    if (target === "messages") setRecipient(id || null);
+    if (target === "profile") setProfileTab("posts");
+    const hash = target === "home" ? "#/" : "#/" + target + (id ? "/" + encodeURIComponent(id) : "");
+    if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+    requestAnimationFrame(() => { window.scrollTo({ top: scrollMemory.current[toKey] ?? 0 }); });
+  }, [view, profileId]);
+
+  useEffect(() => {
+    const update = () => {
+      const parts = window.location.hash.replace(/^#\/?/, "").split("/");
+      const target = parts[0];
+      let id = "";
+      try { id = decodeURIComponent(parts[1] || ""); } catch {}
+      if (target === "post") {
+        const existing = data.posts.find(post => post.id === id);
+        if (existing) { setSelectedPost(existing); return; }
+        void request<Post[]>("/api/social?post=" + encodeURIComponent(id))
+          .then(items => { if (items[0]) setSelectedPost(items[0]); else toast.error("This post is no longer available."); })
+          .catch(() => toast.error("Could not load this post."));
+        return;
+      }
+      setSelectedPost(null);
+      const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved"];
+      if (!target || allowed.includes(target)) {
+        setView((target || "home") as View);
+        setProfileId(id || null);
+        if (target === "messages") setRecipient(id || null);
+      }
+    };
+    update();
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => { window.removeEventListener("hashchange", update); window.removeEventListener("popstate", update); };
+  }, [data.posts]);
+
+  useEffect(() => {
+    if (view === "notifications" && viewerId) {
+      void request("/api/social", { action: "read_notifications" })
+        .then(() => setData(current => ({ ...current, notifications: current.notifications.map(n => ({ ...n, read_at: n.read_at || Date.now() })) })))
+        .catch(() => {});
+    }
+  }, [view, viewerId]);
+
+  useEffect(() => {
+    if (!viewerId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages">>("/api/social?activity=1");
+        if (active) setData(current => ({ ...current, ...activity }));
+      } catch { /* transient network issues are retried on the next tick */ }
+    };
+    void poll();
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void poll(); }, 15000);
+    return () => { active = false; clearInterval(timer); };
+  }, [viewerId]);
+
+  /* ---------------------------------- actions ---------------------------------- */
+
+  const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
+  const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if (!needsLogin()) setCreate(kind); };
+
+  const follow = async (person: Person) => {
+    if (needsLogin() || followPending) return;
+    setFollowPending(person.id);
+    setData(current => ({
+      ...current,
+      me: current.me ? { ...current.me, following: current.me.following + (person.followed ? -1 : 1) } : null,
+      people: current.people.map(user => user.id === person.id
+        ? { ...user, followed: person.followed ? 0 : 1, followers: user.followers + (person.followed ? -1 : 1) } : user),
+    }));
+    try { await request("/api/social", { action: "follow", id: person.id, active: !person.followed }); }
+    catch (e) {
+      setData(current => ({
+        ...current,
+        me: current.me ? { ...current.me, following: current.me.following + (person.followed ? 1 : -1) } : null,
+        people: current.people.map(user => user.id === person.id
+          ? { ...user, followed: person.followed ? 1 : 0, followers: user.followers + (person.followed ? 1 : -1) } : user),
+      }));
+      toast.error((e as Error).message);
+    } finally { setFollowPending(null); }
+  };
+
+  const react = async (post: Post, kind: string, active: boolean) => {
+    if (needsLogin()) return;
+    const restore = (current: Post): Post => ({ ...current, liked: post.liked, likes: post.likes, saved: post.saved, seen: post.seen });
+    if (kind === "hidden") {
+      if (!active) return;
+      setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
+      setSelectedPost(null);
+      try {
+        await request("/api/social", { action: "reaction", id: post.id, kind, active: true });
+        toast("Post hidden", {
+          action: {
+            label: "Undo",
+            onClick: () => void request("/api/social", { action: "reaction", id: post.id, kind, active: false })
+              .then(refresh)
+              .catch(() => toast.error("Could not restore the post.")),
+          },
+        });
+      } catch (e) {
+        setData(current => ({ ...current, posts: [post, ...current.posts] }));
+        toast.error((e as Error).message);
+      }
+      return;
+    }
+    patchPost(post.id, current => kind === "like"
+      ? { ...current, liked: active ? 1 : 0, likes: current.likes + (active ? 1 : 0) - (current.liked ? 1 : 0) }
+      : kind === "save" ? { ...current, saved: active ? 1 : 0 } : { ...current, seen: active ? 1 : 0 });
+    try { await request("/api/social", { action: "reaction", id: post.id, kind, active }); }
+    catch (e) { patchPost(post.id, restore); toast.error((e as Error).message); }
+  };
+
+  const submitComment = async (post: Post, body: string): Promise<Comment> => {
+    if (needsLogin()) throw new Error("Sign in required");
+    const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body });
+    patchPost(post.id, current => ({ ...current, comment_count: current.comment_count + 1 }));
+    return { id: created.id, post_id: post.id, author_id: data.me!.id, body, created_at: Date.now(), username: data.me!.username, avatar: data.me!.avatar };
+  };
+
+  const deletePost = async () => {
+    if (!deleteTarget) return;
+    const post = deleteTarget;
+    setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
+    setSelectedPost(null); setDeleteTarget(null);
+    try {
+      await request("/api/social", { action: "delete_post", id: post.id });
+      void refresh();
+    } catch (e) {
+      setData(current => ({ ...current, posts: [post, ...current.posts] }));
+      toast.error((e as Error).message);
+    }
+  };
+
+  const copyLink = async (post: Post) => {
+    const link = window.location.origin + "/#/post/" + encodeURIComponent(post.id);
+    try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { setSharePost(post); }
+  };
+
+  const actions: PostActions = {
+    react, submitComment,
+    openPost: post => { setSelectedPost(post); window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); },
+    openProfile: id => navigate("profile", id),
+    share: setSharePost,
+    deletePost: setDeleteTarget,
+    copyLink,
+    me: data.me,
+  };
+
+  const loadMore = async () => {
+    setMoreLoading(true);
+    try {
+      const more = await request<Post[]>("/api/social?offset=" + data.posts.length);
+      setData(current => ({ ...current, posts: [...current.posts, ...more.filter(item => !current.posts.some(existing => existing.id === item.id))], hasMore: more.length === 40 }));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setMoreLoading(false); }
+  };
+
+  const toggleTheme = () => toggleStoredTheme(theme);
+  const nav = (id: string) => {
+    if (id === "create") { openCreate(); return; }
+    if (["messages", "notifications", "profile", "saved"].includes(id) && needsLogin()) return;
+    navigate(id);
+  };
+
+  /* ---------------------------------- derived ---------------------------------- */
+
+  const stories = data.posts.filter(post => post.kind === "story" && (!post.expires_at || post.expires_at > now));
+  const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
+    && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
+  const profile = data.people.find(person => person.id === (profileId || data.me?.id)) || null;
+  const hasNotifications = data.notifications.some(n => !n.read_at);
+
+  /* ----------------------------------- shell ----------------------------------- */
+
+  const sidebar = (
+    <aside className="app-sidebar" aria-label="Main navigation">
+      <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
+      <nav className="main-nav">
+        {navItems.map(item => (
+          <button key={item.id} className={"nav-link " + (view === item.id ? "nav-active" : "")}
+            onClick={() => nav(item.id)} aria-label={item.label} aria-current={view === item.id ? "page" : undefined}>
+            <span className="nav-icon">
+              <item.icon fill={view === item.id && item.id === "home" ? "currentColor" : "none"} />
+              {item.id === "messages" && data.unreadMessages > 0 && <i />}
+              {item.id === "notifications" && hasNotifications && <i />}
+            </span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="sidebar-footer">
+        {!data.me && (
+          <button className="nav-link" onClick={() => openAuth()} aria-label="Sign in"><LogIn /><span>Sign in</span></button>
+        )}
+        <button className={"nav-link " + (view === "saved" ? "nav-active" : "")} onClick={() => nav("saved")} aria-label="Saved"><Bookmark /><span>Saved</span></button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="nav-link" aria-label="More"><Menu /><span>More</span></button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="social-menu more-menu">
+            <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
+            {data.me && <><DropdownMenuSeparator /><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </aside>
+  );
+
+  const mobileHeader = (
+    <header className="mobile-header">
+      <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
+      <div>
+        <IconButton label="Notifications" onClick={() => nav("notifications")}><Heart /></IconButton>
+        <IconButton label="Messages" onClick={() => nav("messages")}><Send /></IconButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="icon-button" aria-label="More options"><Menu size={22} /></button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="social-menu">
+            <DropdownMenuItem onClick={() => nav("saved")}><Bookmark />Saved posts</DropdownMenuItem>
+            <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
+            {data.me
+              ? <><DropdownMenuSeparator /><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
+              : <DropdownMenuItem onClick={() => openAuth()}><LogIn />Sign in</DropdownMenuItem>}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </header>
+  );
+
+  const mobileNav = (
+    <nav className="mobile-nav" aria-label="Bottom navigation">
+      {["home", "search", "explore", "create", "reels", "profile"].map(id => {
+        const item = navItems.find(entry => entry.id === id)!;
+        return (
+          <button key={id} onClick={() => nav(id)} aria-label={item.label} aria-current={view === id ? "page" : undefined} className={view === id ? "active" : ""}>
+            {id === "profile" && data.me ? <Avatar person={data.me} size={27} /> : <item.icon fill={view === id && id === "home" ? "currentColor" : "none"} />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      {sidebar}
+      {mobileHeader}
+      <main id="main-content" className={"main-surface view-" + view}>
+        {!data.me && (
+          <div className="guest-auth-bar glass-card">
+            <p>Share your moments on RSTMC.</p>
+            <div>
+              <button className="secondary-button" onClick={() => openAuth("signin")}>Sign in</button>
+              <button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button>
+            </div>
+          </div>
+        )}
+        {loadError ? (
+          <Empty icon={<RefreshCw />} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment."
+            action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>Reload feed</button>} />
+        ) : (
+          <div className="view-transition" key={view + ":" + (profileId || "")}>
+            {view === "home" && (
+              <HomeView data={data} feedTab={feedTab} setFeedTab={setFeedTab} stories={stories}
+                onOpenStory={setStory} onCreateStory={() => openCreate("story")}
+                feedPosts={feedPosts} actions={actions}
+                moreLoading={moreLoading} onLoadMore={() => void loadMore()}
+                follow={person => void follow(person)} followPending={followPending}
+                navigate={(target, id) => navigate(target, id)} onEdit={() => setEdit(true)} onAbout={() => setAbout(true)} />
+            )}
+            {(view === "search" || view === "explore") && (view === "search"
+              ? <SearchView query={search} setQuery={setSearch} data={data} onProfile={id => navigate("profile", id)}
+                  openPost={actions.openPost} follow={person => void follow(person)} followPending={followPending}
+                  navigate={(target, id) => navigate(target, id)} />
+              : <ExploreView data={data} category={category} setCategory={setCategory} query={search} openPost={actions.openPost} />)}
+            {view === "reels" && <Reels posts={data.posts} actions={actions} onCreate={() => openCreate("reel")} />}
+            {view === "profile" && (profile
+              ? <ProfileView profile={profile} me={data.me} tab={profileTab} setTab={setProfileTab} posts={data.posts}
+                  openPost={actions.openPost} onCreate={() => openCreate()} onEdit={() => setEdit(true)}
+                  follow={person => void follow(person)} followPending={followPending} onShare={() => setShareProfile(profile)}
+                  onRelations={(person, kind) => setRelation({ person, kind })}
+                  onMessage={person => { if (person.is_demo) toast("This is a sample profile. Message real members in Messages."); else navigate("messages", person.id); }} />
+              : <Empty icon={<UserRound />} heading="Your own corner of RSTMC" body="Sign in to create a profile and share your world."
+                  action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
+            {view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
+            {view === "messages" && (data.me
+              ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} onProfile={id => navigate("profile", id)} />
+              : <Empty icon={<Send />} heading="Your conversations, here" body="Sign in to send messages and save notes to yourself."
+                  action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
+            {view === "notifications" && (
+              <NotificationsView notifications={data.notifications} posts={data.posts}
+                openPost={actions.openPost} onProfile={id => navigate("profile", id)} />
+            )}
+          </div>
+        )}
+      </main>
+      {mobileNav}
+
+      {create && data.me && <CreateDialog kind={create} me={data.me} onClose={() => setCreate(null)} onCreated={refresh} />}
+      {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
+      {story !== null && stories[story] && (
+        <StoryViewer stories={stories} start={story} onClose={() => setStory(null)}
+          onSeen={post => { if (data.me && !post.seen) void react(post, "seen", true); }}
+          onProfile={id => navigate("profile", id)} />
+      )}
+      {selectedPost && (
+        <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
+          onClose={() => { setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
+          onCommentCountChange={delta => patchPost(selectedPost.id, post => ({ ...post, comment_count: Math.max(0, post.comment_count + delta) }))} />
+      )}
+      {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
+      {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
+      <Modal open={login} onClose={() => setLogin(false)} title="Make yourself at home" description="Sign in to share your moments, follow people, and join the conversation.">
+        <div className="sign-in-content"><AuthForm key={authMode} initialMode={authMode} /></div>
+      </Modal>
+      <AlertDialog open={!!deleteTarget} onOpenChange={value => { if (!value) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this post?</AlertDialogTitle>
+            <AlertDialogDescription>The post, its comments, and likes will be removed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep post</AlertDialogCancel>
+            <AlertDialogAction className="delete-action" onClick={() => void deletePost()}>Delete post</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {about && <About onClose={() => setAbout(false)} />}
+      {relation && <Relations person={relation.person} kind={relation.kind} onClose={() => setRelation(null)} onProfile={id => { setRelation(null); navigate("profile", id); }} />}
+      <Toaster position="bottom-center" closeButton />
+    </div>
+  );
 }
 
-function ShareDialog({post,me,people,onClose}:{post:Post;me:Person|null;people:Person[];onClose:()=>void}){const [sent,setSent]=useState<string[]>([]),[busy,setBusy]=useState(''),[copied,setCopied]=useState(false);const link=typeof window!=='undefined'?window.location.origin+'/#/post/'+encodeURIComponent(post.id):'';return <Modal open onClose={onClose} title="Share this moment" className="share-dialog"><div className="share-preview"><Avatar person={post.author} size={39}/><span><strong>{post.author.username}</strong><small>{post.caption.slice(0,85)||'A moment on RSTMC'}</small></span></div><div className="share-link"><LinkIcon size={19}/><input aria-label="Post link" value={link} readOnly onFocus={e=>e.target.select()}/><button className="text-action" onClick={async()=>{try{await navigator.clipboard.writeText(link);setCopied(true);}catch{toast('Select and copy the link above.');}}}>{copied?'Copied':'Copy'}</button></div>{typeof navigator!=='undefined'&&!!navigator.share&&<button className="secondary-button wide share-native" onClick={()=>void navigator.share({title:'A moment on RSTMC',url:link}).catch(()=>{})}><Send size={17}/>Share to another app</button>}{me&&<div className="share-people"><h3>Send in a message</h3>{[me,...people.filter(p=>p.id!==me.id&&!p.is_demo)].map(p=><div className="suggestion" key={p.id}><Avatar person={p} size={40}/><span className="person-detail"><strong>{p.id===me.id?'Saved messages':p.username}</strong></span><button className="follow-button" disabled={!!busy||sent.includes(p.id)} onClick={async()=>{if(busy)return;setBusy(p.id);try{await request('/api/social',{action:'message',id:p.id,body:link});setSent(list=>[...list,p.id]);}catch(e){toast.error('Couldn’t send post. Try again.');}finally{setBusy('');}}}>{sent.includes(p.id)?'Sent':busy===p.id?<Busy/>:'Send'}</button></div>)}</div>}</Modal>;}
-function Relations({person,kind,onClose,onProfile}:{person:Person;kind:'followers'|'following';onClose:()=>void;onProfile:(id:string)=>void}){const [users,setUsers]=useState<Person[]|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0);useEffect(()=>{const controller=new AbortController();void request<Person[]>('/api/social?relations='+encodeURIComponent(person.id)+'&kind='+kind,undefined,controller.signal).then(setUsers).catch(e=>{if(!controller.signal.aborted)setError((e as Error).message);});return()=>controller.abort();},[person.id,kind,retry]);return <Modal open onClose={onClose} title={kind==='followers'?'Followers':'Following'}>{users===null&&!error?<div className="loading-row"><Busy/></div>:users?.length?users.map(p=><button className="person-result" key={p.id} onClick={()=>onProfile(p.id)}><Avatar person={p}/><span className="person-detail"><strong>{p.username}</strong><span>{p.name}</span></span></button>):<div className="inline-error">{error||(kind==='followers'?'No followers yet.':'Not following anyone yet.')}{error&&<button className="secondary-button" onClick={()=>{setError('');setRetry(v=>v+1);}}>Retry</button>}</div>}</Modal>;}
-function About({onClose}:{onClose:()=>void}){const [credits,setCredits]=useState<{credit:string;source:string}[]>([]);useEffect(()=>{void Promise.all([request<{credit:string;source:string}[]>('/media/photo-credits.json'),request<{credit:string;source:string}[]>('/media/portrait-credits.json')]).then(c=>setCredits(c.flat())).catch(()=>{});},[]);return <Modal open onClose={onClose} title="About RSTMC" className="about-modal"><p>A place for your photos, stories, reels and conversations.</p><p>RSTMC / FunctionGram is an independent social app. It is not affiliated with Instagram or Meta.</p><h3>Your data</h3><p>Your posts, comments, saved items, follows and messages are stored with your account. Saved posts and private conversations are only visible to you and the relevant participants. Stories expire after 24 hours unless added to highlights.</p><h3>Sample content</h3><p>The starter profiles, captions and engagement counts are examples. Sample profiles don’t receive messages. All features also work with your own uploaded photos and videos.</p><h3>Photo credits</h3><div className="credits">{credits.map((c,i)=><a key={i} href={c.source} target="_blank" rel="noreferrer">{c.credit}</a>)}</div><p className="form-hint">Sample flower video: MDN public-domain media collection.</p></Modal>;}
+/* ---------------------------------- overlays ---------------------------------- */
+
+function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | null; people: Person[]; onClose: () => void }) {
+  const [sent, setSent] = useState("");
+  const [busy, setBusy] = useState("");
+  const link = typeof window !== "undefined" ? window.location.origin + "/#/post/" + encodeURIComponent(post.id) : "";
+  return (
+    <Modal open onClose={onClose} title="Share this moment">
+      <div className="share-link">
+        <LinkIcon size={20} />
+        <input aria-label="Post link" value={link} readOnly onFocus={event => event.target.select()} />
+        <button className="text-action" onClick={async () => {
+          try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { toast("Select and copy the link above."); }
+        }}>Copy</button>
+      </div>
+      {typeof navigator !== "undefined" && !!navigator.share && (
+        <button className="secondary-button wide" onClick={() => void navigator.share({ title: "A moment on RSTMC", url: link }).catch(() => {})}>
+          <Send size={17} />Share to another app
+        </button>
+      )}
+      {me && (
+        <div className="share-people">
+          <h3>Send in a message</h3>
+          {[me, ...people.filter(person => person.id !== me.id && !person.is_demo)].map(person => (
+            <div className="suggestion" key={person.id}>
+              <Avatar person={person} size={40} />
+              <span className="person-detail"><strong>{person.id === me.id ? "Saved messages" : person.username}</strong></span>
+              <button className="follow-button" disabled={!!busy || sent === person.id}
+                onClick={async () => {
+                  setBusy(person.id);
+                  try { await request("/api/social", { action: "message", id: person.id, body: link }); setSent(person.id); }
+                  catch (e) { toast.error((e as Error).message); }
+                  finally { setBusy(""); }
+                }}>
+                {sent === person.id ? "Sent" : busy === person.id ? <Busy size={14} /> : "Send"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: () => void }) {
+  const link = typeof window !== "undefined" ? window.location.origin + "/#/profile/" + encodeURIComponent(profile.id) : "";
+  return (
+    <Modal open onClose={onClose} title={"Share " + profile.username + "’s profile"}>
+      <div className="share-link">
+        <LinkIcon size={20} />
+        <input aria-label="Profile link" value={link} readOnly onFocus={event => event.target.select()} />
+        <button className="text-action" onClick={async () => {
+          try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { toast("Select and copy the link above."); }
+        }}>Copy</button>
+      </div>
+      {typeof navigator !== "undefined" && !!navigator.share && (
+        <button className="secondary-button wide" onClick={() => void navigator.share({ title: profile.name + " on RSTMC", url: link }).catch(() => {})}>
+          <Send size={17} />Share to another app
+        </button>
+      )}
+    </Modal>
+  );
+}
+
+function About({ onClose }: { onClose: () => void }) {
+  const [credits, setCredits] = useState<{ credit: string; source: string }[]>([]);
+  useEffect(() => {
+    void Promise.all([
+      request<{ credit: string; source: string }[]>("/media/photo-credits.json"),
+      request<{ credit: string; source: string }[]>("/media/portrait-credits.json"),
+    ]).then(lists => setCredits(lists.flat())).catch(() => {});
+  }, []);
+  return (
+    <Modal open onClose={onClose} title="About RSTMC" className="about-modal">
+      <p>A place for your photos, stories, reels, and conversations.</p>
+      <p>RSTMC is an independent social app inspired by Instagram. It is not affiliated with Instagram or Meta.</p>
+      <h3>Your data</h3>
+      <p>Your posts, comments, saved items, follows, and messages are stored with your account. Saved posts and private conversations are only visible to you and the relevant participants. Stories expire after 24 hours.</p>
+      <h3>Sample content</h3>
+      <p>The starter profiles, captions, and engagement counts are fictional examples. Sample profiles do not receive messages. All features also work with your own uploaded photos and videos.</p>
+      <h3>Photo credits</h3>
+      <div className="credits">{credits.map((credit, index) => <a key={index} href={credit.source} target="_blank" rel="noreferrer">{credit.credit}</a>)}</div>
+      <p className="form-hint">Sample flower video: MDN public-domain media collection.</p>
+    </Modal>
+  );
+}

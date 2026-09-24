@@ -75,7 +75,12 @@ export async function POST(request:Request){try{
     const category=clean(input.category||'For you',50);if(!categories.includes(category))throw new AppError('Choose a valid category.');
     const types:string[]=[];for(const url of media){const asset=await database.prepare('SELECT mime FROM assets WHERE key=? AND owner_id=?').bind(url.replace('/api/media/',''),user).first<{mime:string}>();if(!asset)throw new AppError('One of your uploads is unavailable. Please upload it again.');types.push(asset.mime);}
     const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. A photo post can include up to 6 images.');
-    const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+86400000:null)];
+    // Optional per-item aspect ratios (width/height) let the feed render media
+    // at its true size without cropping or layout shift.
+    const aspects=input.aspects;
+    const ratios=aspects==null?null:(Array.isArray(aspects)&&aspects.length===media.length&&aspects.every(a=>typeof a==='number'&&Number.isFinite(a)&&a>=0.2&&a<=5))?aspects as number[]:null;
+    if(aspects!=null&&!ratios)throw new AppError('Could not read the media size. Please try again.');
+    const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+86400000:null,ratios?JSON.stringify(ratios):null)];
     for(const tagged of tags){if(tagged!==user)stmts.push(database.prepare('INSERT INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
     await database.batch(stmts);return json({id:postId});
   }

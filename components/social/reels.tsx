@@ -1,21 +1,137 @@
 "use client";
-import {useEffect,useRef,useState} from 'react';
-import {Heart,MessageCircle,Send,Bookmark,Film,ChevronDown,ChevronUp,RefreshCw} from 'lucide-react';
-import {Avatar,IconButton,Empty,Busy,count,request} from './common';
-import {VideoPlayer} from './media';
-import type {Post} from '@/lib/types';
-import type {PostActions} from './post-card';
+import { useState, useRef, useEffect } from "react";
+import { Heart, MessageCircle, Send, Bookmark, Play, Pause, Volume2, VolumeX, Film } from "lucide-react";
+import { Avatar, IconButton, Empty, count, Busy } from "./common";
+import type { Post } from "@/lib/types";
+import type { PostActions } from "./post-card";
 
-export function Reels({posts,cache,actions,onCreate,onLoaded,suspended}:{posts:Post[];cache:Record<string,Post>;actions:PostActions;onCreate:()=>void;onLoaded:(posts:Post[])=>void;suspended:boolean}){
- const [items,setItems]=useState<Post[]>(posts.filter(p=>p.kind==='reel')),[current,setCurrent]=useState(0),[loading,setLoading]=useState(true),[more,setMore]=useState(false),[error,setError]=useState(''),[hasMore,setHasMore]=useState(false);
- const scroll=useRef<HTMLDivElement>(null),offset=useRef(0);
- const load=async(reset:boolean)=>{if(!reset&&more)return;if(reset){setLoading(true);setError('');}else setMore(true);try{const batch=await request<Post[]>('/api/social?reels=1&offset='+(reset?0:offset.current));if(reset)setItems(batch);else setItems(list=>[...list,...batch.filter(p=>!list.some(q=>q.id===p.id))]);offset.current=(reset?0:offset.current)+batch.length;setHasMore(batch.length===20);onLoaded(batch);}catch(e){setError((e as Error).message);}finally{setLoading(false);setMore(false);}};
- useEffect(()=>{let active=true;queueMicrotask(()=>{if(active)void load(true);});return()=>{active=false;};/* Fetch the real video collection on entry. */},[]); // eslint-disable-line react-hooks/exhaustive-deps
- useEffect(()=>{const root=scroll.current;if(!root||!items.length)return;const observer=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting&&entry.intersectionRatio>=.65)setCurrent(Number((entry.target as HTMLElement).dataset.index));}},{root,threshold:[.65,.85]});root.querySelectorAll<HTMLElement>('.reel-shell').forEach(el=>observer.observe(el));return()=>observer.disconnect();},[items.length]);
- const step=(next:number)=>{const target=Math.min(items.length-1,Math.max(0,current+next));scroll.current?.querySelectorAll<HTMLElement>('.reel-shell')[target]?.scrollIntoView({behavior:'smooth',block:'start'});};
- if(loading&&!items.length)return <div className="reels-view"><div className="section-heading"><h1>Reels</h1></div><div className="reel-skeleton" aria-label="Loading reels"><Busy/></div></div>;
- if(error&&!items.length)return <Empty icon={<Film/>} heading="Reels couldn’t load" body={error} action={<button className="primary-button" onClick={()=>void load(true)}><RefreshCw size={16}/>Retry</button>}/>;
- if(!items.length)return <Empty icon={<Film/>} heading="Make it a moving moment" body="Share a short video and start the reel collection." action={<button className="primary-button" onClick={onCreate}>Create a reel</button>}/>;
- return <section className="reels-view"><div className="reels-heading"><div><span className="eyebrow">Watch / Discover</span><h1>Reels</h1></div><button className="secondary-button" onClick={onCreate}>Create reel</button></div><div className="reel-stage"><div className="reel-scroll" ref={scroll} aria-label="Reel videos">{items.map((item,i)=><div key={item.id} className="reel-shell" data-index={i}><Reel post={cache[item.id]||posts.find(p=>p.id===item.id)||item} actions={actions} active={i===current&&!suspended}/></div>)}{hasMore&&<div className="reel-load"><button className="secondary-button" disabled={more} onClick={()=>void load(false)}>{more?<Busy/>:'Load more reels'}</button></div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>void load(false)}>Retry</button></div>}</div><div className="reel-navigation"><IconButton label="Previous reel" disabled={current===0} onClick={()=>step(-1)}><ChevronUp/></IconButton><span>{current+1} / {items.length}</span><IconButton label="Next reel" disabled={current===items.length-1} onClick={()=>step(1)}><ChevronDown/></IconButton></div></div></section>;
+export function Reels({ posts, actions, onCreate }: { posts: Post[]; actions: PostActions; onCreate: () => void }) {
+  const videos = posts.filter(p => p.media_type === "video" && p.kind !== "story");
+  const [active, setActive] = useState(0);
+  const track = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = track.current;
+    if (!container) return;
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+          const index = Number((entry.target as HTMLElement).dataset.index);
+          setActive(Number.isFinite(index) ? index : 0);
+        }
+      }
+    }, { root: container, threshold: [0.6] });
+    container.querySelectorAll(".reel-item").forEach(item => observer.observe(item));
+    return () => observer.disconnect();
+  }, [videos.length]);
+
+  if (!videos.length) {
+    return (
+      <Empty icon={<Film />} heading="Make it a moving moment" body="Share a short video and start the reel collection."
+        action={<button className="primary-button" onClick={onCreate}>Create a reel</button>} />
+    );
+  }
+  return (
+    <div className="reels-view">
+      <div className="reels-heading">
+        <h1>Reels</h1>
+        <button className="text-action" onClick={onCreate}>Create reel</button>
+      </div>
+      <div className="reels-track" ref={track} aria-label="Reels feed">
+        {videos.map((post, index) => (
+          <Reel key={post.id} post={post} index={index} isActive={index === active} actions={actions} />
+        ))}
+      </div>
+      <p className="reel-count" aria-live="polite">{active + 1} of {videos.length}</p>
+    </div>
+  );
 }
-function Reel({post:p,actions:a,active}:{post:Post;actions:PostActions;active:boolean}){const [pending,setPending]=useState(false),lock=useRef(false);const react=async(kind:'like'|'save',value:boolean)=>{if(lock.current)return;lock.current=true;setPending(true);try{await a.react(p,kind,value);}finally{lock.current=false;setPending(false);}};return <div className="reel-player"><VideoPlayer src={p.media[0]} label={p.caption||'Reel by '+p.author.username} autoPlay active={active} className="reel-video"/><div className="reel-info"><div className="user-line"><Avatar person={p.author} size={38} onClick={()=>a.openProfile(p.author_id)}/><button className="username" onClick={()=>a.openProfile(p.author_id)}>{p.author.username}</button></div><p>{p.caption}</p><small>{p.author.is_demo?'Sample reel':'Original video'}</small></div><div className="reel-actions"><IconButton label={p.liked?'Unlike reel':'Like reel'} active={!!p.liked} disabled={pending} onClick={()=>void react('like',!p.liked)}><Heart fill={p.liked?'currentColor':'none'}/></IconButton><span>{count(p.likes)}</span><IconButton label="View comments" onClick={()=>a.openPost(p)}><MessageCircle/></IconButton><span>{p.comment_count}</span><IconButton label="Share reel" onClick={()=>a.share(p)}><Send/></IconButton><IconButton label={p.saved?'Unsave reel':'Save reel'} active={!!p.saved} disabled={pending} onClick={()=>void react('save',!p.saved)}><Bookmark fill={p.saved?'currentColor':'none'}/></IconButton></div></div>;}
+
+function Reel({ post: p, index, isActive, actions }: { post: Post; index: number; isActive: boolean; actions: PostActions }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  // Only the visible reel plays: pause when scrolled away, play when active.
+  // Playing state itself is tracked through the video's own play/pause events.
+  useEffect(() => {
+    const element = video.current;
+    if (!element) return;
+    if (isActive) {
+      element.currentTime = 0;
+      void element.play().catch(() => {});
+    } else {
+      element.pause();
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const onVisibility = () => { if (document.visibilityState !== "visible") video.current?.pause(); else if (playing) void video.current?.play().catch(() => {}); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [isActive, playing]);
+
+  const react = async (kind: string, value: boolean) => {
+    if (pending) return;
+    setPending(true);
+    try { await actions.react(p, kind, value); } finally { setPending(false); }
+  };
+  const togglePlay = () => {
+    const element = video.current;
+    if (!element) return;
+    if (element.paused) void element.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    else { element.pause(); setPlaying(false); }
+  };
+
+  return (
+    <section className="reel-item" data-index={index} aria-label={"Reel by " + p.author.username}>
+      <div className="reel-player">
+        <video ref={video} src={p.media[0]} loop muted={muted} playsInline preload="metadata"
+          onClick={togglePlay}
+          onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+          onLoadedMetadata={event => { setDuration(event.currentTarget.duration); setLoading(false); }}
+          onWaiting={() => setLoading(true)} onPlaying={() => setLoading(false)} onCanPlay={() => setLoading(false)}
+          onTimeUpdate={event => setProgress(event.currentTarget.currentTime / (event.currentTarget.duration || 1))}
+          onError={() => { setError(true); setLoading(false); }}
+          aria-label={p.caption || "Reel video"} />
+        {loading && !error && <span className="reel-loading"><Busy /></span>}
+        {error && <p className="reel-error">This video couldn’t load. Please refresh to try again.</p>}
+        {!playing && !error && !loading && (
+          <button className="reel-play-large" aria-label="Play video" onClick={togglePlay}><Play size={46} fill="white" /></button>
+        )}
+        <div className="reel-top">
+          <IconButton label={playing ? "Pause reel" : "Play reel"} onClick={togglePlay}>{playing ? <Pause /> : <Play />}</IconButton>
+          <IconButton label={muted ? "Unmute reel" : "Mute reel"} onClick={() => setMuted(value => !value)}>{muted ? <VolumeX /> : <Volume2 />}</IconButton>
+        </div>
+        <div className="reel-info">
+          <div className="user-line">
+            <Avatar person={p.author} size={38} onClick={() => actions.openProfile(p.author_id)} />
+            <button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
+          </div>
+          {p.caption && <p>{p.caption}</p>}
+          <small>{p.author.is_demo ? "Sample reel · Original clip" : "Original video"} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
+        </div>
+        <div className="reel-actions">
+          <IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
+            <Heart className={p.liked ? "like-pop" : ""} fill={p.liked ? "currentColor" : "none"} />
+          </IconButton>
+          <span>{count(p.likes)}</span>
+          <IconButton label="View comments" onClick={() => actions.openPost(p)}><MessageCircle /></IconButton>
+          <span>{p.comment_count}</span>
+          <IconButton label="Share reel" onClick={() => actions.share(p)}><Send /></IconButton>
+          <IconButton label={p.saved ? "Unsave reel" : "Save reel"} disabled={pending} onClick={() => void react("save", !p.saved)}>
+            <Bookmark fill={p.saved ? "currentColor" : "none"} />
+          </IconButton>
+        </div>
+        <input className="reel-seek" aria-label="Seek video" type="range" min="0" max="100" step="0.1" value={progress * 100}
+          onChange={event => { if (video.current && Number.isFinite(duration)) video.current.currentTime = Number(event.target.value) / 100 * duration; }} />
+      </div>
+    </section>
+  );
+}

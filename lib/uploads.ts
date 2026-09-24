@@ -7,7 +7,7 @@ export async function reserveUpload(key:string,owner:string,payload:string|null)
  if(!keyPattern.test(key))throw new AppError('Invalid upload name.');
  let input:{size:number;type:string};try{input=JSON.parse(payload||'');}catch{throw new AppError('Invalid upload.');}
  if(!Number.isSafeInteger(input.size)||input.size<1||input.size>20*1024*1024||!mediaTypes.includes(input.type))throw new AppError('Choose a supported photo or video smaller than 20 MB.');
- const client=await getPool().connect();
+ const client=await (await getPool()).connect();
  try{
   await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
   const existing=await client.query('SELECT owner_id,expected_size,mime,completed FROM upload_claims WHERE key=$1',[key]);

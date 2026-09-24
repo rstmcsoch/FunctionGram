@@ -1,30 +1,118 @@
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
+
+// The minimal surface every caller (this app, better-auth's postgres adapter)
+// needs: positional query() plus connect()/release() for transactions.
+export interface QueryExecutor {
+  query(text: string, values?: unknown[]): Promise<{ rows: QueryResultRow[]; rowCount: number | null }>;
+}
+export interface PoolLike extends QueryExecutor {
+  connect(): Promise<QueryExecutor & { release(): void }>;
+}
+
+const migrations = [
+  { version: 1, statements: schemaStatements },
+  { version: 2, statements: socialUpgradeStatements },
+  { version: 3, statements: aspectUpgradeStatements },
+];
+
 let pool: Pool | undefined;
 let ready: Promise<void> | undefined;
-export function getPool() {
+
+// `npm run dev` without a database URL runs on PGlite (embedded Postgres) so
+// the whole app, including auth sessions, works offline for local preview.
+// Production always configures a real connection string and never gets here.
+export function localDevDatabase() {
+  return !(process.env.POSTGRES_URL || process.env.DATABASE_URL) && process.env.NODE_ENV !== 'production';
+}
+
+// PGlite keeps the whole database in memory, so two instances pointed at the
+// same data directory immediately diverge. Next.js dev (Turbopack) builds a
+// separate module registry per route bundle, so a module-level variable is NOT
+// enough to guarantee one instance per process: the key must live on
+// globalThis, which is shared by every bundle in the server runtime.
+interface PGliteInstance {
+  query(text: string, values?: unknown[]): Promise<{
+    rows: Record<string, unknown>[];
+    fields: { name: string; dataTypeID: number }[];
+    affectedRows?: number;
+  }>;
+}
+const LOCAL_POOL_KEY = '__functiongramLocalPool__';
+
+async function createLocalPool(): Promise<PoolLike> {
+  // createRequire bypasses bundler analysis so PGlite is always loaded as a
+  // native Node dependency (see also serverExternalPackages in next.config.ts).
+  const { createRequire } = await import('node:module');
+  const require = createRequire(path.join(process.cwd(), 'package.json'));
+  const { PGlite } = require('@electric-sql/pglite') as {
+    PGlite: new (dataDir: string) => PGliteInstance;
+  };
+  const instance = new PGlite(path.join(process.cwd(), '.pglite'));
+  const query = async (text: string, values?: unknown[]) => {
+    const result = await instance.query(text, values as unknown[]);
+    // PGlite returns int8/numeric columns as strings; the pg driver parses
+    // them to numbers (see setTypeParser above). Keep both drivers identical.
+    const numeric = (result.fields ?? []).filter(field => field.dataTypeID === 20 || field.dataTypeID === 1700).map(field => field.name);
+    if (numeric.length) for (const row of result.rows as Record<string, unknown>[])
+      for (const column of numeric) if (typeof row[column] === 'string') row[column] = Number(row[column]);
+    return { rows: result.rows as QueryResultRow[], rowCount: result.affectedRows ?? result.rows.length };
+  };
+  return {
+    query,
+    async connect() { return { query, release() {} }; },
+  };
+}
+
+async function getLocalPool(): Promise<PoolLike> {
+  const g = globalThis as typeof globalThis & Record<string, unknown>;
+  const existing = g[LOCAL_POOL_KEY] as Promise<PoolLike> | undefined;
+  if (existing) return existing;
+  const creation = createLocalPool();
+  g[LOCAL_POOL_KEY] = creation;
+  // A failed startup (bad data dir, etc.) must not leave a rejected promise
+  // cached forever; clear it so the next request can retry.
+  creation.catch(() => { delete g[LOCAL_POOL_KEY]; });
+  return creation;
+}
+
+const MANAGED_POOL_KEY = '__functiongramPool__';
+
+export async function getPool(): Promise<PoolLike> {
+  if (localDevDatabase()) return getLocalPool();
   // Prefer Vercel's managed Postgres/Neon variable when both are present.
   // A legacy DATABASE_URL may still point at a removed database.
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('FunctionGram requires DATABASE_URL.');
-  if (!pool) {
-    pool = new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
-    pool.on('error', error => console.error('Idle database connection closed', error.message));
-  }
-  return pool;
+  const g = globalThis as typeof globalThis & Record<string, unknown>;
+  const existing = g[MANAGED_POOL_KEY] as Pool | undefined;
+  if (existing) return existing as unknown as PoolLike;
+  pool = new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
+  pool.on('error', error => console.error('Idle database connection closed', error.message));
+  g[MANAGED_POOL_KEY] = pool;
+  return pool as unknown as PoolLike;
 }
+
 export async function ensureSchema() {
   if (!ready) ready = (async () => {
-    const client=await getPool().connect();
+    if (localDevDatabase()) {
+      const database = await getLocalPool();
+      for (const migration of migrations)
+        for (const statement of migration.statements) await database.query(statement);
+      return;
+    }
+    const client = await (await getPool()).connect();
     try {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements]] as const) {
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements]] as const) {
         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
         if (!applied.rowCount) {
           for (const statement of statements) await client.query(statement);
@@ -37,22 +125,27 @@ export async function ensureSchema() {
   })().catch(error=>{ready=undefined;throw error;});
   return ready;
 }
+
+type Executor = QueryExecutor & { release(): void };
+
 export class Statement {
   constructor(public query:string, public values:unknown[] = []) {}
   bind(...values:unknown[]) { return new Statement(this.query,values); }
-  async execute(client?:PoolClient) {
+  async execute(client?: Executor) {
     if (!client) await ensureSchema();
-    return (client || getPool()).query(postgresQuery(this.query),this.values);
+    const executor = client || await getPool();
+    return executor.query(postgresQuery(this.query),this.values);
   }
   async all<T = QueryResultRow>() { const result=await this.execute(); return {results:result.rows as T[]}; }
   async first<T = QueryResultRow>() { const result=await this.execute(); return (result.rows[0] || null) as T|null; }
   async run() { const result=await this.execute();return {meta:{changes:result.rowCount||0}}; }
 }
+
 export function database() {
   return {
     prepare:(query:string)=>new Statement(query),
     async batch(statements:Statement[]) {
-      await ensureSchema(); const client=await getPool().connect();
+      await ensureSchema(); const client = await (await getPool()).connect();
       try {
         await client.query('BEGIN');
         const results=[];

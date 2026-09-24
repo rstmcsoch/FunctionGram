@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
-import {schemaStatements,socialUpgradeStatements} from '../lib/postgres-schema';
+import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements} from '../lib/postgres-schema';
 import {postgresQuery} from '../lib/sql';
 import {getAuthTables} from 'better-auth/db';
 import {detectMediaType} from '../lib/media-type';
@@ -10,8 +10,8 @@ import {detectMediaType} from '../lib/media-type';
 test('PostgreSQL schema supports actual feed, social actions, ownership and transaction rollback',async()=>{
  const db=new PGlite();
  try{
-  for(const sql of [...schemaStatements,...socialUpgradeStatements])await db.exec(sql);
-  for(const sql of [...schemaStatements,...socialUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql);
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
   const authTables=getAuthTables({emailAndPassword:{enabled:true},rateLimit:{enabled:true,storage:'database'}});
   for(const table of Object.values(authTables)){
    const columns=await db.query<{column_name:string}>('SELECT column_name FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=$1',[table.modelName]);

@@ -7,7 +7,17 @@ export class AppError extends Error { constructor(message:string,public status=4
 export function db(){return database();}
 export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
-export function sameOrigin(request:Request){const origin=request.headers.get('origin'); if(request.headers.get('sec-fetch-site')==='cross-site'||(origin&&new URL(origin).host!==new URL(request.url).host))throw new AppError('Please open RSTMC to make this change.',403);}
+export function sameOrigin(request:Request){
+  if(request.headers.get('sec-fetch-site')==='cross-site')throw new AppError('Please open RSTMC to make this change.',403);
+  const origin=request.headers.get('origin');
+  if(origin){
+    // Compare against the Host header, not request.url: Next.js derives
+    // request.url from the server's bind address (e.g. 0.0.0.0:3000 in dev),
+    // which never matches a real Origin host and would reject every write.
+    const host=request.headers.get('host');
+    if(!host||new URL(origin).host!==host)throw new AppError('Please open RSTMC to make this change.',403);
+  }
+}
 export function clean(value:unknown,max:number,required=false){if(typeof value!=='string'||value.trim().length>max||(required&&!value.trim()))throw new AppError(required?'Please complete the required fields.':'Please check the length of your text.');return value.trim();}
 export async function readBody(request:Request){if(Number(request.headers.get('content-length')||0)>20000)throw new AppError('This request is too large.',413);try{const body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw new Error();return body as Record<string,unknown>;}catch{throw new AppError('Please check your input.');}}
 export async function identity(required=false){
@@ -25,7 +35,7 @@ export async function searchPeople(viewer:string|null,query:string):Promise<Pers
 export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',id).all<Person>();return r.results;}
 
 type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean};
-function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({...p,media:JSON.parse(p.media as string) as string[],media_options:JSON.parse(p.media_options as string) as MediaOption[],tagged_users:JSON.parse(p.tagged_users as string) as string[],highlighted:!!p.highlighted,author:{id:p.author_id,username:p.username,name:p.name,avatar:p.avatar,bio:p.bio,website:p.website,is_demo:p.is_demo}})) as unknown as Post[];}
+function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({...p,media:JSON.parse(p.media as string) as string[],aspects:p.aspects?JSON.parse(p.aspects as string) as number[]:null,media_options:p.media_options?JSON.parse(p.media_options as string) as MediaOption[]:[],tagged_users:p.tagged_users?JSON.parse(p.tagged_users as string) as string[]:[],highlighted:!!p.highlighted,author:{id:p.author_id,username:p.username,name:p.name,avatar:p.avatar,bio:p.bio,website:p.website,is_demo:p.is_demo}})) as unknown as Post[];}
 export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilter={}):Promise<Post[]>{
   const conditions:string[]=[];const extraArgs:unknown[]=[];
   if(filter.author){conditions.push('p.author_id=?');extraArgs.push(filter.author);}

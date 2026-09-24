@@ -3,6 +3,14 @@ import {forwardRef,useEffect,useState,type ComponentPropsWithoutRef,type FormEve
 import {toast} from 'sonner';
 import Link from 'next/link';
 import {authClient} from '@/lib/auth-client';
+import {devMode} from './common';
+
+// Local preview only: signs the browser in as the local "Preview" account.
+async function previewSession(){try{const response=await fetch('/api/dev-session',{method:'POST'});if(!response.ok)throw new Error();window.location.reload();}catch{toast.error('Could not start the preview account.');}}
+export function PreviewAccountButton({label='Use the local preview account'}:{label?:string}){
+  const [busy,setBusy]=useState(false);
+  return <button type="button" className="text-button" disabled={busy} onClick={async()=>{setBusy(true);await previewSession();}}>{busy?'Setting up preview…':label}</button>;
+}
 
 export function VerificationForm({initialEmail='',recentlyRequested=false,onBack}:{initialEmail?:string;recentlyRequested?:boolean;onBack?:()=>void}){
  const [email,setEmail]=useState(initialEmail),[busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -61,9 +69,10 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
  <label>Password<input name="password" type="password" autoComplete={register?'new-password':'current-password'} minLength={register?12:1} maxLength={128} required aria-describedby={register?'password-help':undefined}/></label>
  {register&&<><small id="password-help">Use at least 12 characters. We’ll email you a verification link. Keep your password safe; password recovery isn’t available yet.</small><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required/></label></>}
  </fieldset>
- {error&&<p role="alert">{error}</p>}
- <button type="submit" className="primary-button wide" disabled={busy}>{busy?'Please wait…':register?'Create account':'Sign in'}</button>
- <button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button>
+  {error&&<p role="alert">{error}</p>}
+  <button type="submit" className="primary-button wide" disabled={busy}>{busy?'Please wait…':register?'Create account':'Sign in'}</button>
+  {devMode&&<PreviewAccountButton/>}
+  <button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button>
  {!register&&<button type="button" className="text-button" disabled={busy} onClick={()=>setPendingEmail('')}>Resend verification email</button>}
  </form>;
 }
@@ -73,7 +82,10 @@ export const SignOutButton=forwardRef<HTMLButtonElement,ComponentPropsWithoutRef
  const [busy,setBusy]=useState(false);
  return <button {...props} ref={ref} type="button" disabled={disabled||busy} onClick={async event=>{
   onClick?.(event);if(event.defaultPrevented||busy)return;setBusy(true);
-  try{const result=await authClient.signOut();if(result.error)throw new Error(result.error.message||'Unable to sign out.');window.location.assign('/');}
+  try{
+    if(devMode){const response=await fetch('/api/dev-session',{method:'DELETE'});if(!response.ok)throw new Error();window.location.assign('/');return;}
+    const result=await authClient.signOut();if(result.error)throw new Error(result.error.message||'Unable to sign out.');window.location.assign('/');
+  }
   catch(error){toast.error(error instanceof Error?error.message:'Unable to sign out. Please try again.');}
   finally{setBusy(false);}
  }}>{busy?'Signing out…':'Sign out'}</button>;
