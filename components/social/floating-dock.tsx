@@ -75,42 +75,45 @@ export const FloatingDock = memo(function FloatingDock({ active, me, onSelect, c
   }, [place]);
 
   return (
-    <nav
-      ref={ref as React.RefObject<HTMLElement>}
-      className="dock"
+    <div
+      ref={ref as React.RefObject<HTMLDivElement>}
+      className="dock-wrap"
       data-state={hidden || covered ? "hidden" : "visible"}
-      aria-label="Bottom navigation"
       aria-hidden={covered || undefined}
       inert={covered}
       onFocus={show}
     >
-      <div className="dock-list" ref={list} data-dock-ready="true">
-        <span className="dock-indicator" ref={indicator} aria-hidden="true" />
-        {items.map(item => {
-          const isActive = active === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={"dock-item" + (item.id === "create" ? " dock-create" : "")}
-              data-active={isActive ? "true" : "false"}
-              data-id={item.id}
-              onClick={() => onSelect(item.id)}
-              aria-label={item.label}
-              aria-current={isActive ? "page" : undefined}
-              title={item.label}
-            >
-              <span className="dock-glyph">
-                {item.id === "create"
-                  ? <Plus strokeWidth={2.3} />
-                  : item.id === "profile" && me
-                    ? <Avatar person={me} size={28} />
-                    : <item.icon fill={isActive && item.id === "home" ? "currentColor" : "none"} strokeWidth={isActive ? 2.15 : 1.85} />}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
+      {/* The wrapper only centres; the pill only ever transforms on the Y
+          axis, so the auto-hide animation can never affect its position. */}
+      <nav className="dock" aria-label="Bottom navigation">
+        <div className="dock-list" ref={list} data-dock-ready="true">
+          <span className="dock-indicator" ref={indicator} aria-hidden="true" />
+          {items.map(item => {
+            const isActive = active === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={"dock-item" + (item.id === "create" ? " dock-create" : "")}
+                data-active={isActive ? "true" : "false"}
+                data-id={item.id}
+                onClick={() => onSelect(item.id)}
+                aria-label={item.label}
+                aria-current={isActive ? "page" : undefined}
+                title={item.label}
+              >
+                <span className="dock-glyph">
+                  {item.id === "create"
+                    ? <Plus strokeWidth={2.3} />
+                    : item.id === "profile" && me
+                      ? <Avatar person={me} size={28} />
+                      : <item.icon fill={isActive && item.id === "home" ? "currentColor" : "none"} strokeWidth={isActive ? 2.15 : 1.85} />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </div>
   );
 });
