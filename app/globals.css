@@ -49,6 +49,23 @@
   --glass-blur:blur(18px) saturate(160%);
   --glass-highlight:inset 0 1px 0 rgba(255,255,255,.55);
 
+  /* floating bottom dock (mobile + tablet) */
+  --dock-height:62px;
+  --dock-gap:14px;
+  --dock-side:14px;
+  --dock-max:460px;
+  --dock-radius:999px;
+  --dock-bg:rgba(255,255,255,.68);
+  --dock-border:rgba(16,10,20,.09);
+  --dock-blur:blur(22px) saturate(170%);
+  --dock-highlight:inset 0 1px 0 rgba(255,255,255,.6);
+  --dock-shadow:0 2px 6px rgba(23,12,28,.06),0 16px 34px -14px rgba(23,12,28,.34),inset 0 1px 0 rgba(255,255,255,.5);
+  --dock-pill:rgba(255,255,255,.95);
+  --dock-pill-border:rgba(16,10,20,.05);
+  --dock-pill-shadow:0 1px 2px rgba(23,12,28,.09),0 5px 14px -6px rgba(23,12,28,.28);
+  --dock-fallback:#fbfbfc;
+  --dock-inset:calc(var(--dock-height) + max(var(--dock-gap), env(safe-area-inset-bottom) + 12px) + 24px);
+
   /* depth */
   --shadow-1:0 1px 2px rgba(23,12,28,.06),0 1px 1px rgba(23,12,28,.04);
   --shadow-2:0 2px 6px rgba(23,12,28,.07),0 8px 24px -8px rgba(23,12,28,.12);
@@ -101,6 +118,15 @@
   --glass-soft:rgba(20,20,26,.5);
   --glass-border:rgba(255,255,255,.09);
   --glass-highlight:inset 0 1px 0 rgba(255,255,255,.07);
+
+  --dock-bg:rgba(19,19,24,.64);
+  --dock-border:rgba(255,255,255,.12);
+  --dock-highlight:inset 0 1px 0 rgba(255,255,255,.09);
+  --dock-shadow:0 2px 8px rgba(0,0,0,.4),0 18px 38px -14px rgba(0,0,0,.72),inset 0 1px 0 rgba(255,255,255,.07);
+  --dock-pill:rgba(255,255,255,.14);
+  --dock-pill-border:rgba(255,255,255,.1);
+  --dock-pill-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 4px 12px -4px rgba(0,0,0,.5);
+  --dock-fallback:#15151a;
 
   --shadow-1:0 1px 2px rgba(0,0,0,.4);
   --shadow-2:0 2px 6px rgba(0,0,0,.45),0 8px 24px -8px rgba(0,0,0,.5);
@@ -224,7 +250,7 @@ h1,h2,h3,p{margin:0}
 @keyframes view-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 
 /* mobile chrome — liquid glass */
-.mobile-header,.mobile-nav{display:none}
+.mobile-header,.dock{display:none}
 .mobile-header{
   position:fixed;inset:0 0 auto;z-index:var(--z-header);height:60px;padding:0 16px;
   align-items:center;justify-content:space-between;
@@ -236,21 +262,80 @@ h1,h2,h3,p{margin:0}
 .mobile-header>div{display:flex;gap:4px}
 .mobile-header .icon-button{width:37px;height:40px}
 .mobile-header .icon-button svg{width:23px;height:23px}
-.mobile-nav{
-  position:fixed;inset:auto 0 0;z-index:var(--z-header);
-  height:calc(60px + env(safe-area-inset-bottom));
-  padding:0 6px env(safe-area-inset-bottom);
-  align-items:center;justify-content:space-around;
-  background:var(--glass-nav);
-  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
-  border-top:1px solid var(--glass-border);
-  box-shadow:0 -8px 30px -12px rgba(23,12,28,.14);
+
+/* ------------------------------------------------------------
+   Floating dock: a centred liquid-glass capsule that never
+   touches the left, right or bottom edge of the viewport.
+   ------------------------------------------------------------ */
+.dock{
+  position:fixed;z-index:var(--z-header);
+  left:50%;bottom:max(var(--dock-gap), calc(env(safe-area-inset-bottom) + 12px));
+  width:min(100% - (var(--dock-side) * 2), var(--dock-max));
+  height:var(--dock-height);padding:6px;
+  translate:-50% 0;
+  display:flex;align-items:center;
+  border-radius:var(--dock-radius);
+  background:var(--dock-bg);
+  -webkit-backdrop-filter:var(--dock-blur);backdrop-filter:var(--dock-blur);
+  border:1px solid var(--dock-border);
+  box-shadow:var(--dock-shadow);
+  transform:translate3d(0,0,0) scale(1);
+  transition:transform 260ms var(--ease),opacity 200ms var(--ease),visibility 0s linear 0s;
+  contain:layout paint;
 }
-.mobile-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:50px;color:var(--foreground);position:relative;border-radius:12px}
-.mobile-nav svg{width:25px;height:25px}
-.mobile-nav .active{color:var(--primary)}
-.mobile-nav .active::after{content:"";position:absolute;bottom:5px;width:5px;height:5px;border-radius:50%;background:var(--primary)}
-.mobile-nav .active .avatar{outline:2px solid var(--primary);outline-offset:2px}
+/* Auto-hide: the bar travels past the bottom edge instead of popping out. */
+.dock[data-state=hidden],.dock[inert]{
+  transform:translate3d(0, calc(100% + max(var(--dock-gap), env(safe-area-inset-bottom)) + 18px), 0) scale(.985);
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:transform 240ms var(--ease),opacity 180ms var(--ease),visibility 0s linear 240ms;
+}
+.dock-list{position:relative;flex:1;display:flex;align-items:center;height:100%;min-width:0}
+/* Sliding active capsule — its own depth layer inside the glass. */
+.dock-indicator{
+  position:absolute;left:0;top:0;width:48px;height:48px;border-radius:50%;
+  background:var(--dock-pill);border:1px solid var(--dock-pill-border);
+  box-shadow:var(--dock-pill-shadow);
+  pointer-events:none;z-index:0;opacity:0;
+  transform:translate3d(6px,0,0);
+}
+.dock-list[data-dock-ready=true] .dock-indicator{
+  opacity:1;
+  transition:transform 230ms var(--ease),width 230ms var(--ease),height 230ms var(--ease),opacity 160ms var(--ease);
+}
+.dock-item{
+  position:relative;z-index:1;flex:1 1 0;min-width:0;
+  height:calc(var(--dock-height) - 12px);
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;color:var(--foreground);background:none;border:0;padding:0;
+  -webkit-tap-highlight-color:transparent;
+}
+.dock-item:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.dock-glyph{
+  display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;
+  transition:transform 170ms var(--ease),color var(--motion-fast) var(--ease),opacity var(--motion-fast) var(--ease);
+}
+.dock-glyph svg{width:24px;height:24px}
+.dock-item[data-active=false]{color:var(--muted-foreground);opacity:.9}
+.dock-item[data-active=true]{color:var(--foreground)}
+.dock-item[data-active=true][data-id=home]{color:var(--primary)}
+.dock-item:active .dock-glyph{transform:scale(.92)}
+.dock-item[data-active=true] .dock-glyph{transform:scale(1.04)}
+.dock-item[data-active=true]:active .dock-glyph{transform:scale(.95)}
+/* Profile keeps its avatar, ringed by the active capsule. */
+.dock-item .avatar{outline:2px solid transparent;outline-offset:2px;transition:outline-color var(--motion) var(--ease),transform 170ms var(--ease)}
+.dock-item[data-active=true] .avatar{outline-color:var(--primary)}
+/* Create is an action, not a destination: it stays visually distinct. */
+.dock-create .dock-glyph{
+  width:44px;height:44px;color:#fff;
+  background:linear-gradient(180deg,#f0507a,var(--primary) 55%,#e23b66);
+  box-shadow:0 2px 8px -2px rgba(235,69,110,.65),inset 0 1px 0 rgba(255,255,255,.28);
+}
+.dock-create .dock-glyph svg{width:22px;height:22px}
+.dock-create:active .dock-glyph{transform:scale(.93)}
+/* Readable fallback where backdrop-filter is unavailable. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .dock{background:var(--dock-fallback)}
+}
 
 /* ============================================================
    4. PRIMITIVES — buttons, icons, avatars, glass cards
@@ -786,8 +871,53 @@ button:hover>.avatar{transform:scale(1.04)}
   .conversation-list{padding:20px 10px 12px}
 }
 
+/* narrow layouts (phones + tablets): the floating dock replaces the sidebar */
+@media (max-width:1080px){
+  .app-sidebar{display:none}
+  .mobile-header{display:flex}
+  .dock{display:flex}
+  /* Content clears the fixed header above and keeps breathing room for the
+     floating bar below: bar height + the gap + safe area + a little slack. */
+  .main-surface{margin-left:0;width:100%;padding-top:60px;padding-bottom:calc(var(--dock-inset) + 8px)}
+  .home-layout{padding-bottom:8px}
+  .discovery-view,.profile-view,.notifications-view{padding-bottom:8px}
+  .reels-track{padding-bottom:calc(var(--dock-inset) - 44px)}
+  .feed-end{padding-bottom:26px}
+  /* The chat compose box must stay clear of the floating bar. */
+  .messages-layout{height:calc(100dvh - 60px - var(--dock-inset) - 8px)}
+}
+
+/* Small phones: keep the capsule clear of the screen edges. The dock tokens
+   live on .dock so they inherit to the content padding that depends on them. */
+@media (max-width:400px){
+  .dock{--dock-side:10px;--dock-height:60px;--dock-max:360px;padding:5px}
+  .dock-glyph{width:42px;height:42px}
+  .dock-glyph svg{width:23px;height:23px}
+  .dock-create .dock-glyph{width:42px;height:42px}
+  .dock-create .dock-glyph svg{width:21px;height:21px}
+  .dock-item .avatar{width:26px!important;height:26px!important}
+}
+
+/* large phones and tablets: a little more room, still clearly floating */
+@media (min-width:430px) and (max-width:1080px){
+  .dock{--dock-height:64px;--dock-max:520px;--dock-side:24px}
+}
+
+/* landscape phones: the bar stays a compact centred control */
+@media (max-height:520px) and (max-width:1080px){
+  .dock{--dock-height:54px;--dock-max:400px;--dock-gap:8px;padding:4px}
+  .dock-glyph,.dock-create .dock-glyph{width:38px;height:38px}
+  .dock-glyph svg{width:21px;height:21px}
+}
+
+/* desktop: full sidebar returns, dock and mobile header step away */
+@media (min-width:1081px){
+  .dock,.mobile-header{display:none!important}
+  .main-surface{margin-left:252px;width:calc(100% - 252px)}
+}
+
 /* tablet: icon rail sidebar */
-@media (min-width:701px) and (max-width:1080px){
+@media (min-width:1081px) and (max-width:1200px){
   .app-sidebar{width:82px;padding:26px 12px 16px;align-items:center}
   .app-sidebar>.brand{font-size:0;letter-spacing:0;width:50px;text-align:center;padding:2px 0 24px}
   .app-sidebar>.brand:before{content:"R";font-size:28px;letter-spacing:-1.6px}
@@ -814,10 +944,7 @@ button:hover>.avatar{transform:scale(1.04)}
 
 /* mobile */
 @media (max-width:700px){
-  .app-sidebar{display:none}
-  .main-surface{margin-left:0;width:100%;padding-top:60px;padding-bottom:calc(62px + env(safe-area-inset-bottom))}
-  .mobile-header{display:flex}
-  .mobile-nav{display:flex}
+  .dock{--dock-side:12px;--dock-gap:12px;--dock-max:420px}
   .home-layout{display:block;padding:0;max-width:560px}
   .feed-tabs[data-slot=tabs-list]{height:50px;gap:26px;padding:0 16px}
   .feed-tabs [data-slot=tabs-trigger]{font-size:16px;padding-top:15px;padding-bottom:13px}
@@ -840,8 +967,8 @@ button:hover>.avatar{transform:scale(1.04)}
   .post-caption{font-size:13.5px;line-height:1.6}
   .like-count,.view-comments,.comment-form input{font-size:13.5px}
   .comment-form{border-top:0;margin:0 -6px 0}
-  .feed-end{padding:28px 10px 34px}
-  .discovery-view,.profile-view{padding:22px 14px}
+  .feed-end{padding:28px 10px 18px}
+  .discovery-view,.profile-view{padding:22px 14px 8px}
   .section-heading h1{font-size:23px}
   .section-heading>span{font-size:13px}
   .search-field.large{margin-bottom:18px}
@@ -875,7 +1002,7 @@ button:hover>.avatar{transform:scale(1.04)}
   .empty-state p{font-size:13.5px}
 
   /* messages: single-thread view */
-  .messages-layout{height:calc(100dvh - 122px - env(safe-area-inset-bottom));grid-template-columns:1fr;padding:0 0 0}
+  .messages-layout{height:calc(100dvh - 60px - var(--dock-inset) - 8px);grid-template-columns:1fr;padding:0 0 0}
   .conversation-list{border-right:0;padding:16px 12px 10px}
   .chat-panel{display:none}
   .messages-layout.show-chat .conversation-list{display:none}
@@ -890,7 +1017,7 @@ button:hover>.avatar{transform:scale(1.04)}
   .reels-view{padding:0;min-height:calc(100dvh - 122px - env(safe-area-inset-bottom))}
   .reels-heading{padding:10px 16px 12px}
   .reels-heading h1{font-size:21px}
-  .reels-track{gap:0;padding:0}
+  .reels-track{gap:0;padding:0 0 calc(var(--dock-inset) - 46px)}
   .reel-item{padding:0}
   .reel-player{width:100%;height:100%;max-height:none;border-radius:0;box-shadow:none}
   .reel-info{left:14px;right:64px;bottom:34px}
@@ -941,6 +1068,7 @@ button:hover>.avatar{transform:scale(1.04)}
 
 @media (max-width:380px){
   .mobile-header{padding:0 12px}
+  .dock{--dock-side:10px}
   .profile-top{gap:14px}
   .profile-top .avatar{width:68px!important;height:68px!important}
   .profile-title h1{font-size:17px}
