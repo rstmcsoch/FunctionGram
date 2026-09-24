@@ -51,9 +51,7 @@
 
   /* floating bottom dock (mobile + tablet) */
   --dock-height:62px;
-  --dock-gap:14px;
-  --dock-side:14px;
-  --dock-max:460px;
+  --dock-max:420px;
   --dock-radius:999px;
   --dock-bg:rgba(255,255,255,.68);
   --dock-border:rgba(16,10,20,.09);
@@ -64,7 +62,7 @@
   --dock-pill-border:rgba(16,10,20,.05);
   --dock-pill-shadow:0 1px 2px rgba(23,12,28,.09),0 5px 14px -6px rgba(23,12,28,.28);
   --dock-fallback:#fbfbfc;
-  --dock-inset:calc(var(--dock-height) + max(var(--dock-gap), env(safe-area-inset-bottom) + 12px) + 24px);
+  --dock-inset:calc(var(--dock-height) + max(16px, env(safe-area-inset-bottom) + 12px) + 24px);
 
   /* depth */
   --shadow-1:0 1px 2px rgba(23,12,28,.06),0 1px 1px rgba(23,12,28,.04);
@@ -250,9 +248,11 @@ h1,h2,h3,p{margin:0}
 @keyframes view-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
 
 /* mobile chrome — liquid glass */
-.mobile-header,.dock{display:none}
+.mobile-header,.dock-wrap{display:none}
+/* Always fixed, always visible: the header never reacts to scrolling. */
 .mobile-header{
-  position:fixed;inset:0 0 auto;z-index:var(--z-header);height:60px;padding:0 16px;
+  position:fixed;top:0;left:0;right:0;z-index:var(--z-header);height:60px;
+  padding:0 16px;padding-top:env(safe-area-inset-top);
   align-items:center;justify-content:space-between;
   background:var(--glass-nav);
   -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
@@ -264,15 +264,23 @@ h1,h2,h3,p{margin:0}
 .mobile-header .icon-button svg{width:23px;height:23px}
 
 /* ------------------------------------------------------------
-   Floating dock: a centred liquid-glass capsule that never
-   touches the left, right or bottom edge of the viewport.
+   Floating dock. A full-width fixed strip centres the pill with
+   flexbox, and only the inner pill carries the hide/show
+   transform — strictly on the Y axis, so the two jobs can never
+   overwrite each other and the pill stays centred at every
+   width, in and out of the hidden state.
    ------------------------------------------------------------ */
+.dock-wrap{
+  position:fixed;left:0;right:0;
+  bottom:max(16px, calc(env(safe-area-inset-bottom) + 12px));
+  z-index:var(--z-header);
+  display:flex;justify-content:center;
+  pointer-events:none;
+}
 .dock{
-  position:fixed;z-index:var(--z-header);
-  left:50%;bottom:max(var(--dock-gap), calc(env(safe-area-inset-bottom) + 12px));
-  width:min(100% - (var(--dock-side) * 2), var(--dock-max));
+  pointer-events:auto;
+  width:min(100% - 24px, var(--dock-max));
   height:var(--dock-height);padding:6px;
-  translate:-50% 0;
   display:flex;align-items:center;
   border-radius:var(--dock-radius);
   background:var(--dock-bg);
@@ -281,11 +289,12 @@ h1,h2,h3,p{margin:0}
   box-shadow:var(--dock-shadow);
   transform:translate3d(0,0,0) scale(1);
   transition:transform 260ms var(--ease),opacity 200ms var(--ease),visibility 0s linear 0s;
-  contain:layout paint;
 }
-/* Auto-hide: the bar travels past the bottom edge instead of popping out. */
-.dock[data-state=hidden],.dock[inert]{
-  transform:translate3d(0, calc(100% + max(var(--dock-gap), env(safe-area-inset-bottom)) + 18px), 0) scale(.985);
+/* Auto-hide: the pill travels past the bottom edge instead of popping out. */
+.dock-wrap[data-state=hidden] .dock,
+.dock-wrap.dock-hidden .dock,
+.dock-wrap[inert] .dock{
+  transform:translate3d(0, calc(100% + max(16px, env(safe-area-inset-bottom)) + 18px), 0) scale(.985);
   opacity:0;visibility:hidden;pointer-events:none;
   transition:transform 240ms var(--ease),opacity 180ms var(--ease),visibility 0s linear 240ms;
 }
@@ -875,22 +884,23 @@ button:hover>.avatar{transform:scale(1.04)}
 @media (max-width:1080px){
   .app-sidebar{display:none}
   .mobile-header{display:flex}
-  .dock{display:flex}
-  /* Content clears the fixed header above and keeps breathing room for the
-     floating bar below: bar height + the gap + safe area + a little slack. */
-  .main-surface{margin-left:0;width:100%;padding-top:60px;padding-bottom:calc(var(--dock-inset) + 8px)}
+  .dock-wrap{display:flex}
+  /* Content clears the fixed header above (plus any notch) and keeps
+     breathing room for the floating bar below: bar height + the gap +
+     safe area + a little slack. */
+  .main-surface{margin-left:0;width:100%;padding-top:calc(60px + env(safe-area-inset-top));padding-bottom:calc(var(--dock-inset) + 8px)}
   .home-layout{padding-bottom:8px}
   .discovery-view,.profile-view,.notifications-view{padding-bottom:8px}
   .reels-track{padding-bottom:calc(var(--dock-inset) - 44px)}
   .feed-end{padding-bottom:26px}
   /* The chat compose box must stay clear of the floating bar. */
-  .messages-layout{height:calc(100dvh - 60px - var(--dock-inset) - 8px)}
+  .messages-layout{height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px)}
 }
 
-/* Small phones: keep the capsule clear of the screen edges. The dock tokens
-   live on .dock so they inherit to the content padding that depends on them. */
+/* Small phones: a slightly slimmer pill that still clears the edges. */
 @media (max-width:400px){
-  .dock{--dock-side:10px;--dock-height:60px;--dock-max:360px;padding:5px}
+  :root{--dock-height:60px}
+  .dock{padding:5px}
   .dock-glyph{width:42px;height:42px}
   .dock-glyph svg{width:23px;height:23px}
   .dock-create .dock-glyph{width:42px;height:42px}
@@ -898,21 +908,22 @@ button:hover>.avatar{transform:scale(1.04)}
   .dock-item .avatar{width:26px!important;height:26px!important}
 }
 
-/* large phones and tablets: a little more room, still clearly floating */
+/* large phones and tablets: a little taller, capped at 480px on tablets */
 @media (min-width:430px) and (max-width:1080px){
-  .dock{--dock-height:64px;--dock-max:520px;--dock-side:24px}
+  :root{--dock-height:64px;--dock-max:480px}
 }
 
 /* landscape phones: the bar stays a compact centred control */
 @media (max-height:520px) and (max-width:1080px){
-  .dock{--dock-height:54px;--dock-max:400px;--dock-gap:8px;padding:4px}
+  :root{--dock-height:54px;--dock-max:400px}
+  .dock{padding:4px}
   .dock-glyph,.dock-create .dock-glyph{width:38px;height:38px}
   .dock-glyph svg{width:21px;height:21px}
 }
 
 /* desktop: full sidebar returns, dock and mobile header step away */
 @media (min-width:1081px){
-  .dock,.mobile-header{display:none!important}
+  .dock-wrap,.mobile-header{display:none!important}
   .main-surface{margin-left:252px;width:calc(100% - 252px)}
 }
 
@@ -944,7 +955,6 @@ button:hover>.avatar{transform:scale(1.04)}
 
 /* mobile */
 @media (max-width:700px){
-  .dock{--dock-side:12px;--dock-gap:12px;--dock-max:420px}
   .home-layout{display:block;padding:0;max-width:560px}
   .feed-tabs[data-slot=tabs-list]{height:50px;gap:26px;padding:0 16px}
   .feed-tabs [data-slot=tabs-trigger]{font-size:16px;padding-top:15px;padding-bottom:13px}
@@ -1002,7 +1012,7 @@ button:hover>.avatar{transform:scale(1.04)}
   .empty-state p{font-size:13.5px}
 
   /* messages: single-thread view */
-  .messages-layout{height:calc(100dvh - 60px - var(--dock-inset) - 8px);grid-template-columns:1fr;padding:0 0 0}
+  .messages-layout{height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px);grid-template-columns:1fr;padding:0 0 0}
   .conversation-list{border-right:0;padding:16px 12px 10px}
   .chat-panel{display:none}
   .messages-layout.show-chat .conversation-list{display:none}
@@ -1014,7 +1024,7 @@ button:hover>.avatar{transform:scale(1.04)}
   .message-row{max-width:84%}
 
   /* reels: immersive */
-  .reels-view{padding:0;min-height:calc(100dvh - 122px - env(safe-area-inset-bottom))}
+  .reels-view{padding:0;min-height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px)}
   .reels-heading{padding:10px 16px 12px}
   .reels-heading h1{font-size:21px}
   .reels-track{gap:0;padding:0 0 calc(var(--dock-inset) - 46px)}
@@ -1068,7 +1078,6 @@ button:hover>.avatar{transform:scale(1.04)}
 
 @media (max-width:380px){
   .mobile-header{padding:0 12px}
-  .dock{--dock-side:10px}
   .profile-top{gap:14px}
   .profile-top .avatar{width:68px!important;height:68px!important}
   .profile-title h1{font-size:17px}
