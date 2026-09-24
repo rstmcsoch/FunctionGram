@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./overhaul.css";
 
 export const metadata: Metadata = {
   title: "RSTMC — Your world, shared",
