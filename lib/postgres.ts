@@ -1,6 +1,6 @@
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
 import { postgresQuery } from './sql';
-import { schemaStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -24,10 +24,12 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=1');
-      if (!applied.rowCount) {
-        for (const statement of schemaStatements) await client.query(statement);
-        await client.query('INSERT INTO functiongram_migrations(version) VALUES(1)');
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements]] as const) {
+        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
+        if (!applied.rowCount) {
+          for (const statement of statements) await client.query(statement);
+          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[version]);
+        }
       }
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK'); throw error; }
