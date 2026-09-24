@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
 import { postgresQuery } from './sql';
 import { schemaStatements, migration2Statements } from './postgres-schema';
