@@ -158,6 +158,7 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
   const [name, setName] = useState(me.name);
   const [username, setUsername] = useState(me.username);
   const [bio, setBio] = useState(me.bio);
+  const [website, setWebsite] = useState(me.website ?? "");
   const [avatar, setAvatar] = useState(me.avatar);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -178,7 +179,7 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      await request("/api/social", { action: "profile", username, name, bio, avatar });
+      await request("/api/social", { action: "profile", username, name, bio, website, avatar });
       await onSaved();
       onClose();
     } catch (e) { setError((e as Error).message); }
@@ -196,6 +197,7 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
         <label>Name<input required maxLength={60} value={name} onChange={e => setName(e.target.value)} /></label>
         <label>Username<input required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_][a-zA-Z0-9_.]{2,29}" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" spellCheck={false} /></label>
         <label>Bio<textarea maxLength={150} rows={3} value={bio} onChange={e => setBio(e.target.value)} /><span className="form-hint">{bio.length}/150</span></label>
+        <label>Website<input type="url" maxLength={200} value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://" autoCapitalize="none" spellCheck={false} /><span className="form-hint">Shown on your profile</span></label>
         {error && <p role="alert" className="form-error">{error}</p>}
         <button disabled={busy} className="primary-button wide">{busy ? <Busy /> : "Save changes"}</button>
       </form>

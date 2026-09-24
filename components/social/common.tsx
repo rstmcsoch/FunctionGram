@@ -235,7 +235,7 @@ export function MediaFrame({
 /* --------------------------------- carousel --------------------------------- */
 
 export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
-  items: string[]; aspects: number[] | null; render: (item: string, index: number) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
+  items: string[]; aspects?: number[] | null; render: (item: string, index: number) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
 }) {
   const [emblaRef, embla] = useEmblaCarousel({ loop: false, watchDrag: true, duration: 22 });
   const [index, setIndex] = useState(0);

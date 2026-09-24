@@ -2,7 +2,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
 import { postgresQuery } from './sql';
-import { schemaStatements, migration2Statements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -18,7 +18,8 @@ export interface PoolLike extends QueryExecutor {
 
 const migrations = [
   { version: 1, statements: schemaStatements },
-  { version: 2, statements: migration2Statements },
+  { version: 2, statements: socialUpgradeStatements },
+  { version: 3, statements: aspectUpgradeStatements },
 ];
 
 let pool: Pool | undefined;
@@ -111,12 +112,12 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      const applied = await client.query('SELECT version FROM functiongram_migrations');
-      const done = new Set(applied.rows.map(row => Number((row as {version:number}).version)));
-      for (const migration of migrations) {
-        if (done.has(migration.version)) continue;
-        for (const statement of migration.statements) await client.query(statement);
-        await client.query('INSERT INTO functiongram_migrations(version) VALUES ($1)', [migration.version]);
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements]] as const) {
+        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
+        if (!applied.rowCount) {
+          for (const statement of statements) await client.query(statement);
+          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[version]);
+        }
       }
       await client.query('COMMIT');
     } catch(error) { await client.query('ROLLBACK'); throw error; }

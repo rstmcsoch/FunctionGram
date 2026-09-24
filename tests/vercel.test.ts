@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
-import {schemaStatements} from '../lib/postgres-schema';
+import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements} from '../lib/postgres-schema';
 import {postgresQuery} from '../lib/sql';
 import {getAuthTables} from 'better-auth/db';
 import {detectMediaType} from '../lib/media-type';
@@ -10,8 +10,8 @@ import {detectMediaType} from '../lib/media-type';
 test('PostgreSQL schema supports actual feed, social actions, ownership and transaction rollback',async()=>{
  const db=new PGlite();
  try{
-  for(const sql of schemaStatements)await db.exec(sql);
-  for(const sql of schemaStatements)await db.exec(sql); // Safe if initialization repeats.
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql);
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
   const authTables=getAuthTables({emailAndPassword:{enabled:true},rateLimit:{enabled:true,storage:'database'}});
   for(const table of Object.values(authTables)){
    const columns=await db.query<{column_name:string}>('SELECT column_name FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=$1',[table.modelName]);
@@ -24,6 +24,13 @@ test('PostgreSQL schema supports actual feed, social actions, ownership and tran
   await query('INSERT OR IGNORE INTO profiles(id,username,name,created_at) VALUES(?,?,?,?)',['alice','alice','Alice',Date.now()]);
   assert.equal((await query('SELECT COUNT(*) count FROM profiles')).rows[0].count,3);
   await query('INSERT INTO posts(id,author_id,media,created_at) VALUES(?,?,?,?)',['p','alice','["/media/coast.jpg"]',Date.now()]);
+  await query('UPDATE posts SET media_options=?,tagged_users=?,caption=? WHERE id=?',[JSON.stringify([{ratio:'original',fit:'contain',alt:'Full coastline at sunset'}]),JSON.stringify(['bob']),'The coast #sunset','p']);
+  assert.equal((await query('SELECT media_options,tagged_users FROM posts WHERE id=?',['p'])).rows[0].tagged_users,'["bob"]');
+  assert.equal((await query('SELECT id FROM posts WHERE tagged_users::jsonb @> ?::jsonb',[JSON.stringify(['bob'])])).rows[0].id,'p');
+  assert.equal((await query("SELECT id FROM posts WHERE caption ILIKE ? ESCAPE '\\'",['%#sunset%'])).rows[0].id,'p');
+  await query('INSERT INTO posts(id,author_id,media,kind,created_at,expires_at) VALUES(?,?,?,?,?,?)',['highlight','alice','["/media/coast.jpg"]','story',Date.now()-200000,Date.now()-100000]);
+  await query('INSERT INTO story_highlights(post_id,owner_id,created_at) VALUES(?,?,?)',['highlight','alice',Date.now()]);
+  assert.equal((await query('SELECT p.id FROM story_highlights h JOIN posts p ON p.id=h.post_id WHERE h.owner_id=?',['alice'])).rows[0].id,'highlight');
   await query('INSERT OR IGNORE INTO reactions(user_id,post_id,kind) VALUES(?,?,?)',['bob','p','like']);
   await query('INSERT OR IGNORE INTO reactions(user_id,post_id,kind) VALUES(?,?,?)',['bob','p','like']);
   const source=readFileSync(new URL('../lib/server.ts',import.meta.url),'utf8');

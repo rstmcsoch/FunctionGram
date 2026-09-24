@@ -29,8 +29,17 @@ export const schemaStatements: string[] = [
   "CREATE TABLE IF NOT EXISTS \"rateLimit\" (id text PRIMARY KEY, key text NOT NULL UNIQUE, count integer NOT NULL, \"lastRequest\" bigint NOT NULL)"
 ];
 
-// Version 2: per-item media aspect ratios (width / height) stored as a JSON text
+// Version 2 extends existing accounts and posts without replacing or resetting any data.
+export const socialUpgradeStatements: string[] = [
+  "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS website text NOT NULL DEFAULT ''",
+  "ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_options text NOT NULL DEFAULT '[]'",
+  "ALTER TABLE posts ADD COLUMN IF NOT EXISTS tagged_users text NOT NULL DEFAULT '[]'",
+  "CREATE TABLE IF NOT EXISTS story_highlights (post_id text PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE, owner_id text NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, created_at bigint NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_story_highlights_owner ON story_highlights(owner_id,created_at DESC)"
+];
+
+// Version 3: per-item media aspect ratios (width / height) stored as a JSON text
 // array parallel to `media`, so posts can reserve exact space and never crop.
-export const migration2Statements: string[] = [
+export const aspectUpgradeStatements: string[] = [
   "ALTER TABLE \"posts\" ADD COLUMN IF NOT EXISTS \"aspects\" text"
 ];

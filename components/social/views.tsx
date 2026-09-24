@@ -376,6 +376,7 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
           </div>
           <strong className="profile-name">{profile.name}</strong>
           <p className="profile-bio">{profile.bio || "A little space to share your world."}</p>
+          {profile.website && <a className="profile-website" href={profile.website} target="_blank" rel="noreferrer nofollow">{profile.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</a>}
           {profile.is_demo === 1 && <span className="sample-label">Sample profile</span>}
         </div>
       </div>
