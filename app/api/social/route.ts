@@ -49,7 +49,12 @@ export async function POST(request:Request){try{
     if(!Array.isArray(media)||media.length<1||media.length>6||media.some(m=>typeof m!=='string'||!m.startsWith('/api/media/')))throw new AppError('Add up to 6 photos or one video.');
     const types:string[]=[];for(const url of media){const asset=await database.prepare('SELECT mime FROM assets WHERE key=? AND owner_id=?').bind(url.replace('/api/media/',''),user).first<{mime:string}>();if(!asset)throw new AppError('One of your uploads is unavailable. Please upload it again.');types.push(asset.mime);}
     const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video))throw new AppError('A reel needs one video. Photo posts can include up to 6 images.');
-    const postId=crypto.randomUUID();await database.prepare('INSERT INTO posts (id,author_id,media,media_type,kind,caption,location,category,base_likes,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,0,?,?)').bind(postId,user,JSON.stringify(media),video?'video':'image',kind,caption,location,'For you',now,kind==='story'?now+86400000:null).run();return json({id:postId});
+    // Optional per-item aspect ratios (width/height) let the feed render media
+    // at its true size without cropping or layout shift.
+    const aspects=input.aspects;
+    const ratios=aspects==null?null:(Array.isArray(aspects)&&aspects.length===media.length&&aspects.every(a=>typeof a==='number'&&Number.isFinite(a)&&a>=0.2&&a<=5))?aspects as number[]:null;
+    if(aspects!=null&&!ratios)throw new AppError('Could not read the media size. Please try again.');
+    const postId=crypto.randomUUID();await database.prepare('INSERT INTO posts (id,author_id,media,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),video?'video':'image',kind,caption,location,'For you',now,kind==='story'?now+86400000:null,ratios?JSON.stringify(ratios):null).run();return json({id:postId});
   }
   if(action==='delete_post'){const result=await database.prepare('DELETE FROM posts WHERE id=? AND author_id=?').bind(id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
   if(action==='message'){

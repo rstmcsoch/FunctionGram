@@ -5,7 +5,7 @@ export const runtime='nodejs';
 async function handle(request:Request) {
   try {
     await ensureSchema();
-    const handlers=toNextJsHandler(getAuth());
+    const handlers=toNextJsHandler(await getAuth());
     return await (request.method==='GET'?handlers.GET(request):handlers.POST(request));
   } catch(error) {
     console.error('Authentication is unavailable',error instanceof Error?error.message:'Unknown error');

@@ -49,3 +49,7 @@ next-env.d.ts
 
 # Track variable names, never runtime secrets.
 !.env.example
+
+# Local preview database and uploads (never publish)
+/.pglite/
+/.local/

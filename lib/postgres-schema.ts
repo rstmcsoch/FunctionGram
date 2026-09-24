@@ -28,3 +28,9 @@ export const schemaStatements: string[] = [
   "CREATE INDEX IF NOT EXISTS verification_identifier_idx ON verification(identifier)",
   "CREATE TABLE IF NOT EXISTS \"rateLimit\" (id text PRIMARY KEY, key text NOT NULL UNIQUE, count integer NOT NULL, \"lastRequest\" bigint NOT NULL)"
 ];
+
+// Version 2: per-item media aspect ratios (width / height) stored as a JSON text
+// array parallel to `media`, so posts can reserve exact space and never crop.
+export const migration2Statements: string[] = [
+  "ALTER TABLE \"posts\" ADD COLUMN IF NOT EXISTS \"aspects\" text"
+];

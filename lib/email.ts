@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { Pool } from 'pg';
 
 type Environment = Record<string, string | undefined>;
 type VerificationEmail = { user: { email: string }; url: string };
+// Structural subset of pg's Pool (and of the local dev driver) used here.
+type Queryable = { query(text: string, values: unknown[]): Promise<{ rows: unknown[] }> };
 
 export function brevoConfiguration(env: Environment = process.env) {
   const apiKey = env.BREVO_API_KEY?.trim();
@@ -15,7 +16,7 @@ export function brevoConfiguration(env: Environment = process.env) {
 
 // Atomically reserve a send across serverless instances, using the existing rate-limit table.
 // No raw recipient address is stored here. This app reserves at most 300 sends per UTC day.
-export async function claimVerificationEmail(pool: Pick<Pool, 'query'>, email: string, now = Date.now()) {
+export async function claimVerificationEmail(pool: Queryable, email: string, now = Date.now()) {
   const key = `verification-email:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex')}`;
   const dayStart = Math.floor(now / 86400000) * 86400000;
   const result = await pool.query(`
