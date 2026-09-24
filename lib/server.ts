@@ -6,7 +6,17 @@ export class AppError extends Error { constructor(message:string,public status=4
 export function db(){return database();}
 export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
-export function sameOrigin(request:Request){const origin=request.headers.get('origin'); if(request.headers.get('sec-fetch-site')==='cross-site'||(origin&&new URL(origin).host!==new URL(request.url).host))throw new AppError('Please open RSTMC to make this change.',403);}
+export function sameOrigin(request:Request){
+  if(request.headers.get('sec-fetch-site')==='cross-site')throw new AppError('Please open RSTMC to make this change.',403);
+  const origin=request.headers.get('origin');
+  if(origin){
+    // Compare against the Host header, not request.url: Next.js derives
+    // request.url from the server's bind address (e.g. 0.0.0.0:3000 in dev),
+    // which never matches a real Origin host and would reject every write.
+    const host=request.headers.get('host');
+    if(!host||new URL(origin).host!==host)throw new AppError('Please open RSTMC to make this change.',403);
+  }
+}
 export function clean(value:unknown,max:number,required=false){if(typeof value!=='string'||value.trim().length>max||(required&&!value.trim()))throw new AppError(required?'Please complete the required fields.':'Please check the length of your text.');return value.trim();}
 export async function readBody(request:Request){if(Number(request.headers.get('content-length')||0)>20000)throw new AppError('This request is too large.',413);try{const body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw new Error();return body as Record<string,unknown>;}catch{throw new AppError('Please check your input.');}}
 export async function identity(required=false){

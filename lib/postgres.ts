@@ -22,7 +22,6 @@ const migrations = [
 ];
 
 let pool: Pool | undefined;
-let localPool: PoolLike | undefined;
 let ready: Promise<void> | undefined;
 
 // `npm run dev` without a database URL runs on PGlite (embedded Postgres) so
@@ -32,10 +31,29 @@ export function localDevDatabase() {
   return !(process.env.POSTGRES_URL || process.env.DATABASE_URL) && process.env.NODE_ENV !== 'production';
 }
 
-async function getLocalPool(): Promise<PoolLike> {
-  if (localPool) return localPool;
-  const { PGlite } = await import('@electric-sql/pglite');
-  const instance = new PGlite('./.pglite');
+// PGlite keeps the whole database in memory, so two instances pointed at the
+// same data directory immediately diverge. Next.js dev (Turbopack) builds a
+// separate module registry per route bundle, so a module-level variable is NOT
+// enough to guarantee one instance per process: the key must live on
+// globalThis, which is shared by every bundle in the server runtime.
+interface PGliteInstance {
+  query(text: string, values?: unknown[]): Promise<{
+    rows: Record<string, unknown>[];
+    fields: { name: string; dataTypeID: number }[];
+    affectedRows?: number;
+  }>;
+}
+const LOCAL_POOL_KEY = '__functiongramLocalPool__';
+
+async function createLocalPool(): Promise<PoolLike> {
+  // createRequire bypasses bundler analysis so PGlite is always loaded as a
+  // native Node dependency (see also serverExternalPackages in next.config.ts).
+  const { createRequire } = await import('node:module');
+  const require = createRequire(path.join(process.cwd(), 'package.json'));
+  const { PGlite } = require('@electric-sql/pglite') as {
+    PGlite: new (dataDir: string) => PGliteInstance;
+  };
+  const instance = new PGlite(path.join(process.cwd(), '.pglite'));
   const query = async (text: string, values?: unknown[]) => {
     const result = await instance.query(text, values as unknown[]);
     // PGlite returns int8/numeric columns as strings; the pg driver parses
@@ -45,12 +63,25 @@ async function getLocalPool(): Promise<PoolLike> {
       for (const column of numeric) if (typeof row[column] === 'string') row[column] = Number(row[column]);
     return { rows: result.rows as QueryResultRow[], rowCount: result.affectedRows ?? result.rows.length };
   };
-  localPool = {
+  return {
     query,
     async connect() { return { query, release() {} }; },
   };
-  return localPool;
 }
+
+async function getLocalPool(): Promise<PoolLike> {
+  const g = globalThis as typeof globalThis & Record<string, unknown>;
+  const existing = g[LOCAL_POOL_KEY] as Promise<PoolLike> | undefined;
+  if (existing) return existing;
+  const creation = createLocalPool();
+  g[LOCAL_POOL_KEY] = creation;
+  // A failed startup (bad data dir, etc.) must not leave a rejected promise
+  // cached forever; clear it so the next request can retry.
+  creation.catch(() => { delete g[LOCAL_POOL_KEY]; });
+  return creation;
+}
+
+const MANAGED_POOL_KEY = '__functiongramPool__';
 
 export async function getPool(): Promise<PoolLike> {
   if (localDevDatabase()) return getLocalPool();
@@ -58,10 +89,12 @@ export async function getPool(): Promise<PoolLike> {
   // A legacy DATABASE_URL may still point at a removed database.
   const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('FunctionGram requires DATABASE_URL.');
-  if (!pool) {
-    pool = new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
-    pool.on('error', error => console.error('Idle database connection closed', error.message));
-  }
+  const g = globalThis as typeof globalThis & Record<string, unknown>;
+  const existing = g[MANAGED_POOL_KEY] as Pool | undefined;
+  if (existing) return existing as unknown as PoolLike;
+  pool = new Pool({connectionString, max:3, idleTimeoutMillis:20000, connectionTimeoutMillis:10000});
+  pool.on('error', error => console.error('Idle database connection closed', error.message));
+  g[MANAGED_POOL_KEY] = pool;
   return pool as unknown as PoolLike;
 }
 
