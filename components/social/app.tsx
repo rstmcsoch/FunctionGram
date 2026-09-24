@@ -14,6 +14,7 @@ import type { PostActions } from "./post-card";
 import { PostViewer, Relations } from "./post-viewer";
 import { CreateDialog, EditProfile } from "./create";
 import { Messages } from "./messages";
+import { FloatingDock } from "./floating-dock";
 import { Reels } from "./reels";
 import { StoryViewer } from "./stories";
 import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView } from "./views";
@@ -321,24 +322,16 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     </header>
   );
 
-  const mobileNav = (
-    <nav className="mobile-nav" aria-label="Bottom navigation">
-      {["home", "search", "explore", "create", "reels", "profile"].map(id => {
-        const item = navItems.find(entry => entry.id === id)!;
-        return (
-          <button key={id} onClick={() => nav(id)} aria-label={item.label} aria-current={view === id ? "page" : undefined} className={view === id ? "active" : ""}>
-            {id === "profile" && data.me ? <Avatar person={data.me} size={27} /> : <item.icon fill={view === id && id === "home" ? "currentColor" : "none"} />}
-          </button>
-        );
-      })}
-    </nav>
-  );
+  // Full-screen viewers and bottom sheets own the screen, so the floating dock
+  // steps aside instead of floating over them.
+  const dockCovered = !!create || !!edit || story !== null || !!selectedPost || login || !!deleteTarget || about || !!relation;
 
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
       {sidebar}
       {mobileHeader}
+
       <main id="main-content" className={"main-surface view-" + view}>
         {!data.me && (
           <div className="guest-auth-bar glass-card">
@@ -388,7 +381,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
           </div>
         )}
       </main>
-      {mobileNav}
+      <FloatingDock active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 
       {create && data.me && <CreateDialog kind={create} me={data.me} onClose={() => setCreate(null)} onCreated={refresh} />}
       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
