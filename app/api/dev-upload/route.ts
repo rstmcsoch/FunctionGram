@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { AppError, db, identity, sameOrigin, fail, json } from '@/lib/server';
+import { AppError, db, identity, requestHeadersWithHost, sameOrigin, fail, json } from '@/lib/server';
 import { localDevDatabase } from '@/lib/postgres';
 import { detectMediaType, mediaTypes } from '@/lib/media-type';
 
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   try {
     if (!localDevDatabase()) throw new AppError('Not found.', 404);
     sameOrigin(request);
-    const user = (await identity(true))!;
+    const user = (await identity(requestHeadersWithHost(request), true))!;
     const form = await request.formData();
     const key = String(form.get('key') || '');
     const file = form.get('file');

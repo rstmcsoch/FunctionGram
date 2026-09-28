@@ -1,9 +1,9 @@
 "use client";
 import { useState, useRef, type FormEvent } from "react";
-import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Smile, Link as LinkIcon, EyeOff, UserRound, Trash2 } from "lucide-react";
+import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Smile, Link as LinkIcon, EyeOff, UserRound, Trash2, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Avatar, IconButton, MediaFrame, Carousel, HeartBurst, count, timeAgo, Busy } from "./common";
-import type { Post, Person, Comment } from "@/lib/types";
+import type { Post, Person, Comment, MediaOption } from "@/lib/types";
 
 export type PostActions = {
   react: (p: Post, kind: string, active: boolean) => Promise<void>;
@@ -13,6 +13,7 @@ export type PostActions = {
   share: (p: Post) => void;
   deletePost: (p: Post) => void;
   copyLink: (p: Post) => void;
+  editPost: (p: Post) => void;
   me: Person | null;
 };
 
@@ -30,7 +31,10 @@ export function PostMenu({ post, actions, className = "" }: { post: Post; action
         <DropdownMenuItem onClick={() => void actions.react(post, "save", !post.saved)}><Bookmark />{post.saved ? "Remove from saved" : "Save post"}</DropdownMenuItem>
         <DropdownMenuSeparator />
         {actions.me?.id === post.author_id
-          ? <DropdownMenuItem variant="destructive" onClick={() => actions.deletePost(post)}><Trash2 />Delete post</DropdownMenuItem>
+          ? <>
+            <DropdownMenuItem onClick={() => actions.editPost(post)}><Pencil />Edit post</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={() => actions.deletePost(post)}><Trash2 />Delete post</DropdownMenuItem>
+          </>
           : <DropdownMenuItem onClick={() => void actions.react(post, "hidden", true)}><EyeOff />Hide post</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -101,13 +105,18 @@ export function CommentForm({ onSubmit, placeholder = "Add a comment…", autoFo
 }
 
 export function PostMedia({ post, onDoubleClick, className = "" }: { post: Post; onDoubleClick?: () => void; className?: string }) {
+  // Per-media options (author-set) win over the feed defaults so crops,
+  // fits, and screen-reader descriptions survive into the feed and viewer.
+  const optionFor = (index: number): MediaOption | undefined => post.media_options?.[index];
+  const altFor = (index: number) => optionFor(index)?.alt || post.caption || (post.media_type === "video" ? "Video by " : "Photo by ") + post.author.username;
+  const fitFor = (index: number) => optionFor(index)?.fit ?? (post.media_type === "video" ? "contain" : "cover");
   if (post.media.length > 1) {
     return (
       <div className={"post-media " + className}>
         <Carousel items={post.media} aspects={post.aspects} ariaLabel={"Photos by " + post.author.username} onDoubleClick={onDoubleClick}
-          render={(item, index) => (
+          render={(item, index, eager) => (
             <MediaFrame src={item} mediaType="image" aspect={post.aspects ? post.aspects[index] ?? null : null}
-              alt={post.caption || "Photo by " + post.author.username} eager />
+              fit={fitFor(index)} alt={altFor(index)} eager={eager} />
           )} />
       </div>
     );
@@ -115,7 +124,7 @@ export function PostMedia({ post, onDoubleClick, className = "" }: { post: Post;
   return (
     <div className={"post-media " + className}>
       <MediaFrame src={post.media[0]} mediaType={post.media_type} aspect={post.aspects ? post.aspects[0] : null}
-        fit={post.media_type === "video" ? "contain" : "cover"} alt={post.caption || (post.media_type === "video" ? "Video by " : "Photo by ") + post.author.username}
+        fit={fitFor(0)} alt={altFor(0)}
         eager onDoubleClick={onDoubleClick} videoProps={post.media_type === "video" ? { controls: true, preload: "metadata" } : undefined} />
     </div>
   );

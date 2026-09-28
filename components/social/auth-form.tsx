@@ -36,10 +36,35 @@ export function VerificationForm({initialEmail='',recentlyRequested=false,onBack
  </form>;
 }
 
+export function ForgotPasswordForm({onDone,onBack}:{onDone:(message:string)=>void;onBack:()=>void}){
+ const [email,setEmail]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[requested,setRequested]=useState(false);
+ async function submit(event:FormEvent<HTMLFormElement>){
+  event.preventDefault();if(busy)return;setError('');
+  const address=email.trim();if(!address){setError('Please enter your account email.');return;}
+  setBusy(true);
+  try{
+   const result=await authClient.requestPasswordReset({email:address,redirectTo:'/reset-password'});
+   if(result.error)throw new Error(result.error.status===429?'Please wait a minute before requesting another email.':result.error.message||'Unable to request a reset email.');
+   setRequested(true);
+  }catch(err){setError(err instanceof Error?err.message:'Unable to connect. Please try again.');}
+  finally{setBusy(false);}
+ }
+ return <form onSubmit={submit} className="auth-form" aria-busy={busy}>
+  <h2>Reset your password</h2>
+  <p role="status">{requested?'If that address has an account, a reset link is on its way. It expires in 15 minutes and works only once.':'Enter the email you signed up with and we’ll send a reset link.'}</p>
+  <label>Email<input type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required maxLength={254} value={email} disabled={busy||requested} onChange={event=>setEmail(event.target.value)}/></label>
+  {error&&<p role="alert">{error}</p>}
+  <button type="submit" className="primary-button wide" disabled={busy||requested}>{busy?'Please wait…':'Send reset email'}</button>
+  {requested&&<button type="button" className="text-button" onClick={()=>onDone('Reset link sent. Check your inbox (and spam) — it expires in 15 minutes.')}>Done</button>}
+  <button type="button" className="text-button" onClick={onBack}>Back to sign in</button>
+ </form>;
+}
+
 export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'signin'|'signup';initialNotice?:string}){
  const [register,setRegister]=useState(initialMode==='signup');
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const [pendingEmail,setPendingEmail]=useState<string|null>(null);
+ const [forgot,setForgot]=useState(false);
  async function submit(event:FormEvent<HTMLFormElement>){
   event.preventDefault();if(busy)return;setError('');
   const form=new FormData(event.currentTarget);
@@ -58,6 +83,7 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
   }catch(err){setError(err instanceof Error?err.message:'Unable to connect. Please try again.');}
   finally{setBusy(false);}
  }
+ if(forgot)return <ForgotPasswordForm onDone={message=>{setForgot(false);setRegister(false);setError('');toast(message);}} onBack={()=>{setForgot(false);setError('');}}/>;
  if(pendingEmail!==null)return <VerificationForm initialEmail={pendingEmail} recentlyRequested={Boolean(pendingEmail)} onBack={()=>{setPendingEmail(null);setRegister(false);setError('');}}/>;
  return <form onSubmit={submit} className="auth-form" aria-busy={busy}>
  <h2>{register?'Create your account':'Sign in to RSTMC'}</h2>
@@ -67,13 +93,16 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
  {register&&<label>Name<input name="name" autoComplete="name" required minLength={1} maxLength={60}/></label>}
  <label>Email<input name="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required maxLength={254}/></label>
  <label>Password<input name="password" type="password" autoComplete={register?'new-password':'current-password'} minLength={register?12:1} maxLength={128} required aria-describedby={register?'password-help':undefined}/></label>
- {register&&<><small id="password-help">Use at least 12 characters. We’ll email you a verification link. Keep your password safe; password recovery isn’t available yet.</small><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required/></label></>}
+ {register&&<><small id="password-help">Use at least 12 characters. We’ll email you a verification link. Forgot it? Reset links last 15 minutes.</small><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required/></label></>}
  </fieldset>
   {error&&<p role="alert">{error}</p>}
   <button type="submit" className="primary-button wide" disabled={busy}>{busy?'Please wait…':register?'Create account':'Sign in'}</button>
   {devMode&&<PreviewAccountButton/>}
   <button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button>
- {!register&&<button type="button" className="text-button" disabled={busy} onClick={()=>setPendingEmail('')}>Resend verification email</button>}
+ {!register&&<div className="auth-links">
+  <button type="button" className="text-button" disabled={busy} onClick={()=>setForgot(true)}>Forgot your password?</button>
+  <button type="button" className="text-button" disabled={busy} onClick={()=>setPendingEmail('')}>Resend verification email</button>
+ </div>}
  </form>;
 }
 

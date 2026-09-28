@@ -10,10 +10,14 @@ export async function reserveUpload(key:string,owner:string,payload:string|null)
  const client=await (await getPool()).connect();
  try{
   await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
+  // Abandoned uploads are dropped before accounting so they can never count
+  // against the daily quota as if they had finished.
+  await client.query('DELETE FROM upload_claims WHERE owner_id=$1 AND completed=false AND created_at<$2',[owner,Date.now()-3600000]);
   const existing=await client.query('SELECT owner_id,expected_size,mime,completed FROM upload_claims WHERE key=$1',[key]);
   if(existing.rows.length){const row=existing.rows[0];if(row.owner_id!==owner||row.expected_size!==input.size||row.mime!==input.type||row.completed)throw new AppError('Please start a new upload.');}
   else{
-   const quota=await client.query('SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND created_at>$2',[owner,Date.now()-86400000]);
+   // Only completed uploads (recorded assets) count as usage.
+   const quota=await client.query('SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND completed=true AND created_at>$2',[owner,Date.now()-86400000]);
    if(Number(quota.rows[0].total)+input.size>250*1024*1024)throw new AppError('You have reached today’s upload limit. Try again tomorrow.',429);
    await client.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,$2,$3,$4,$5)',[key,owner,input.size,input.type,Date.now()]);
   }

@@ -43,3 +43,20 @@ export const socialUpgradeStatements: string[] = [
 export const aspectUpgradeStatements: string[] = [
   "ALTER TABLE \"posts\" ADD COLUMN IF NOT EXISTS \"aspects\" text"
 ];
+
+// Version 4: post editing, private accounts, blocking and reports, saved
+// collections, and story replies. Purely additive: no existing column, index,
+// or row is modified or reset.
+export const accountUpgradeStatements: string[] = [
+  "ALTER TABLE \"posts\" ADD COLUMN IF NOT EXISTS \"edited_at\" bigint",
+  "ALTER TABLE \"profiles\" ADD COLUMN IF NOT EXISTS \"is_private\" integer NOT NULL DEFAULT 0",
+  "CREATE TABLE IF NOT EXISTS \"blocked_users\" (\n\t\"blocker_id\" text NOT NULL,\n\t\"blocked_id\" text NOT NULL,\n\t\"created_at\" bigint NOT NULL,\n\tPRIMARY KEY(\"blocker_id\", \"blocked_id\"),\n\tFOREIGN KEY (\"blocker_id\") REFERENCES \"profiles\"(\"id\") ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (\"blocked_id\") REFERENCES \"profiles\"(\"id\") ON UPDATE no action ON DELETE cascade\n)",
+  "CREATE INDEX IF NOT EXISTS \"idx_blocked_users_blocked\" ON \"blocked_users\" (\"blocked_id\")",
+  "CREATE TABLE IF NOT EXISTS \"reports\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"reporter_id\" text NOT NULL,\n\t\"target_type\" text NOT NULL,\n\t\"target_id\" text NOT NULL,\n\t\"reason\" text NOT NULL,\n\t\"details\" text DEFAULT '' NOT NULL,\n\t\"created_at\" bigint NOT NULL,\n\tFOREIGN KEY (\"reporter_id\") REFERENCES \"profiles\"(\"id\") ON UPDATE no action ON DELETE cascade\n)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"idx_reports_reporter_target\" ON \"reports\" (\"reporter_id\", \"target_type\", \"target_id\", \"reason\")",
+  "CREATE TABLE IF NOT EXISTS \"saved_collections\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"owner_id\" text NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"created_at\" bigint NOT NULL,\n\tFOREIGN KEY (\"owner_id\") REFERENCES \"profiles\"(\"id\") ON UPDATE no action ON DELETE cascade\n)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"idx_saved_collections_owner_name\" ON \"saved_collections\" (\"owner_id\", \"name\")",
+  "CREATE TABLE IF NOT EXISTS \"saved_collection_items\" (\n\t\"collection_id\" text NOT NULL,\n\t\"post_id\" text NOT NULL,\n\t\"created_at\" bigint NOT NULL,\n\tPRIMARY KEY(\"collection_id\", \"post_id\"),\n\tFOREIGN KEY (\"collection_id\") REFERENCES \"saved_collections\"(\"id\") ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (\"post_id\") REFERENCES \"posts\"(\"id\") ON UPDATE no action ON DELETE cascade\n)",
+  "ALTER TABLE \"messages\" ADD COLUMN IF NOT EXISTS \"post_id\" text REFERENCES \"posts\"(\"id\") ON DELETE SET NULL",
+  "CREATE INDEX IF NOT EXISTS \"idx_messages_post\" ON \"messages\" (\"post_id\")"
+];

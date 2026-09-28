@@ -56,17 +56,17 @@ npm run build
 
 The migration tests use an isolated PostgreSQL-compatible PGlite database and exercise the actual feed/profile SQL, duplicate reaction handling, participant-only message queries, author-only deletion, transaction rollback, cascades, unique usernames, upload quota totals and file-type checks. The Next.js production build and TypeScript check were run locally without production credentials.
 
-Live account registration, durable uploads, cross-account messaging, provider quota behavior and deployment-domain cookies still need end-to-end validation after the Vercel resources are connected. `tests/integration.mjs` and the original `VERIFICATION.md` describe the earlier Sites/Cloudflare version; those 43 checks are not proof of this Vercel deployment.
+Live account registration, durable uploads, cross-account messaging, provider quota behavior and deployment-domain cookies still need end-to-end validation after the Vercel resources are connected. The old Sites/Cloudflare integration suite was removed; `VERIFICATION.md` now records the current Vercel/Next.js verification.
 
 ## Source history
 
-The earlier Sites implementation is preserved in the repository history at `b61f33a5d64cadfd45aeb634c120a9a45d4a99e7`. The old Drizzle SQLite schema, hosting scripts and configuration are retained only as migration reference; Next.js builds use `next.config.ts` and `vercel.json`, and the current PostgreSQL schema is in `lib/postgres-schema.ts`.
+The earlier Sites implementation is preserved in the repository history at `b61f33a5d64cadfd45aeb634c120a9a45d4a99e7`. Its legacy artifacts (old Vite config, Cloudflare type declarations, Drizzle SQLite schema and migrations, Miniflare integration suite) have been removed from the working tree; the history above remains the reference if they are ever needed. Next.js builds use `next.config.ts` and `vercel.json`, and the current PostgreSQL schema is in `lib/postgres-schema.ts`.
 
 Media credits are in `public/media/photo-credits.json` and `public/media/portrait-credits.json` and the app's About dialog.
 
 ## Authentication and database troubleshooting
 
-FunctionGram uses email/password sign-up and sign-in only, with email verification required. No social authentication providers are configured. Passwords must be 12–128 characters. Password reset email delivery is not configured.
+FunctionGram uses email/password sign-up and sign-in only, with email verification required. No social authentication providers are configured. Passwords must be 12–128 characters. Password recovery is supported end to end: `POST /api/auth/request-password-reset` emails a single-use link valid for 15 minutes (Brevo, same send limits as verification), the link opens `/reset-password`, and a successful reset revokes all existing sessions. All of it is covered by the E2E tests in `tests/auth.test.ts`.
 
 Set the Production `DATABASE_URL` to the active Neon production branch. Set Preview to a separate Neon branch before testing. A successful build does not verify a database connection; check `/api/health` after deployment. If `POSTGRES_URL` is also present, it takes precedence and must point to the intended database. Environment changes require a new deployment. Never commit connection strings or auth secrets.
 

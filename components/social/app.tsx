@@ -12,7 +12,8 @@ import { Avatar, IconButton, Modal, Empty, Busy, request, subscribeTheme, readTh
 import { AuthForm, SignOutButton } from "./auth-form";
 import type { PostActions } from "./post-card";
 import { PostViewer, Relations } from "./post-viewer";
-import { CreateDialog, EditProfile } from "./create";
+import { CreateDialog, EditProfile, EditPostDialog } from "./create";
+import { SettingsDialog } from "./settings";
 import { Messages } from "./messages";
 import { FloatingDock } from "./floating-dock";
 import { Reels } from "./reels";
@@ -54,9 +55,15 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
   const [deleteTarget, setDeleteTarget] = useState<Post | null>(null);
   const [recipient, setRecipient] = useState<string | null>(null);
   const [about, setAbout] = useState(false);
-  const [followPending, setFollowPending] = useState<string | null>(null);
+  // Follows are pending per profile: one slow request must not block the
+  // follow buttons on every other card.
+  const [followPending, setFollowPending] = useState<Set<string>>(() => new Set());
   const [moreLoading, setMoreLoading] = useState(false);
   const [relation, setRelation] = useState<{ person: Person; kind: "followers" | "following" } | null>(null);
+  const [settings, setSettings] = useState(false);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [reportTarget, setReportTarget] = useState<Person | null>(null);
+  const [followingFeed, setFollowingFeed] = useState<{ posts: Post[]; hasMore: boolean; loading: boolean }>({ posts: [], hasMore: false, loading: false });
 
   const theme = useSyncExternalStore(subscribeTheme, readTheme, () => "light" as const);
   const [now, setNow] = useState(Date.now);
@@ -131,18 +138,34 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     }
   }, [view, viewerId]);
 
+  // Activity polling backs off from 15s toward 60s while the inbox is quiet,
+  // resets when something arrives, and pauses entirely in hidden tabs.
+  const quietPolls = useRef(0);
   useEffect(() => {
     if (!viewerId) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let latestNotification = 0;
     const poll = async () => {
+      if (active && timer) { clearTimeout(timer); timer = undefined; }
       try {
         const activity = await request<Pick<SocialData, "notifications" | "unreadMessages">>("/api/social?activity=1");
-        if (active) setData(current => ({ ...current, ...activity }));
-      } catch { /* transient network issues are retried on the next tick */ }
+        if (!active) return;
+        const newest = activity.notifications[0]?.created_at || 0;
+        const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
+        latestNotification = Math.max(latestNotification, newest);
+        quietPolls.current = changed ? 0 : quietPolls.current + 1;
+        setData(current => ({ ...current, ...activity }));
+      } catch {
+        /* transient network issues: retry sooner on the next tick */
+        quietPolls.current = 0;
+      }
+      if (active) timer = setTimeout(() => { if (document.visibilityState === "visible") void poll(); }, Math.min(60000, 15000 * 2 ** quietPolls.current));
     };
+    const onVisibility = () => { if (document.visibilityState === "visible" && active && !timer) void poll(); };
+    document.addEventListener("visibilitychange", onVisibility);
     void poll();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") void poll(); }, 15000);
-    return () => { active = false; clearInterval(timer); };
+    return () => { active = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [viewerId]);
 
   /* ---------------------------------- actions ---------------------------------- */
@@ -151,30 +174,39 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
   const openCreate = (kind: "post" | "story" | "reel" = "post") => { if (!needsLogin()) setCreate(kind); };
 
+  const setFollowPendingFor = (id: string, pending: boolean) => {
+    setFollowPending(current => {
+      const next = new Set(current);
+      if (pending) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+
   const follow = async (person: Person) => {
-    if (needsLogin() || followPending) return;
-    setFollowPending(person.id);
+    if (needsLogin() || followPending.has(person.id)) return;
+    const active = !person.followed;
+    setFollowPendingFor(person.id, true);
     setData(current => ({
       ...current,
-      me: current.me ? { ...current.me, following: current.me.following + (person.followed ? -1 : 1) } : null,
+      me: current.me ? { ...current.me, following: current.me.following + (active ? 1 : -1) } : null,
       people: current.people.map(user => user.id === person.id
-        ? { ...user, followed: person.followed ? 0 : 1, followers: user.followers + (person.followed ? -1 : 1) } : user),
+        ? { ...user, followed: active ? 1 : 0, followers: user.followers + (active ? 1 : -1) } : user),
     }));
-    try { await request("/api/social", { action: "follow", id: person.id, active: !person.followed }); }
+    try { await request("/api/social", { action: "follow", id: person.id, active }); }
     catch (e) {
+      // Roll back exactly what the optimistic update changed.
       setData(current => ({
         ...current,
-        me: current.me ? { ...current.me, following: current.me.following + (person.followed ? 1 : -1) } : null,
+        me: current.me ? { ...current.me, following: current.me.following + (active ? -1 : 1) } : null,
         people: current.people.map(user => user.id === person.id
-          ? { ...user, followed: person.followed ? 1 : 0, followers: user.followers + (person.followed ? 1 : -1) } : user),
+          ? { ...user, followed: active ? 0 : 1, followers: user.followers + (active ? -1 : 1) } : user),
       }));
       toast.error((e as Error).message);
-    } finally { setFollowPending(null); }
+    } finally { setFollowPendingFor(person.id, false); }
   };
 
   const react = async (post: Post, kind: string, active: boolean) => {
     if (needsLogin()) return;
-    const restore = (current: Post): Post => ({ ...current, liked: post.liked, likes: post.likes, saved: post.saved, seen: post.seen });
     if (kind === "hidden") {
       if (!active) return;
       setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
@@ -195,11 +227,19 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       }
       return;
     }
+    const snapshot = { liked: post.liked, saved: post.saved, seen: post.seen, likes: post.likes };
     patchPost(post.id, current => kind === "like"
       ? { ...current, liked: active ? 1 : 0, likes: current.likes + (active ? 1 : 0) - (current.liked ? 1 : 0) }
       : kind === "save" ? { ...current, saved: active ? 1 : 0 } : { ...current, seen: active ? 1 : 0 });
-    try { await request("/api/social", { action: "reaction", id: post.id, kind, active }); }
-    catch (e) { patchPost(post.id, restore); toast.error((e as Error).message); }
+    try {
+      // The response is the canonical post-reaction state; apply it instead of
+      // trusting the optimistic arithmetic (base likes can change meanwhile).
+      const result = await request<{ liked: number; saved: number; seen: number; likes: number }>("/api/social", { action: "reaction", id: post.id, kind, active });
+      patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes }));
+    } catch (e) {
+      patchPost(post.id, current => ({ ...current, ...snapshot }));
+      toast.error((e as Error).message);
+    }
   };
 
   const submitComment = async (post: Post, body: string): Promise<Comment> => {
@@ -235,6 +275,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     share: setSharePost,
     deletePost: setDeleteTarget,
     copyLink,
+    editPost: setEditingPost,
     me: data.me,
   };
 
@@ -245,6 +286,51 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       setData(current => ({ ...current, posts: [...current.posts, ...more.filter(item => !current.posts.some(existing => existing.id === item.id))], hasMore: more.length === 40 }));
     } catch (e) { toast.error((e as Error).message); }
     finally { setMoreLoading(false); }
+  }
+
+  // The Following tab is filtered and paginated by the server (never by
+  // scanning the whole bootstrap list in the browser).
+  const followingInFlight = useRef(false);
+  const loadFollowing = useCallback(async (offset = 0) => {
+    if (!viewerId || followingInFlight.current) return;
+    followingInFlight.current = true;
+    // Yield before touching state so the effect that starts this load never
+    // synchronously re-renders the feed.
+    await Promise.resolve();
+    setFollowingFeed(current => ({ ...current, loading: true }));
+    try {
+      const page = await request<{ posts: Post[]; hasMore: boolean }>("/api/social?following=1&offset=" + offset);
+      setFollowingFeed(current => ({
+        posts: offset === 0 ? page.posts : [...current.posts, ...page.posts.filter(item => !current.posts.some(existing => existing.id === item.id))],
+        hasMore: page.hasMore,
+        loading: false,
+      }));
+    } catch (e) {
+      setFollowingFeed(current => ({ ...current, loading: false }));
+      toast.error((e as Error).message);
+    } finally {
+      followingInFlight.current = false;
+    }
+  }, [viewerId]);
+
+  useEffect(() => {
+    if (view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
+  }, [view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
+
+  // Blocking removes the follow in both directions on the server; the local
+  // copy just reflects it for instant feedback.
+  const toggleBlock = async (person: Person) => {
+    if (needsLogin()) return;
+    const blocking = !person.blocked;
+    setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 1 : 0 } : user) }));
+    try {
+      await request("/api/social", { action: blocking ? "block" : "unblock", id: person.id });
+      toast(blocking ? "You no longer see " + person.username + "'s content and they can't message you." : "Unblocked " + person.username + ".");
+      await refresh();
+    } catch (e) {
+      setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 0 : 1 } : user) }));
+      toast.error((e as Error).message);
+    }
   };
 
   const toggleTheme = () => toggleStoredTheme(theme);
@@ -292,7 +378,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
           <DropdownMenuContent side="top" align="start" className="social-menu more-menu">
             <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
-            {data.me && <><DropdownMenuSeparator /><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>}
+            {data.me && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -314,7 +400,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
             <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
             {data.me
-              ? <><DropdownMenuSeparator /><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
+              ? <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
               : <DropdownMenuItem onClick={() => openAuth()}><LogIn />Sign in</DropdownMenuItem>}
           </DropdownMenuContent>
         </DropdownMenu>
@@ -350,7 +436,8 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
             {view === "home" && (
               <HomeView data={data} feedTab={feedTab} setFeedTab={setFeedTab} stories={stories}
                 onOpenStory={setStory} onCreateStory={() => openCreate("story")}
-                feedPosts={feedPosts} actions={actions}
+                feedPosts={feedPosts} following={followingFeed} onLoadFollowing={offset => void loadFollowing(offset)}
+                actions={actions}
                 moreLoading={moreLoading} onLoadMore={() => void loadMore()}
                 follow={person => void follow(person)} followPending={followPending}
                 navigate={(target, id) => navigate(target, id)} onEdit={() => setEdit(true)} onAbout={() => setAbout(true)} />
@@ -359,14 +446,15 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
               ? <SearchView query={search} setQuery={setSearch} data={data} onProfile={id => navigate("profile", id)}
                   openPost={actions.openPost} follow={person => void follow(person)} followPending={followPending}
                   navigate={(target, id) => navigate(target, id)} />
-              : <ExploreView data={data} category={category} setCategory={setCategory} query={search} openPost={actions.openPost} />)}
+              : <ExploreView category={category} setCategory={setCategory} openPost={actions.openPost} />)}
             {view === "reels" && <Reels posts={data.posts} actions={actions} onCreate={() => openCreate("reel")} />}
             {view === "profile" && (profile
               ? <ProfileView profile={profile} me={data.me} tab={profileTab} setTab={setProfileTab} posts={data.posts}
                   openPost={actions.openPost} onCreate={() => openCreate()} onEdit={() => setEdit(true)}
                   follow={person => void follow(person)} followPending={followPending} onShare={() => setShareProfile(profile)}
                   onRelations={(person, kind) => setRelation({ person, kind })}
-                  onMessage={person => { if (person.is_demo) toast("This is a sample profile. Message real members in Messages."); else navigate("messages", person.id); }} />
+                  onReport={person => setReportTarget(person)} onBlock={person => void toggleBlock(person)}
+                  onMessage={person => { if (person.is_demo) toast("This is a sample profile. Message real members in Messages."); else if (person.blocked) toast("You cannot message this profile while it is blocked."); else navigate("messages", person.id); }} />
               : <Empty icon={<UserRound />} heading="Your own corner of RSTMC" body="Sign in to create a profile and share your world."
                   action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
             {view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
@@ -383,10 +471,11 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       </main>
       <FloatingDock active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 
-      {create && data.me && <CreateDialog kind={create} me={data.me} onClose={() => setCreate(null)} onCreated={refresh} />}
+      {create && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
+      {editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
       {story !== null && stories[story] && (
-        <StoryViewer stories={stories} start={story} onClose={() => setStory(null)}
+        <StoryViewer stories={stories} start={story} me={data.me} onClose={() => setStory(null)}
           onSeen={post => { if (data.me && !post.seen) void react(post, "seen", true); }}
           onProfile={id => navigate("profile", id)} />
       )}
@@ -413,6 +502,8 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
         </AlertDialogContent>
       </AlertDialog>
       {about && <About onClose={() => setAbout(false)} />}
+      {settings && data.me && <SettingsDialog me={data.me} onClose={() => setSettings(false)} onSaved={refresh} onSignOut={() => window.location.assign("/")} />}
+      {reportTarget && <ReportDialog person={reportTarget} onClose={() => setReportTarget(null)} />}
       {relation && <Relations person={relation.person} kind={relation.kind} onClose={() => setRelation(null)} onProfile={id => { setRelation(null); navigate("profile", id); }} />}
       <Toaster position="bottom-center" closeButton />
     </div>
@@ -479,6 +570,53 @@ function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: ()
           <Send size={17} />Share to another app
         </button>
       )}
+    </Modal>
+  );
+}
+
+function ReportDialog({ person, onClose }: { person: Person; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const reasons = [
+    ["spam", "Spam"],
+    ["harassment", "Harassment or bullying"],
+    ["false_information", "False information"],
+    ["misleading", "Misleading content"],
+    ["inappropriate", "Inappropriate content"],
+    ["other", "Something else"],
+  ] as const;
+  const submit = async () => {
+    if (!reason || busy) return;
+    setBusy(true); setError("");
+    try {
+      await request("/api/social", { action: "report", id: person.id, target_type: "profile", reason, details });
+      setSent(true);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal open onClose={() => !busy && onClose()} title={"Report " + person.username} description="Reports are private. A human will review what you send.">
+      {sent
+        ? <p role="status">Thank you. Your report has been recorded and will be reviewed.</p>
+        : <>
+          <div className="report-reasons" role="radiogroup" aria-label="Report reason">
+            {reasons.map(([value, label]) => (
+              <label key={value} className={"report-option " + (reason === value ? "selected" : "")}>
+                <input type="radio" name="report-reason" value={value} checked={reason === value} onChange={() => setReason(value)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          <textarea aria-label="Add details (optional)" placeholder="Add details (optional)" maxLength={1000} rows={3} value={details} onChange={e => setDetails(e.target.value)} />
+          {error && <p role="alert" className="form-error">{error}</p>}
+          <div className="create-preview-actions">
+            <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !reason}>{busy ? <Busy /> : "Send report"}</button>
+          </div>
+        </>}
     </Modal>
   );
 }
