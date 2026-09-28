@@ -10,8 +10,8 @@ Next.js/Vercel codebase.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| TypeScript strict | `node node_modules/typescript/bin/tsc --noEmit` | 0 errors |
-| Lint | `npm run lint` | 0 errors, 11 warnings (all pre-existing `<img>` LCP pattern) |
+| TypeScript strict | `npm run typecheck` (`tsc --noEmit`) | 0 errors |
+| Lint | `npm run lint` | 0 errors, 7 warnings (only the `<img>` LCP notices Next.js emits for user-supplied media) |
 | Test suite | `npm run test:vercel` | 25/25 pass, 0 fail (stable across consecutive runs) |
 | Production build | `npm run build` | compiles; all routes generated incl. `/reset-password` |
 | Install | `npm ci` | clean (746 packages) |

@@ -29,6 +29,10 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const sequence = useRef(0);
   const person = people.find(p => p.id === recipient) || me;
 
+  // Bumping the sequence number discards any in-flight response for the
+  // conversation that is no longer current.
+  const cancelInFlight = useCallback(() => { sequence.current++; }, []);
+
   const load = useCallback(() => {
     const version = ++sequence.current;
     return Promise.all([
@@ -46,8 +50,8 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     let active = true;
     void load();
     const timer = setInterval(() => { if (active && document.visibilityState === "visible") void load(); }, 5000);
-    return () => { active = false; sequence.current++; clearInterval(timer); };
-  }, [load]);
+    return () => { active = false; cancelInFlight(); clearInterval(timer); };
+  }, [load, cancelInFlight]);
 
   // Conversation search: two or more characters ask the server for partners
   // whose message text matches; shorter input falls back to the name filter

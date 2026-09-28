@@ -50,6 +50,8 @@ Set `BETTER_AUTH_URL=http://localhost:3000` for local development. Use a separat
 ## Verification
 
 ```sh
+npm run typecheck
+npm run lint
 npm run test:vercel
 npm run build
 ```
