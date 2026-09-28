@@ -64,6 +64,24 @@
   --dock-fallback:#fbfbfc;
   --dock-inset:calc(var(--dock-height) + max(16px, env(safe-area-inset-bottom) + 12px) + 24px);
 
+  /* floating top bar (mobile + tablet) — deliberately the same glass recipe
+     and geometry as the dock, so the two pieces of chrome read as one family.
+     --header-height is the exact rendered height: padding (2×6) + border
+     (2×1) + the 44px touch targets it holds. Change one, change the other. */
+  --header-height:58px;
+  --header-gap:12px;                                      /* breathing room from the screen edges */
+  --header-top:max(8px, env(safe-area-inset-top) + 6px);  /* clears status bars and notches */
+  --header-max:var(--dock-max);
+  --header-bg:var(--dock-bg);
+  --header-border:var(--dock-border);
+  --header-blur:var(--dock-blur);
+  --header-shadow:var(--dock-shadow);
+  --header-pill:var(--dock-pill);
+  --header-pill-border:var(--dock-pill-border);
+  --header-pill-shadow:var(--dock-pill-shadow);
+  --header-fallback:var(--dock-fallback);
+  --header-inset:calc(var(--header-height) + var(--header-top) + 12px);
+
   /* depth */
   --shadow-1:0 1px 2px rgba(23,12,28,.06),0 1px 1px rgba(23,12,28,.04);
   --shadow-2:0 2px 6px rgba(23,12,28,.07),0 8px 24px -8px rgba(23,12,28,.12);
@@ -249,19 +267,41 @@ h1,h2,h3,p{margin:0}
 
 /* mobile chrome — liquid glass */
 .mobile-header,.dock-wrap{display:none}
-/* Always fixed, always visible: the header never reacts to scrolling. */
+/* Always fixed, always visible: the header never reacts to scrolling.
+   A transparent full-width wrapper only centres the bar and pads for
+   notches — the floating pill inside carries the glass, its radius and its
+   elevation, exactly like the bottom dock. */
 .mobile-header{
-  position:fixed;top:0;left:0;right:0;z-index:var(--z-header);height:60px;
-  padding:0 16px;padding-top:env(safe-area-inset-top);
-  align-items:center;justify-content:space-between;
-  background:var(--glass-nav);
-  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
-  border-bottom:1px solid var(--glass-border);
+  position:fixed;top:var(--header-top);left:0;right:0;z-index:var(--z-header);
+  align-items:center;justify-content:center;
+  padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
+  pointer-events:none;
 }
-.mobile-header .brand{font-size:27px;letter-spacing:-1.4px}
-.mobile-header>div{display:flex;gap:4px}
-.mobile-header .icon-button{width:37px;height:40px}
+.header-bar{
+  pointer-events:auto;min-width:0;
+  width:min(calc(100% - var(--header-gap) * 2), var(--header-max));
+  min-height:var(--header-height);
+  padding:6px 8px 6px 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border-radius:var(--dock-radius);
+  background:var(--header-bg);
+  -webkit-backdrop-filter:var(--header-blur);backdrop-filter:var(--header-blur);
+  border:1px solid var(--header-border);
+  box-shadow:var(--header-shadow);
+}
+/* The wordmark is a control too: it gets a comfortable target without
+   moving the logo, which stays flush with the bar's padding. */
+.mobile-header .brand{display:inline-flex;align-items:center;min-height:44px;font-size:25px;letter-spacing:-1.3px;min-width:0;overflow:hidden;padding:0 8px;margin-left:-8px;border-radius:12px}
+.mobile-header .header-actions{display:flex;align-items:center;gap:2px;flex:0 0 auto}
+/* Round, generously sized controls so the pills read as one set with the dock. */
+.mobile-header .icon-button{width:44px;height:44px;padding:8px;border-radius:50%}
 .mobile-header .icon-button svg{width:23px;height:23px}
+/* Current section (messages / notifications) gets the dock's active capsule. */
+.mobile-header .icon-button.is-current{color:var(--foreground);background:var(--header-pill);border:1px solid var(--header-pill-border);box-shadow:var(--header-pill-shadow)}
+/* Readable fallback where backdrop-filter is unavailable. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .header-bar{background:var(--header-fallback)}
+}
 
 /* ------------------------------------------------------------
    Floating dock. A full-width fixed strip centres the pill with
@@ -1246,22 +1286,25 @@ div[data-slot=dialog-content].post-viewer {
   .app-sidebar{display:none}
   .mobile-header{display:flex}
   .dock-wrap{display:flex}
-  /* Content clears the fixed header above (plus any notch) and keeps
-     breathing room for the floating bar below: bar height + the gap +
-     safe area + a little slack. */
-  .main-surface{margin-left:0;width:100%;padding-top:calc(60px + env(safe-area-inset-top));padding-bottom:calc(var(--dock-inset) + 8px)}
+  /* Content clears the floating header above (plus any notch) and keeps
+     breathing room for the floating bar below: both insets are derived
+     from their own height + edge gap + safe area. */
+  .main-surface{margin-left:0;width:100%;padding-top:var(--header-inset);padding-bottom:calc(var(--dock-inset) + 8px)}
   .home-layout{padding-bottom:8px}
   .discovery-view,.profile-view,.notifications-view{padding-bottom:8px}
   .reels-track{padding-bottom:calc(var(--dock-inset) - 44px)}
   .feed-end{padding-bottom:26px}
   /* The chat compose box must stay clear of the floating bar. */
-  .messages-layout{height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px)}
+  .messages-layout{height:calc(100dvh - var(--header-inset) - var(--dock-inset) - 8px)}
 }
 
 /* Small phones: a slightly slimmer pill that still clears the edges. */
 @media (max-width:400px){
-  :root{--dock-height:60px}
+  :root{--dock-height:60px;--header-gap:10px}
   .dock{padding:5px}
+  /* same 6px inset the dock's active capsule uses, one step slimmer sideways */
+  .header-bar{padding:6px 6px 6px 12px}
+  .mobile-header .brand{font-size:23px;letter-spacing:-1.2px}
   .dock-glyph{width:42px;height:42px}
   .dock-glyph svg{width:23px;height:23px}
   .dock-create .dock-glyph{width:42px;height:42px}
@@ -1276,8 +1319,9 @@ div[data-slot=dialog-content].post-viewer {
 
 /* landscape phones: the bar stays a compact centred control */
 @media (max-height:520px) and (max-width:1080px){
-  :root{--dock-height:54px;--dock-max:400px}
+  :root{--dock-height:54px;--dock-max:400px;--header-height:52px;--header-top:max(6px, env(safe-area-inset-top) + 4px)}
   .dock{padding:4px}
+  .header-bar{padding:3px 6px 3px 14px}
   .dock-glyph,.dock-create .dock-glyph{width:38px;height:38px}
   .dock-glyph svg{width:21px;height:21px}
 }
@@ -1373,7 +1417,7 @@ div[data-slot=dialog-content].post-viewer {
   .empty-state p{font-size:13.5px}
 
   /* messages: single-thread view */
-  .messages-layout{height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px);grid-template-columns:1fr;padding:0 0 0}
+  .messages-layout{height:calc(100dvh - var(--header-inset) - var(--dock-inset) - 8px);grid-template-columns:1fr;padding:0 0 0}
   .conversation-list{border-right:0;padding:16px 12px 10px}
   .chat-panel{display:none}
   .messages-layout.show-chat .conversation-list{display:none}
@@ -1385,7 +1429,7 @@ div[data-slot=dialog-content].post-viewer {
   .message-row{max-width:84%}
 
   /* reels: immersive */
-  .reels-view{padding:0;min-height:calc(100dvh - 60px - env(safe-area-inset-top) - var(--dock-inset) - 8px)}
+  .reels-view{padding:0;min-height:calc(100dvh - var(--header-inset) - var(--dock-inset) - 8px)}
   .reels-heading{padding:10px 16px 12px}
   .reels-heading h1{font-size:21px}
   .reels-track{gap:0;padding:0 0 calc(var(--dock-inset) - 46px)}
@@ -1426,7 +1470,7 @@ div[data-slot=dialog-content].post-viewer {
 }
 
 @media (max-width:380px){
-  .mobile-header{padding:0 12px}
+  .mobile-header .brand{font-size:22px}
   .profile-top{gap:14px}
   .profile-top .avatar{width:68px!important;height:68px!important}
   .profile-title h1{font-size:17px}

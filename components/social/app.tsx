@@ -389,23 +389,27 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   const mobileHeader = (
     <header className="mobile-header">
-      <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
-      <div>
-        <IconButton label="Notifications" onClick={() => nav("notifications")}><Heart /></IconButton>
-        <IconButton label="Messages" onClick={() => nav("messages")}><Send /></IconButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="icon-button" aria-label="More options"><Menu size={22} /></button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="social-menu">
-            <DropdownMenuItem onClick={() => nav("saved")}><Bookmark />Saved posts</DropdownMenuItem>
-            <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
-            {data.me
-              ? <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
-              : <DropdownMenuItem onClick={() => openAuth()}><LogIn />Sign in</DropdownMenuItem>}
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {/* Visual layer only: same brand button, same controls, same handlers —
+          the pill is the shape the old full-width bar used to have. */}
+      <div className="header-bar">
+        <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
+        <div className="header-actions">
+          <IconButton label="Notifications" onClick={() => nav("notifications")} className={view === "notifications" ? "is-current" : ""} current={view === "notifications"}><Heart /></IconButton>
+          <IconButton label="Messages" onClick={() => nav("messages")} className={view === "messages" ? "is-current" : ""} current={view === "messages"}><Send /></IconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="icon-button" aria-label="More options"><Menu size={22} /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="social-menu">
+              <DropdownMenuItem onClick={() => nav("saved")}><Bookmark />Saved posts</DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
+              {data.me
+                ? <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
+                : <DropdownMenuItem onClick={() => openAuth()}><LogIn />Sign in</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </header>
   );
