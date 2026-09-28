@@ -45,6 +45,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     if (!localDevDatabase()) throw new AppError('Not found.', 404);
+    sameOrigin(request);
     const cookies = request.headers.get('cookie') || '';
     const match = cookies.match(/(?:^|;\s*)better-auth\.session_token=([^;]+)/);
     if (match) await db().prepare('DELETE FROM session WHERE token=?').bind(decodeURIComponent(match[1])).run();

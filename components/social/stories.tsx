@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect, useRef, useCallback, useEffectEvent } from "react";
-import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX, MessageCircle, Eye, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Avatar, IconButton, timeAgo } from "./common";
+import { Avatar, IconButton, timeAgo, request, Busy } from "./common";
+import { toast } from "sonner";
 import type { Person, Post } from "@/lib/types";
 
 export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me: Person | null; onOpen: (index: number) => void; onCreate: () => void }) {
@@ -31,8 +32,8 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
   );
 }
 
-export function StoryViewer({ stories, start, onClose, onSeen, onProfile }: {
-  stories: Post[]; start: number; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void;
+export function StoryViewer({ stories, start, me, onClose, onSeen, onProfile }: {
+  stories: Post[]; start: number; me: Person | null; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void;
 }) {
   const [index, setIndex] = useState(start);
   const post = stories[index];
@@ -43,22 +44,26 @@ export function StoryViewer({ stories, start, onClose, onSeen, onProfile }: {
   useEffect(() => { if (!post) onClose(); }, [post, onClose]);
   if (!post) return null;
   return (
-    <StoryPlayback key={post.id} stories={stories} index={index} setIndex={setIndex} post={post} next={next} onClose={onClose} onSeen={onSeen} onProfile={onProfile} />
+    <StoryPlayback key={post.id} stories={stories} index={index} setIndex={setIndex} post={post} me={me} next={next} onClose={onClose} onSeen={onSeen} onProfile={onProfile} />
   );
 }
 
-function StoryPlayback({ stories, index, setIndex, post, next, onClose, onSeen, onProfile }: {
-  stories: Post[]; index: number; setIndex: React.Dispatch<React.SetStateAction<number>>; post: Post;
+function StoryPlayback({ stories, index, setIndex, post, me, next, onClose, onSeen, onProfile }: {
+  stories: Post[]; index: number; setIndex: React.Dispatch<React.SetStateAction<number>>; post: Post; me: Person | null;
   next: () => void; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void;
 }) {
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(true);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
+  const [replyTo, setReplyTo] = useState(false);
+  const [showViewers, setShowViewers] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const elapsed = useRef(0);
   const holdPaused = useRef(false);
   const markSeen = useEffectEvent(() => onSeen(post));
+  const isOwn = me?.id === post.author_id;
+  const canReply = !isOwn && !post.author.is_demo;
 
   useEffect(() => { markSeen(); }, [post.id]);
 
@@ -111,6 +116,8 @@ function StoryPlayback({ stories, index, setIndex, post, next, onClose, onSeen, 
               <button onClick={() => { onClose(); onProfile(post.author_id); }}>{post.author.username}</button>
               <span>{timeAgo(post.created_at)}</span>
               <div className="story-tools">
+                {isOwn && <IconButton label="View who saw this story" onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
+                {canReply && <IconButton label={replyTo ? "Close reply" : "Reply to this story"} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton>}
                 <IconButton label={paused ? "Play story" : "Pause story"} onClick={() => setPaused(value => !value)}>
                   {paused ? <Play size={20} /> : <Pause size={20} />}
                 </IconButton>
@@ -127,14 +134,77 @@ function StoryPlayback({ stories, index, setIndex, post, next, onClose, onSeen, 
                   onTimeUpdate={event => setProgress(event.currentTarget.currentTime / (event.currentTarget.duration || 1))}
                   onEnded={next} />
               : <img key={post.id} src={post.media[0]} alt={post.caption || "Story photo"} onLoad={() => setReady(true)} />}
-            <div className="story-tap previous" onClick={() => setIndex(value => Math.max(0, value - 1))} aria-hidden="true" />
-            <div className="story-tap next" onClick={next} aria-hidden="true" />
+            <button type="button" className="story-tap previous" aria-label="Previous story" onClick={() => setIndex(value => Math.max(0, value - 1))} />
+            <button type="button" className="story-tap next" aria-label="Next story" onClick={next} />
             {post.caption && <p className="story-caption">{post.caption}</p>}
+            {replyTo && <ReplyComposer post={post} onClose={() => setReplyTo(false)} />}
+            {showViewers && <StoryViewers post={post} onClose={() => setShowViewers(false)} />}
           </div>
           <IconButton className="story-prev" label="Previous story" disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft /></IconButton>
           <IconButton className="story-next" label="Next story" onClick={next}><ChevronRight /></IconButton>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+function ReplyComposer({ post, onClose }: { post: Post; onClose: () => void }) {
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); }, []);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const text = body.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try {
+      // Story replies address the story's author through its post id.
+      await request("/api/social", { action: "message", id: post.author_id, post_id: post.id, body: text });
+      toast("Reply sent to " + post.author.username + ".");
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={submit} className="story-reply" aria-label={"Reply to " + post.author.username}>
+      <Avatar person={post.author} size={34} />
+      <input ref={input} aria-label={"Reply to " + post.author.username} placeholder="Reply…" maxLength={2000}
+        value={body} onChange={e => setBody(e.target.value)} />
+      <button className="message-send" type="submit" aria-label="Send reply" disabled={!body.trim() || busy}>{busy ? <Busy size={18} /> : <Send size={18} />}</button>
+    </form>
+  );
+}
+
+function StoryViewers({ post, onClose }: { post: Post; onClose: () => void }) {
+  const [viewers, setViewers] = useState<import("@/lib/types").StoryViewer[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void request<import("@/lib/types").StoryViewer[]>("/api/social?story-viewers=" + encodeURIComponent(post.id))
+      .then(items => { if (active) setViewers(items); })
+      .catch(e => { if (active) setError((e as Error).message); });
+    return () => { active = false; };
+  }, [post.id]);
+  return (
+    <div className="story-viewers" role="dialog" aria-label="Who viewed this story">
+      <header>
+        <h2>Viewed by</h2>
+        <IconButton label="Close viewer list" onClick={onClose}><X /></IconButton>
+      </header>
+      {error ? <p className="form-error" role="alert">{error}</p>
+        : viewers === null ? <div className="loading-row"><Busy /></div>
+          : !viewers.length ? <p className="muted">Only you have seen this so far.</p>
+            : (
+              <ul className="viewer-list">
+                {viewers.map(v => (
+                  <li key={v.username}>
+                    <Avatar person={{ avatar: v.avatar, username: v.username, name: v.name, id: v.username }} size={38} />
+                    <span><strong>{v.username}</strong><small>{v.name}</small></span>
+                  </li>
+                ))}
+              </ul>
+            )}
+    </div>
   );
 }

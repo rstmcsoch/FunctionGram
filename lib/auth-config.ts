@@ -25,6 +25,12 @@ export function authConfiguration(env: AuthEnvironment = process.env) {
     },
     trustedOrigins: origins,
     emailAndPassword: { enabled: true, minPasswordLength: 12, maxPasswordLength: 128, requireEmailVerification: true },
+    user: {
+      // Email changes and account deletion both require the signed-in user to
+      // confirm through a time-limited email before anything changes.
+      changeEmail: { enabled: true },
+      deleteUser: { enabled: true, deleteTokenExpiresIn: 15 * 60 },
+    },
     emailVerification: {
       sendOnSignUp: true,
       sendOnSignIn: true,
@@ -38,6 +44,10 @@ export function authConfiguration(env: AuthEnvironment = process.env) {
         '/send-verification-email': { window: 60, max: 2 },
         '/sign-up/email': { window: 60, max: 3 },
         '/sign-in/email': { window: 60, max: 5 },
+        '/request-password-reset': { window: 60, max: 3 },
+        '/reset-password': { window: 60, max: 10 },
+        '/change-email': { window: 60, max: 3 },
+        '/delete-user': { window: 60, max: 3 },
       },
     },
     session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },

@@ -2,16 +2,17 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
-import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements} from '../lib/postgres-schema';
+import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements} from '../lib/postgres-schema';
 import {postgresQuery} from '../lib/sql';
+import {buildFeedQuery,buildPeopleQuery} from '../lib/server';
 import {getAuthTables} from 'better-auth/db';
 import {detectMediaType} from '../lib/media-type';
 
 test('PostgreSQL schema supports actual feed, social actions, ownership and transaction rollback',async()=>{
  const db=new PGlite();
  try{
-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql);
-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements])await db.exec(sql);
+  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
   const authTables=getAuthTables({emailAndPassword:{enabled:true},rateLimit:{enabled:true,storage:'database'}});
   for(const table of Object.values(authTables)){
    const columns=await db.query<{column_name:string}>('SELECT column_name FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=$1',[table.modelName]);
@@ -33,17 +34,16 @@ test('PostgreSQL schema supports actual feed, social actions, ownership and tran
   assert.equal((await query('SELECT p.id FROM story_highlights h JOIN posts p ON p.id=h.post_id WHERE h.owner_id=?',['alice'])).rows[0].id,'highlight');
   await query('INSERT OR IGNORE INTO reactions(user_id,post_id,kind) VALUES(?,?,?)',['bob','p','like']);
   await query('INSERT OR IGNORE INTO reactions(user_id,post_id,kind) VALUES(?,?,?)',['bob','p','like']);
-  const source=readFileSync(new URL('../lib/server.ts',import.meta.url),'utf8');
-  const feed=source.match(/db\(\)\.prepare\(`(SELECT p\.\*,p\.base_likes[\s\S]*?)`\)/);
-  assert.ok(feed,'Read production feed SQL');
-  const feedSql=feed[1].replace('${extra}','');
-  const posts=await query(feedSql,['bob','bob','bob',Date.now(),'bob',40,0]);
-  assert.equal(posts.rows.length,1);assert.equal(posts.rows[0].likes,1);assert.equal(posts.rows[0].liked,true);assert.equal(posts.rows[0].saved,false);
+  // The exact SQL the production feed and people endpoints run, straight from
+  // the exported builders (no scraping the source for the query text).
+  const feedQ=buildFeedQuery('bob',40,0);
+  const posts=await query(feedQ.sql,feedQ.args);
+  assert.equal(posts.rows.length,1);assert.equal(posts.rows[0].likes,1);assert.equal(posts.rows[0].liked,1);assert.equal(posts.rows[0].saved,0);
   await query('INSERT OR IGNORE INTO follows(follower_id,followee_id) VALUES(?,?)',['bob','alice']);
-  const peopleSql=source.match(/db\(\)\.prepare\(`(SELECT p\.\*, \(SELECT COUNT\(\*\)[\s\S]*?)`\)/)![1];
-  const people=await query(peopleSql,['bob','bob']);assert.equal(people.rows.find(p=>p.id==='alice')?.followers,1);
+  const peopleQ=buildPeopleQuery('bob');
+  const people=await query(peopleQ.sql,peopleQ.args);assert.equal(people.rows.find(p=>p.id==='alice')?.followers,1);
   await db.exec("INSERT INTO profiles(id,username,name,created_at) SELECT 'extra_'||n,'extra_'||n,'Extra',0 FROM generate_series(1,305) n");
-  assert.equal((await query(peopleSql,['bob','bob'])).rows[0].id,'bob','Signed-in viewer stays available beyond the people list limit');
+  assert.equal((await query(peopleQ.sql,peopleQ.args)).rows[0].id,'bob','Signed-in viewer stays available beyond the people list limit');
   await query('INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES(?,?,?,?,?)',['c','p','bob',"What's up?",Date.now()]);
   await query('INSERT INTO messages(id,sender_id,recipient_id,body,created_at) VALUES(?,?,?,?,?)',['m','alice','bob','Private message',Date.now()]);
   const messagesSql='SELECT * FROM messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?) ORDER BY created_at DESC LIMIT 200';
@@ -71,7 +71,7 @@ test('Media checks reject SVG and fake image prefixes, recognize actual bundled 
  assert.equal(detectMediaType(readFileSync(new URL('../public/media/flowers.mp4',import.meta.url)).subarray(0,16)),'video/mp4');
 });
 test('Vercel application routes do not import Cloudflare bindings or trust Sites identity headers',()=>{
- for(const path of ['../lib/server.ts','../lib/auth.ts','../db/index.ts','../app/api/upload/route.ts','../app/api/media/[key]/route.ts']){
+ for(const path of ['../lib/server.ts','../lib/auth.ts','../lib/email.ts','../lib/uploads.ts','../app/api/social/route.ts','../app/api/dev-session/route.ts','../app/api/dev-upload/route.ts','../app/api/upload/route.ts','../app/api/upload/complete/route.ts','../app/api/media/[key]/route.ts','../app/api/health/route.ts','../app/api/auth/[...all]/route.ts']){
   const source=readFileSync(new URL(path,import.meta.url),'utf8');assert.ok(!source.includes('cloudflare:workers'));assert.ok(!source.includes('oai-authenticated-user-id'));
  }
 });

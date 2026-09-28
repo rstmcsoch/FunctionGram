@@ -235,9 +235,11 @@ export function MediaFrame({
 /* --------------------------------- carousel --------------------------------- */
 
 export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
-  items: string[]; aspects?: number[] | null; render: (item: string, index: number) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
+  items: string[]; aspects?: number[] | null; render: (item: string, index: number, eager: boolean) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
 }) {
-  const [emblaRef, embla] = useEmblaCarousel({ loop: false, watchDrag: true, duration: 22 });
+  // A short, smooth slide animation (22ms felt like a jump cut); adjacent
+  // slides are preloaded so swipes never show a spinner.
+  const [emblaRef, embla] = useEmblaCarousel({ loop: false, watchDrag: true, duration: 300 });
   const [index, setIndex] = useState(0);
   useEffect(() => {
     if (!embla) return;
@@ -252,7 +254,7 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
       <div className="carousel-track" ref={emblaRef}>
         {items.map((item, position) => (
           <div className="carousel-slide" key={item + ":" + position} aria-hidden={position !== index}>
-            {render(item, position)}
+            {render(item, position, Math.abs(position - index) <= 1)}
           </div>
         ))}
       </div>

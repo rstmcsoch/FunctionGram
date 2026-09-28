@@ -7,7 +7,7 @@ import type {Pool} from 'pg';
 import {PGlite} from '@electric-sql/pglite';
 import {schemaStatements} from '../lib/postgres-schema';
 import {authConfiguration} from '../lib/auth-config';
-import {createVerificationEmailSender} from '../lib/email';
+import {createVerificationEmailSender,createPasswordResetEmailSender} from '../lib/email';
 
 const production='https://functiongram.vercel.app';
 const preview='https://functiongram-git-fix-rstmc.vercel.app';
@@ -103,5 +103,77 @@ test('Brevo verification gates real Better Auth signup, login, and sessions agai
   assert.equal(unsafeResend.status,403);
   const oauth=await call('sign-in/social',{provider:'google',callbackURL:'/'});
   assert.ok(oauth.status>=400,'No social sign-in provider is enabled');
+ }finally{await db.close();}
+});
+
+test('password recovery issues single-use time-limited links, revokes sessions, and is rate limited',async()=>{
+ const db=new PGlite();
+ try{
+  for(const sql of schemaStatements)await db.exec(sql);
+  const client={query:async(text:string,values?:unknown[])=>{const result=await db.query(text,values);return {...result,rowCount:result.affectedRows};},release(){}};
+  const pool={connect:async()=>client,end:async()=>{},query:client.query} as unknown as Pool;
+  const secret=randomBytes(32).toString('hex');
+  const deliveries:{to:{email:string}[];textContent:string;htmlContent:string}[]=[];
+  const brevoEnv={BREVO_API_KEY:'test-only-key',BREVO_SENDER_EMAIL:'noreply@example.test'};
+  const sendVerification=createVerificationEmailSender(brevoEnv,async (_url,options)=>{
+   deliveries.push(JSON.parse(String(options?.body)));
+   return Response.json({messageId:'test-message'},{status:201});
+  });
+  const sendReset=createPasswordResetEmailSender(brevoEnv,async (_url,options)=>{
+   deliveries.push(JSON.parse(String(options?.body)));
+   return Response.json({messageId:'test-message'},{status:201});
+  });
+  const options=config();
+  const auth=betterAuth({
+   ...options,database:pool,secret,logger:{level:'error'},
+   emailVerification:{...options.emailVerification,sendVerificationEmail:sendVerification},
+   emailAndPassword:{...options.emailAndPassword,resetPasswordTokenExpiresIn:15*60,revokeSessionsOnPasswordReset:true,sendResetPassword:sendReset},
+  });
+  async function call(path:string,body?:unknown,cookie='',origin=production){
+   return auth.handler(new Request(origin+'/api/auth/'+path,{method:body?'POST':'GET',headers:{host:new URL(origin).host,origin,'content-type':'application/json',...(cookie?{cookie}:{})},...(body?{body:JSON.stringify(body)}:{})}));
+  }
+  const email='recover@example.test',password='Example-password-123!';
+  const signup=await call('sign-up/email',{email,password,name:'Recovery User',callbackURL:'/'});
+  assert.equal(signup.status,200,await signup.clone().text());
+  const verifyUrl=new URL(deliveries[0].textContent.split('\n').find(line=>line.startsWith('https://'))!);
+  assert.equal((await auth.handler(new Request(verifyUrl,{headers:{host:verifyUrl.host}}))).status,302);
+  // Unknown emails get the same generic 200 and no delivery: no enumeration.
+  const before=deliveries.length;
+  const ghost=await call('request-password-reset',{email:'missing@example.test',redirectTo:production+'/reset-password'});
+  assert.equal(ghost.status,200,await ghost.clone().text());
+  assert.equal(deliveries.length,before,'No reset email for unknown addresses');
+  const known=await call('request-password-reset',{email,redirectTo:production+'/reset-password'});
+  assert.equal(known.status,200,await known.clone().text());
+  assert.equal(deliveries.length,before+1);
+  const resetUrl=new URL(deliveries[before].textContent.split('\n').find(line=>line.startsWith('https://'))!);
+  const token=resetUrl.pathname.split('/').pop()!;
+  assert.equal(resetUrl.pathname,'/api/auth/reset-password/'+token,'Link points at the reset endpoint');
+  const callback=resetUrl.searchParams.get('callbackURL')!;
+  // The GET endpoint validates the token and forwards it to the app page.
+  const getResp=await call('reset-password/'+token+'?callbackURL='+encodeURIComponent(callback),undefined,'',production);
+  assert.equal(getResp.status,302);
+  assert.ok((getResp.headers.get('location')||'').includes('token='+token));
+  // A signed-in session must be revoked the moment the password changes.
+  const login=await call('sign-in/email',{email,password,callbackURL:'/'});
+  const oldCookie=login.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
+  const newPassword='Brand-new-password-456!';
+  const reset=await call('reset-password',{token,newPassword});
+  assert.equal(reset.status,200,await reset.clone().text());
+  assert.equal(await (await call('get-session',undefined,oldCookie)).json(),null,'Old sessions are revoked on reset');
+  const reuse=await call('reset-password',{token,newPassword:'Another-password-789!'});
+  assert.equal(reuse.status,400,'A reset token works exactly once');
+  assert.equal((await call('sign-in/email',{email,password,callbackURL:'/'})).status,401,'The old password no longer signs in');
+  const relogin=await call('sign-in/email',{email,password:newPassword,callbackURL:'/'});
+  assert.equal(relogin.status,200,await relogin.clone().text());
+  // Expired tokens redirect back with an error instead of resetting.
+  await call('request-password-reset',{email,redirectTo:production+'/reset-password'});
+  const expiredUrl=new URL(deliveries[deliveries.length-1].textContent.split('\n').find(line=>line.startsWith('https://'))!);
+  await db.query('UPDATE "verification" SET "expiresAt"=now()-interval \'1 minute\' WHERE "identifier" LIKE \'reset-password:%\'');
+  const expired=await call('reset-password/'+expiredUrl.pathname.split('/').pop()+'?callbackURL='+encodeURIComponent(expiredUrl.searchParams.get('callbackURL')!),undefined,'',production);
+  assert.match(expired.headers.get('location')||'',/error=INVALID_TOKEN/);
+  // The per-minute request cap applies to the reset flow itself.
+  assert.equal((await call('request-password-reset',{email,redirectTo:production+'/reset-password'})).status,429,'Reset requests are rate limited');
+  await db.query('UPDATE "rateLimit" SET "lastRequest"=0');
+  assert.equal((await call('request-password-reset',{email,redirectTo:production+'/reset-password'})).status,200);
  }finally{await db.close();}
 });

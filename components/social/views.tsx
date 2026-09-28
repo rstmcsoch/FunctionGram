@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Search, X, Users, Heart, Bookmark, Film, Grid3X3, UserRound, Camera, TrendingUp, Send, BadgeCheck } from "lucide-react";
+import { Search, X, Users, Heart, Bookmark, Film, Grid3X3, UserRound, Camera, TrendingUp, Send, BadgeCheck, Flag, UserX, UserCheck, Lock } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { Avatar, Empty, Busy, request, count, timeAgo, GridSkeleton } from "./common";
 import { PostCard } from "./post-card";
 import { Stories } from "./stories";
@@ -73,12 +74,20 @@ export function ProfileGrid({ id, tab, posts, onPost, onCreate, own }: {
 
 /* ------------------------------------ home ------------------------------------ */
 
-export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCreateStory, feedPosts, actions, moreLoading, onLoadMore, follow, followPending, navigate, onEdit, onAbout }: {
+export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCreateStory, feedPosts, following, onLoadFollowing, actions, moreLoading, onLoadMore, follow, followPending, navigate, onEdit, onAbout }: {
   data: SocialData; feedTab: string; setFeedTab: (tab: string) => void; stories: Post[]; onOpenStory: (index: number) => void; onCreateStory: () => void;
-  feedPosts: Post[]; actions: Parameters<typeof PostCard>[0]["actions"]; moreLoading: boolean; onLoadMore: () => void;
-  follow: (person: Person) => void; followPending: string | null; navigate: (view: string, id?: string) => void; onEdit: () => void; onAbout: () => void;
+  feedPosts: Post[]; following: { posts: Post[]; hasMore: boolean; loading: boolean }; onLoadFollowing: (offset: number) => void;
+  actions: Parameters<typeof PostCard>[0]["actions"]; moreLoading: boolean; onLoadMore: () => void;
+  follow: (person: Person) => void; followPending: Set<string>; navigate: (view: string, id?: string) => void; onEdit: () => void; onAbout: () => void;
 }) {
   const suggestions = data.people.filter(p => p.id !== data.me?.id && !p.followed).slice(0, 5);
+  // The Following tab lists come from the server filter (posts + hasMore),
+  // so switching tabs never re-scans the bootstrap feed in the browser.
+  const isFollowing = feedTab === "following";
+  const visiblePosts = isFollowing ? following.posts : feedPosts;
+  const hasMore = isFollowing ? following.hasMore : data.hasMore;
+  const loadingMore = isFollowing ? following.loading : moreLoading;
+  const loadMore = isFollowing ? () => onLoadFollowing(following.posts.length) : onLoadMore;
   return (
     <div className="home-layout">
       <section className="feed-column">
@@ -90,15 +99,21 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
         </Tabs>
         <Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} />
         <div className="feed-posts">
-          {feedPosts.map(post => <PostCard key={post.id} post={post} actions={actions} />)}
-          {!feedPosts.length && (
-            <Empty icon={<Users />} heading="Make this feed yours" body="Follow a few people to see their latest moments here."
-              action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
-          )}
+          {visiblePosts.map(post => <PostCard key={post.id} post={post} actions={actions} />)}
+          {!visiblePosts.length && (isFollowing && !following.loading
+            ? <Empty icon={<Users />} heading="Follow a few people" body="Their latest moments will appear here."
+                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
+            : !isFollowing && (
+              <Empty icon={<Users />} heading="Make this feed yours" body="Follow a few people to see their latest moments here."
+                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
+            ))}
+          {isFollowing && following.loading && !visiblePosts.length && <div className="loading-row"><Busy /></div>}
           <div className="feed-end">
-            {data.hasMore
-              ? <button className="secondary-button" disabled={moreLoading} onClick={onLoadMore}>{moreLoading ? <Busy /> : "Load more posts"}</button>
-              : <><span className="caught-up" aria-hidden="true">✓</span><strong>You’re all caught up</strong><span>A good moment to make a moment.</span></>}
+            {hasMore
+              ? <button className="secondary-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? <Busy /> : "Load more posts"}</button>
+              : visiblePosts.length
+                ? <><span className="caught-up" aria-hidden="true">✓</span><strong>You’re all caught up</strong><span>A good moment to make a moment.</span></>
+                : null}
           </div>
         </div>
       </section>
@@ -125,8 +140,8 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
                   <strong>{person.username}</strong>
                   <span>{person.is_demo ? "Suggested for you" : person.name}</span>
                 </button>
-                <button className="follow-button" onClick={() => follow(person)} disabled={followPending === person.id}>
-                  {followPending === person.id ? <Busy size={14} /> : "Follow"}
+                <button className="follow-button" onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                  {followPending.has(person.id) ? <Busy size={14} /> : "Follow"}
                 </button>
               </div>
             ))}
@@ -148,9 +163,12 @@ const recentKey = "rstmc-recent-searches";
 
 export function SearchView({ query, setQuery, data, onProfile, openPost, follow, followPending, navigate }: {
   query: string; setQuery: (value: string) => void; data: SocialData; onProfile: (id: string) => void; openPost: (post: Post) => void;
-  follow: (person: Person) => void; followPending: string | null; navigate: (view: string, id?: string) => void;
+  follow: (person: Person) => void; followPending: Set<string>; navigate: (view: string, id?: string) => void;
 }) {
   const [recents, setRecents] = useState<string[]>([]);
+  const [results, setResults] = useState<{ people: Person[]; posts: Post[] } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
   useEffect(() => {
     // Recent searches live in localStorage; read them just after mount (and
     // after each committed search) without blocking the first paint.
@@ -177,9 +195,27 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
       return next;
     });
   };
-  const needle = query.trim().toLowerCase().replace(/^@/, "");
-  const people = data.people.filter(p => p.id !== data.me?.id && (p.username + " " + p.name).toLowerCase().includes(needle));
-  const posts = needle ? data.posts.filter(p => p.kind !== "story" && (p.caption + " " + p.location + " " + p.author.username).toLowerCase().includes(needle)) : [];
+  const needle = query.trim().replace(/^@/, "");
+  const active = needle.length >= 2;
+  const requested = useRef("");
+  // Debounced server search: the database does the matching, the page only
+  // renders whatever the API returns. Under-two-character input simply stops
+  // searching; the render gate below falls back to the discover list.
+  useEffect(() => {
+    if (!active) { requested.current = ""; return; }
+    if (requested.current === needle) return;
+    requested.current = needle;
+    let activeRequest = true;
+    const timer = setTimeout(() => {
+      if (!activeRequest) return;
+      setSearching(true);
+      void request<{ people: Person[]; posts: Post[] }>("/api/social?search=" + encodeURIComponent(needle))
+        .then(page => { if (activeRequest) { setResults(page); setSearchError(""); } })
+        .catch(e => { if (activeRequest) { setResults(null); setSearchError((e as Error).message); } })
+        .finally(() => { if (activeRequest) setSearching(false); });
+    }, 300);
+    return () => { activeRequest = false; clearTimeout(timer); };
+  }, [needle, active]);
 
   return (
     <section className="discovery-view search-view">
@@ -211,34 +247,62 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
         </>
       )}
 
-      <h2 className="list-title">{needle ? (people.length ? "People" : "No people found") : "Discover people"}</h2>
-      {needle && !people.length ? (
-        <p className="muted search-empty">No accounts match “{query.trim()}”. Try another name.</p>
-      ) : (
-        <div className="people-results">
-          {people.map(person => (
-            <div className="person-result" key={person.id}>
-              <Avatar person={person} size={46} onClick={() => onProfile(person.id)} />
-              <button className="person-detail" onClick={() => onProfile(person.id)}>
-                <strong>{person.username}</strong>
-                <span>{person.name}{person.is_demo ? " · Sample profile" : ""}</span>
-              </button>
-              {person.id === data.me?.id
-                ? <button className="follow-button" disabled>You</button>
-                : <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending === person.id}>
+      {active ? (
+        searching && !results
+          ? <div className="loading-row" role="status"><Busy /></div>
+          : results ? (
+            <>
+              <h2 className="list-title">People</h2>
+              {results.people.length
+                ? <div className="people-results">
+                    {results.people.map(person => (
+                      <div className="person-result" key={person.id}>
+                        <Avatar person={person} size={46} onClick={() => onProfile(person.id)} />
+                        <button className="person-detail" onClick={() => onProfile(person.id)}>
+                          <strong>{person.username}</strong>
+                          <span>{person.name}{person.is_demo ? " · Sample profile" : ""}</span>
+                        </button>
+                        {person.id === data.me?.id
+                          ? <button className="follow-button" disabled>You</button>
+                          : <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                              {person.followed ? "Following" : "Follow"}
+                            </button>}
+                      </div>
+                    ))}
+                  </div>
+                : <p className="muted search-empty">No accounts match “{needle}”. Try another name.</p>}
+              {results.posts.length > 0 && (
+                <>
+                  <h2 className="list-title">Posts</h2>
+                  <PostGrid posts={results.posts} onPost={openPost} masonry />
+                </>
+              )}
+              {!results.people.length && !results.posts.length && (
+                <p className="muted search-empty">Nothing found for “{needle}”.</p>
+              )}
+            </>
+          ) : (
+            <p className="muted search-empty" role="alert">{searchError || "Still searching…"}</p>
+          )
+        ) : (
+          <>
+            <h2 className="list-title">Discover people</h2>
+            <div className="people-results">
+              {data.people.filter(p => p.id !== data.me?.id && !p.is_demo).slice(0, 10).map(person => (
+                <div className="person-result" key={person.id}>
+                  <Avatar person={person} size={46} onClick={() => onProfile(person.id)} />
+                  <button className="person-detail" onClick={() => onProfile(person.id)}>
+                    <strong>{person.username}</strong>
+                    <span>{person.name}</span>
+                  </button>
+                  <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
                     {person.followed ? "Following" : "Follow"}
-                  </button>}
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-
-      {needle && posts.length > 0 && (
-        <>
-          <h2 className="list-title">Posts</h2>
-          <PostGrid posts={posts} onPost={openPost} masonry />
-        </>
-      )}
+          </>
+        )}
       {!needle && (
         <button className="explore-cta glass-card" onClick={() => navigate("explore")}>
           <TrendingUp size={22} />
@@ -251,13 +315,41 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
 
 /* ----------------------------------- explore ----------------------------------- */
 
-export function ExploreView({ data, category, setCategory, query, openPost }: {
-  data: SocialData; category: string; setCategory: (value: string) => void; query: string; openPost: (post: Post) => void;
+export function ExploreView({ category, setCategory, openPost }: {
+  category: string; setCategory: (value: string) => void; openPost: (post: Post) => void;
 }) {
-  const needle = query.trim().toLowerCase();
-  const posts = data.posts.filter(p => p.kind !== "story"
-    && (category === "For you" || p.category === category)
-    && (!needle || (p.caption + " " + p.location + " " + p.author.username).toLowerCase().includes(needle)));
+  // Each fetch records which category it answered; a response for a stale
+  // category is dropped, so switching tabs never flashes the wrong feed.
+  const [page, setPage] = useState<{ category: string; posts: Post[]; hasMore: boolean } | null>(null);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [error, setError] = useState("");
+  const current = page && page.category === category ? page : null;
+
+  // Explore is a server-side discovery feed (categories + offset), so this
+  // view never scans the bootstrap posts locally.
+  useEffect(() => {
+    let active = true;
+    void request<Post[]>("/api/social?explore" + (category === "For you" ? "" : "&category=" + encodeURIComponent(category)) + "&offset=0")
+      .then(pg => { if (active) { setPage({ category, posts: pg, hasMore: pg.length === 24 }); setError(""); } })
+      .catch(e => { if (active) setError((e as Error).message); });
+    return () => { active = false; };
+  }, [category]);
+
+  const loadMore = async () => {
+    if (moreLoading || !current) return;
+    setMoreLoading(true);
+    try {
+      const pg = await request<Post[]>("/api/social?explore" + (category === "For you" ? "" : "&category=" + encodeURIComponent(category)) + "&offset=" + current.posts.length);
+      setPage(p => p && p.category === category
+        ? { ...p, posts: [...p.posts, ...pg.filter(item => !p.posts.some(existing => existing.id === item.id))], hasMore: pg.length === 24 }
+        : p);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setMoreLoading(false); }
+  };
+
+  const posts = current ? current.posts : [];
+  const hasMore = current ? current.hasMore : false;
+
   return (
     <section className="discovery-view">
       <div className="section-heading">
@@ -271,7 +363,20 @@ export function ExploreView({ data, category, setCategory, query, openPost }: {
           ))}
         </TabsList>
       </Tabs>
-      <PostGrid posts={posts} onPost={openPost} masonry empty={needle ? "No moments found. Try a different search." : undefined} />
+      {!current
+        ? error
+          ? <p className="muted" role="alert">{error} <button className="text-action" onClick={() => setCategory(category)}>Retry</button></p>
+          : <div className="loading-row" role="status"><Busy /></div>
+        : (
+            <>
+              <PostGrid posts={posts} onPost={openPost} masonry />
+              <div className="feed-end">
+                {hasMore
+                  ? <button className="secondary-button" disabled={moreLoading} onClick={() => void loadMore()}>{moreLoading ? <Busy /> : "Load more moments"}</button>
+                  : posts.length ? <span className="muted">You’ve explored everything for now.</span> : null}
+              </div>
+            </>
+          )}
     </section>
   );
 }
@@ -280,9 +385,19 @@ export function ExploreView({ data, category, setCategory, query, openPost }: {
 
 type NotificationGroup = { key: string; kind: string; actors: Notification[]; postId: string | null; media: string | null; created_at: number; unread: boolean };
 
+const notificationFilters = [
+  ["all", "All"],
+  ["like", "Likes"],
+  ["comment", "Comments"],
+  ["follow", "Follows"],
+  ["tag", "Tags"],
+] as const;
+
 export function NotificationsView({ notifications, posts, openPost, onProfile }: {
   notifications: Notification[]; posts: Post[]; openPost: (post: Post) => void; onProfile: (id: string) => void;
 }) {
+  const [filter, setFilter] = useState<string>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
   const groups = useMemo(() => {
     const result: NotificationGroup[] = [];
     for (const notification of notifications) {
@@ -298,27 +413,52 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
     }
     return result;
   }, [notifications]);
+  const visibleGroups = filter === "all" ? groups : groups.filter(group => group.kind === filter);
 
-  if (!notifications.length) {
-    return (
-      <section className="notifications-view">
-        <div className="section-heading"><h1>Notifications</h1></div>
-        <Empty icon={<Heart />} heading="You’re all caught up" body="When someone likes, comments, or follows you, you’ll see it here." />
-      </section>
-    );
-  }
+  // The bootstrap payload only carries recent posts; when a notification's
+  // post is missing, fetch it straight from the API before opening it.
+  const activate = async (group: NotificationGroup) => {
+    const first = group.actors[0];
+    if (!group.postId) { onProfile(first.actor_id); return; }
+    const local = posts.find(p => p.id === group.postId);
+    if (local) { openPost(local); return; }
+    setBusyId(group.key);
+    try {
+      // The API answers with a single-element array (its existing contract).
+      const page = await request<Post[]>("/api/social?post=" + encodeURIComponent(group.postId));
+      if (page[0]) openPost(page[0]);
+      else toast.error("This post is no longer available.");
+    } catch {
+      toast.error("This post is no longer available.");
+    } finally { setBusyId(null); }
+  };
 
   return (
     <section className="notifications-view">
       <div className="section-heading"><h1>Notifications</h1><span>{notifications.some(n => !n.read_at) ? "New activity" : "Recent activity"}</span></div>
-      {groups.map(group => {
+      <div className="notification-filters" role="tablist" aria-label="Filter notifications">
+        {notificationFilters.map(([value, label]) => (
+          <button key={value} role="tab" aria-selected={filter === value}
+            className={"filter-chip " + (filter === value ? "active" : "")}
+            onClick={() => setFilter(value)}>
+            {label}
+            {value !== "all" && notifications.some(n => n.kind === value && !n.read_at) && <i className="unread-dot" aria-hidden="true" />}
+          </button>
+        ))}
+      </div>
+      {!notifications.length ? (
+        <Empty icon={<Heart />} heading="You’re all caught up" body="When someone likes, comments, or follows you, you’ll see it here." />
+      ) : !visibleGroups.length ? (
+        <Empty icon={<Heart />} heading="Nothing here yet" body={"No " + (filter === "all" ? "" : filter + " ") + "notifications yet."} />
+      ) : visibleGroups.map(group => {
         const first = group.actors[0];
         const others = group.actors.length - 1;
-        const label = group.kind === "like" ? "liked your post" : group.kind === "follow" ? "started following you" : group.kind === "comment" ? "commented on your post" : "interacted with you";
+        const label = group.kind === "like" ? "liked your post" : group.kind === "follow" ? "started following you" : group.kind === "comment" ? "commented on your post" : group.kind === "tag" ? "tagged you in a post" : "interacted with you";
         const post = group.postId ? posts.find(p => p.id === group.postId) : null;
         return (
           <button className={"notification-row " + (group.unread ? "unread" : "")} key={group.key + ":" + first.id}
-            onClick={() => { if (post) openPost(post); else onProfile(first.actor_id); }}>
+            disabled={busyId === group.key}
+            onClick={() => void activate(group)}>
             <span className="notification-avatars">
               <Avatar person={{ avatar: first.avatar, username: first.username }} size={44} />
               {others > 0 && <Avatar person={{ avatar: group.actors[1].avatar, username: group.actors[1].username }} size={28} className="notification-avatar-small" />}
@@ -329,7 +469,7 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
             </span>
             {group.media
               ? <img src={JSON.parse(group.media)[0]} alt="" loading="lazy" />
-              : post ? <img src={post.media[0]} alt="" loading="lazy" /> : null}
+              : post ? <img src={post.media[0]} alt="" loading="lazy" /> : busyId === group.key ? <Busy size={18} /> : null}
             {group.unread && <i className="unread-dot" aria-label="New" />}
           </button>
         );
@@ -340,10 +480,11 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
 
 /* ----------------------------------- profile ----------------------------------- */
 
-export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreate, onEdit, follow, followPending, onShare, onRelations, onMessage }: {
+export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreate, onEdit, follow, followPending, onShare, onRelations, onMessage, onReport, onBlock }: {
   profile: Person; me: Person | null; tab: string; setTab: (value: string) => void; posts: Post[];
   openPost: (post: Post) => void; onCreate: () => void; onEdit: () => void; follow: (person: Person) => void;
-  followPending: string | null; onShare: () => void; onRelations: (person: Person, kind: "followers" | "following") => void; onMessage: (person: Person) => void;
+  followPending: Set<string>; onShare: () => void; onRelations: (person: Person, kind: "followers" | "following") => void; onMessage: (person: Person) => void;
+  onReport: (person: Person) => void; onBlock: (person: Person) => void;
 }) {
   const own = profile.id === me?.id;
   return (
@@ -354,6 +495,7 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
           <div className="profile-title">
             <h1>{profile.username}</h1>
             {profile.is_demo !== 1 && <BadgeCheck className="verified-badge" aria-label="Verified" />}
+            {profile.is_private ? <span className="sample-label private-label" title="Private account"><Lock size={11} />Private</span> : null}
             {own ? (
               <>
                 <button className="secondary-button" onClick={onEdit}>Edit profile</button>
@@ -361,11 +503,19 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
               </>
             ) : (
               <>
-                <button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending === profile.id}>
-                  {followPending === profile.id ? <Busy size={14} /> : profile.followed ? "Following" : "Follow"}
+                <button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending.has(profile.id) || !!profile.blocked}>
+                  {followPending.has(profile.id) ? <Busy size={14} /> : profile.followed ? "Following" : "Follow"}
                 </button>
-                <button className="secondary-button" onClick={() => onMessage(profile)}>Message</button>
+                <button className="secondary-button" onClick={() => onMessage(profile)} disabled={!!profile.blocked}>Message</button>
                 <button className="secondary-button icon-only" onClick={onShare} aria-label="Share profile"><Send size={15} /></button>
+                <div className="profile-safety">
+                  <button className="icon-button" onClick={() => onReport(profile)} aria-label={"Report " + profile.username} title="Report"><Flag size={16} /></button>
+                  <button className={"icon-button " + (profile.blocked ? "is-active" : "")} onClick={() => onBlock(profile)}
+                    aria-label={profile.blocked ? "Unblock " + profile.username : "Block " + profile.username}
+                    title={profile.blocked ? "Unblock" : "Block"}>
+                    {profile.blocked ? <UserCheck size={16} /> : <UserX size={16} />}
+                  </button>
+                </div>
               </>
             )}
           </div>

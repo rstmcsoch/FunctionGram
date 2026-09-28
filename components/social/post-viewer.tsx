@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Avatar, IconButton, request, timeAgo, HeartBurst } from "./common";
+import { Avatar, IconButton, request, timeAgo, HeartBurst, Busy } from "./common";
 import { PostActionsRow, PostMenu, PostMedia, CommentForm, CommentRow, type PostActions } from "./post-card";
 import type { Post, Person, Comment } from "@/lib/types";
 
@@ -11,6 +11,8 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   post: Post; actions: PostActions; onClose: () => void; onCommentCountChange: (delta: number) => void;
 }) {
   const [comments, setComments] = useState<Comment[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState("");
   const [burst, setBurst] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -19,8 +21,8 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   // clean for every post and only the fetch runs here.
   useEffect(() => {
     let active = true;
-    void request<Comment[]>("/api/social?comments=" + encodeURIComponent(post.id))
-      .then(items => { if (active) setComments(items); })
+    void request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30")
+      .then(page => { if (active) { setComments(page.items); setNextCursor(page.next_cursor); } })
       .catch(e => { if (active) setError((e as Error).message); });
     return () => { active = false; };
   }, [post.id]);
@@ -28,6 +30,17 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   useEffect(() => {
     if (comments) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [comments?.length]);
+
+  const loadOlder = async () => {
+    if (!nextCursor || moreLoading) return;
+    setMoreLoading(true);
+    try {
+      const page = await request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30&cursor=" + encodeURIComponent(nextCursor));
+      setComments(current => [...(current ?? []), ...page.items.filter(item => !(current ?? []).some(existing => existing.id === item.id))]);
+      setNextCursor(page.next_cursor);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setMoreLoading(false); }
+  };
 
   const submit = async (body: string) => {
     const created = await actions.submitComment(post, body);
@@ -86,6 +99,11 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
                   onDelete={() => void removeComment(comment)}
                   onProfile={id => { onClose(); actions.openProfile(id); }} />
               ))}
+              {nextCursor && comments !== null && (
+                <button className="secondary-button load-more-comments" onClick={() => void loadOlder()} disabled={moreLoading}>
+                  {moreLoading ? <Busy /> : "View earlier comments"}
+                </button>
+              )}
               {error && <p className="form-error" role="alert">{error} <button className="text-action" onClick={() => setComments(null)}>Retry</button></p>}
               {comments !== null && !comments.length && !error && <p className="muted viewer-empty">Be the first to say something.</p>}
             </div>

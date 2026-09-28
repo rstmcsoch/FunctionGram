@@ -1,0 +1,376 @@
+import assert from 'node:assert/strict';
+import { test, before, after } from 'node:test';
+import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// Isolated local database for this suite: the app's local dev driver and the
+// better-auth instance in the test share the same throwaway PGlite files, so
+// the social API is exercised against the exact queries it ships.
+delete process.env.DATABASE_URL;
+delete process.env.POSTGRES_URL;
+const dataDir = mkdtempSync(path.join(tmpdir(), 'functiongram-social-'));
+process.env.FUNCTIONGRAM_PGLITE_DIR = dataDir;
+process.env.BETTER_AUTH_SECRET = randomBytes(32).toString('hex');
+process.env.BREVO_API_KEY = 'test-only-key';
+process.env.BREVO_SENDER_EMAIL = 'noreply@example.test';
+
+import { betterAuth } from 'better-auth';
+import type { Pool } from 'pg';
+import { ensureSchema, getPool } from '../lib/postgres';
+import { authConfiguration } from '../lib/auth-config';
+import { GET, POST } from '../app/api/social/route';
+
+const origin = 'http://localhost:3000';
+const host = new URL(origin).host;
+const options = authConfiguration({});
+const captured: string[] = [];
+type TestAuth = { handler: (request: Request) => Promise<Response> };
+let auth: TestAuth;
+
+async function callAuth(pathName: string, body?: unknown, cookie = '') {
+  return auth.handler(new Request(origin + '/api/auth/' + pathName, {
+    method: body ? 'POST' : 'GET',
+    headers: { host, origin, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  }));
+}
+function sessionCookie(response: Response) {
+  return response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+}
+
+type User = { id: string; email: string; password: string; cookie: string; name: string };
+const users: Record<string, User> = {};
+async function registerUser(name: string) {
+  const email = name + '@social.test';
+  const password = 'Example-password-' + name + '-123!';
+  const signup = await callAuth('sign-up/email', { email, password, name, callbackURL: '/' });
+  assert.equal(signup.status, 200, await signup.clone().text());
+  const signupBody = await signup.json() as { user: { id: string } };
+  assert.equal(captured.length, 1, 'verification email captured');
+  const verificationUrl = new URL(captured.pop()!);
+  const verify = await auth.handler(new Request(verificationUrl.href, { headers: { host } }));
+  assert.equal(verify.status, 302);
+  const signin = await callAuth('sign-in/email', { email, password, callbackURL: '/' });
+  assert.equal(signin.status, 200, await signin.clone().text());
+  users[name] = { id: signupBody.user.id, email, password, cookie: sessionCookie(signin), name };
+  return users[name];
+}
+async function grantAsset(userId: string, type = 'image/jpeg') {
+  const key = crypto.randomUUID();
+  const pool = await getPool();
+  // assets.owner_id has a foreign key to profiles, mirroring the real flow
+  // where identity() creates the profile before any upload exists.
+  await pool.query('INSERT INTO profiles (id,username,name,bio,avatar,is_demo,created_at) VALUES ($1,$2,$3,$4,$5,0,$6) ON CONFLICT (id) DO NOTHING', [userId, 'rstmc_' + userId.slice(0, 6), userId, '', '', Date.now()]);
+  await pool.query('INSERT INTO assets (key,owner_id,mime,size,created_at,blob_url) VALUES ($1,$2,$3,$4,$5,$6)', [key, userId, type, 100, Date.now(), 'local']);
+  return key;
+}
+
+// Test convenience: response bodies are plain JSON objects/arrays.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function api(user: User | null, body?: Record<string, unknown> | null, query = '', headers: Record<string, string> = {}) {
+  // Real browsers and proxies always send Host; in-process Requests do not,
+  // so add it explicitly for fidelity.
+  const response = body
+    ? await POST(new Request(origin + '/api/social' + query, {
+        method: 'POST', headers: { host, origin, 'content-type': 'application/json', ...(user ? { cookie: user.cookie } : {}), ...headers }, body: JSON.stringify(body),
+      }))
+    : await GET(new Request(origin + '/api/social' + query, { headers: { host, ...headers, ...(user ? { cookie: user.cookie } : {}) } }));
+  const data = (await response.json().catch(() => null)) as any;
+  return { status: response.status, data };
+}
+
+let alice: User, bob: User, carol: User;
+before(async () => {
+  const pool = await getPool();
+  await ensureSchema();
+  auth = betterAuth({
+    ...options,
+    appName: 'FunctionGram',
+    secret: process.env.BETTER_AUTH_SECRET!,
+    database: pool as unknown as Pool,
+    emailVerification: {
+      ...options.emailVerification,
+      sendVerificationEmail: (details: { url: string }) => { captured.push(details.url); return Promise.resolve(); },
+    },
+    logger: { level: 'error' as const },
+  });
+  alice = await registerUser('alice');
+  bob = await registerUser('bob');
+  carol = await registerUser('carol');
+});
+after(() => { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ } });
+
+test('guest bootstrap seeds the demo feed and signs guests out of mutations', async () => {
+  const guest = await api(null);
+  assert.equal(guest.status, 200);
+  assert.equal(guest.data.me, null);
+  assert.ok(guest.data.posts.length >= 16, 'demo posts and stories seeded');
+  assert.ok(guest.data.people.length >= 8, 'demo profiles seeded');
+  const denied = await api(null, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true });
+  assert.equal(denied.status, 401, 'anonymous mutations rejected');
+});
+
+test('same-origin and trusted-origin checks guard every mutation', async () => {
+  const cross = await api(alice, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true }, '', { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' });
+  assert.equal(cross.status, 403);
+  const opaque = await api(alice, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true }, '', { origin: 'null' });
+  assert.equal(opaque.status, 403);
+  const other = await api(alice, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true }, '', { origin: 'http://unrelated.example' });
+  assert.equal(other.status, 403);
+  process.env.AUTH_TRUSTED_ORIGINS = 'http://preview.example';
+  try {
+    const trusted = await api(alice, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true }, '', { origin: 'http://preview.example' });
+    assert.equal(trusted.status, 200, 'explicitly trusted origins are allowed');
+    assert.equal(trusted.data.liked, 1);
+    assert.ok((trusted.data.likes as number) > 0, 'canonical like state returned');
+  } finally { delete process.env.AUTH_TRUSTED_ORIGINS; }
+  const self = await api(alice, { action: 'reaction', id: 'demo_coast', kind: 'like', active: false });
+  assert.equal(self.status, 200);
+});
+
+test('reactions return canonical state and are idempotent', async () => {
+  const liked = await api(bob, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true });
+  assert.equal(liked.data.liked, 1);
+  const likes = liked.data.likes as number;
+  const again = await api(bob, { action: 'reaction', id: 'demo_coast', kind: 'like', active: true });
+  assert.equal(again.data.likes, likes, 'double like does not double count');
+  const saved = await api(bob, { action: 'reaction', id: 'demo_coast', kind: 'save', active: true });
+  assert.equal(saved.data.saved, 1);
+  const savedFeed = await api(bob, null, '?saved=1');
+  assert.ok(savedFeed.data.some((post: { id: string }) => post.id === 'demo_coast'));
+  const otherSaved = await api(carol, null, '?saved=1');
+  assert.ok(!otherSaved.data.some((post: { id: string }) => post.id === 'demo_coast'), 'saves stay private');
+});
+
+test('comments are paginated with stable cursors', async () => {
+  const baseline = (await api(alice, null, '?comments=demo_coast')).data.items.length;
+  for (let i = 0; i < 15; i++) {
+    const created = await api(alice, { action: 'comment', id: 'demo_coast', body: 'cursor check ' + i });
+    assert.equal(created.status, 200);
+  }
+  const total = baseline + 15;
+  const page = await api(alice, null, '?comments=demo_coast&limit=10');
+  assert.equal(page.status, 200);
+  assert.equal(page.data.items.length, 10);
+  assert.ok(page.data.next_cursor, 'first page has a next cursor');
+  const times = page.data.items.map((c: { created_at: number }) => c.created_at);
+  assert.deepEqual([...times].sort((a, b) => a - b), times, 'ascending order');
+  const next = await api(alice, null, '?comments=demo_coast&limit=10&cursor=' + encodeURIComponent(page.data.next_cursor));
+  assert.equal(next.data.items.length, total - 10);
+  assert.ok(!next.data.items.some((c: { body: string }) => page.data.items.some((p: { body: string }) => p.body === c.body)), 'no overlap between pages');
+  assert.equal(next.data.next_cursor, null, 'last page ends the cursor chain');
+});
+
+test('comment deletion enforces ownership with correct 403/404 states', async () => {
+  const key = await grantAsset(alice.id);
+  const post = await api(alice, { action: 'create_post', kind: 'post', media: ['/api/media/' + key], caption: 'moderation sandbox' });
+  assert.equal(post.status, 200);
+  const postId = post.data.id as string;
+  const aliceComment = (await api(alice, { action: 'comment', id: postId, body: 'mine' })).data.id;
+  const bobComment = (await api(bob, { action: 'comment', id: postId, body: 'theirs' })).data.id;
+  const carolDeletesBob = await api(carol, { action: 'delete_comment', id: bobComment });
+  assert.equal(carolDeletesBob.status, 403, 'strangers cannot delete comments');
+  const stillThere = (await api(alice, null, '?comments=' + postId)).data.items.some((c: { id: string }) => c.id === bobComment);
+  assert.ok(stillThere, 'the comment survived the rejected delete');
+  const missing = await api(bob, { action: 'delete_comment', id: crypto.randomUUID() });
+  assert.equal(missing.status, 404, 'missing comments report 404, never ok:true');
+  const authorDeletesStranger = await api(alice, { action: 'delete_comment', id: bobComment });
+  assert.equal(authorDeletesStranger.data.ok, true, 'post authors can moderate their post');
+  const strangerDeletesOwner = await api(bob, { action: 'delete_comment', id: aliceComment });
+  assert.equal(strangerDeletesOwner.status, 403, 'comment authors are not above the owner rule');
+  const own = await api(alice, { action: 'delete_comment', id: aliceComment });
+  assert.equal(own.data.ok, true, 'owners delete their own comments');
+  assert.ok(!(await api(alice, null, '?comments=' + postId)).data.items.length);
+});
+
+test('uploads, posts and the 24-hour story lifecycle stay consistent', async () => {
+  const key = await grantAsset(alice.id);
+  const post = await api(alice, { action: 'create_post', kind: 'post', media: ['/api/media/' + key], caption: 'a real moment', location: 'Test studio', category: 'Lifestyle', tagged_users: [bob.id] });
+  assert.equal(post.status, 200, JSON.stringify(post.data));
+  const postId = post.data.id as string;
+  const direct = await api(carol, null, '?post=' + postId);
+  assert.equal(direct.data[0]?.caption, 'a real moment', 'direct post links retrieve persisted posts');
+  const tagged = await api(bob, null, '?tagged=' + encodeURIComponent(bob.id));
+  assert.ok(tagged.data.some((p: { id: string }) => p.id === postId), 'tagged feed shows the tagged post');
+  const stolen = await api(bob, { action: 'create_post', kind: 'post', media: ['/api/media/' + key], caption: 'stolen' });
+  assert.equal(stolen.status, 400, 'another account cannot claim an upload');
+
+  const story = await api(alice, { action: 'create_post', kind: 'story', media: ['/api/media/' + key], caption: 'story test' });
+  assert.equal(story.status, 200);
+  const storyId = story.data.id as string;
+  const storyData = (await api(alice, null, '?post=' + storyId)).data[0];
+  assert.equal(storyData.expires_at - storyData.created_at, 86400000, 'story lifespan is exactly 24 hours');
+  await api(bob, { action: 'comment', id: storyId, body: 'great story!' });
+  await api(bob, { action: 'reaction', id: storyId, kind: 'seen', active: true });
+  await api(alice, { action: 'highlight', id: storyId, active: true });
+  const highlightsBefore = await api(carol, null, '?highlights=' + encodeURIComponent(alice.id));
+  assert.ok(highlightsBefore.data.some((p: { id: string }) => p.id === storyId));
+  // Expire the story and re-check every surface that exposes it.
+  await (await getPool()).query('UPDATE posts SET expires_at=$1 WHERE id=$2', [Date.now() - 1000, storyId]);
+  assert.equal((await api(alice, null, '?comments=' + storyId)).status, 404, 'expired story comments are rejected');
+  assert.equal((await api(alice, { action: 'comment', id: storyId, body: 'too late' })).status, 404, 'expired story comments cannot be added');
+  assert.equal((await api(alice, { action: 'reaction', id: storyId, kind: 'like', active: true })).status, 404, 'expired stories cannot be reacted to');
+  assert.equal((await api(alice, null, '?post=' + storyId)).data.length, 0, 'expired stories disappear from retrieval');
+  const highlightsAfter = await api(carol, null, '?highlights=' + encodeURIComponent(alice.id));
+  assert.ok(!highlightsAfter.data.some((p: { id: string }) => p.id === storyId), 'expired stories disappear from highlights');
+  assert.equal((await api(bob, null, '?story-viewers=' + storyId)).status, 404, 'viewers of expired stories are unavailable');
+  const reel = await api(alice, { action: 'create_post', kind: 'reel', media: ['/api/media/' + key], caption: 'invalid' });
+  assert.equal(reel.status, 400, 'a photo cannot be submitted as a reel');
+});
+
+test('post editing is restricted to authors and stamps edited_at', async () => {
+  const posts = (await api(alice, null, '?profile=' + encodeURIComponent(alice.id))).data;
+  const post = posts.find((p: { caption: string }) => p.caption === 'a real moment');
+  assert.ok(post, 'test post is on the profile');
+  const denied = await api(bob, { action: 'update_post', id: post.id, caption: 'hacked', location: '', category: 'For you' });
+  assert.equal(denied.status, 403, 'non-authors cannot edit');
+  const edited = await api(alice, { action: 'update_post', id: post.id, caption: 'an edited moment', location: 'Studio B', category: 'Photography' });
+  assert.equal(edited.status, 200);
+  const refreshed = (await api(carol, null, '?post=' + post.id)).data[0];
+  assert.equal(refreshed.caption, 'an edited moment');
+  assert.equal(refreshed.category, 'Photography');
+  assert.ok(refreshed.edited_at > refreshed.created_at, 'edited_at stamped');
+  assert.equal((await api(alice, { action: 'update_post', id: crypto.randomUUID(), caption: 'x', location: '', category: 'For you' })).status, 404);
+});
+
+test('the following feed is filtered and paginated server-side', async () => {
+  const key = await grantAsset(bob.id);
+  await api(bob, { action: 'create_post', kind: 'post', media: ['/api/media/' + key], caption: 'bob moment one' });
+  const before = await api(alice, null, '?following=1');
+  assert.equal(before.status, 200);
+  assert.ok(!before.data.posts.some((p: { caption: string }) => p.caption === 'bob moment one'), 'not in following before the follow');
+  await api(alice, { action: 'follow', id: bob.id, active: true });
+  const after = await api(alice, null, '?following=1');
+  assert.ok(after.data.posts.some((p: { caption: string }) => p.caption === 'bob moment one'), 'bob appears after the follow');
+  assert.ok(after.data.posts.every((p: { author_id: string }) => p.author_id === alice.id || p.author_id === bob.id), 'server-side filter admits only followed authors and self');
+  const guest = await GET(new Request(origin + '/api/social?following=1'));
+  assert.equal(guest.status, 401, 'following requires a signed-in viewer');
+  const pageTwo = await api(alice, null, '?following=1&offset=1');
+  if (after.data.posts.length > 1) assert.notEqual(pageTwo.data.posts[0]?.id, after.data.posts[0].id, 'independent offset pagination');
+});
+
+test('private accounts hide posts from everyone but followers and the owner', async () => {
+  const key = await grantAsset(bob.id);
+  await api(bob, { action: 'create_post', kind: 'post', media: ['/api/media/' + key], caption: 'private bob moment' });
+  await api(bob, { action: 'set_privacy', private: true });
+  const stranger = await api(carol, null, '?profile=' + encodeURIComponent(bob.id));
+  assert.ok(!stranger.data.some((p: { caption: string }) => p.caption === 'private bob moment'), 'strangers see nothing');
+  const strangerFeed = (await api(carol)).data.posts;
+  assert.ok(!strangerFeed.some((p: { caption: string }) => p.caption === 'private bob moment'), 'stranger feed excludes private posts');
+  const guestFeed = (await api(null)).data.posts;
+  assert.ok(!guestFeed.some((p: { caption: string }) => p.caption === 'private bob moment'), 'guest feed excludes private posts');
+  const owner = await api(bob, null, '?profile=' + encodeURIComponent(bob.id));
+  assert.ok(owner.data.some((p: { caption: string }) => p.caption === 'private bob moment'), 'owner keeps access');
+  const follower = await api(alice, null, '?profile=' + encodeURIComponent(bob.id));
+  assert.ok(follower.data.some((p: { caption: string }) => p.caption === 'private bob moment'), 'followers keep access');
+  await api(bob, { action: 'set_privacy', private: false });
+  const reopened = await api(carol, null, '?profile=' + encodeURIComponent(bob.id));
+  assert.ok(reopened.data.some((p: { caption: string }) => p.caption === 'private bob moment'), 'going public restores visibility');
+});
+
+test('blocking hides content, removes follows, and blocks messaging one way', async () => {
+  assert.equal((await api(bob, { action: 'block', id: bob.id })).status, 400, 'cannot block yourself');
+  await api(bob, { action: 'block', id: alice.id });
+  const bobFeed = (await api(bob)).data.posts;
+  assert.ok(!bobFeed.some((p: { author_id: string }) => p.author_id === alice.id), 'blocked author disappears from the feed');
+  const noMessage = await api(alice, { action: 'message', id: bob.id, body: 'hello?' });
+  assert.equal(noMessage.status, 403, 'blocked users cannot message the blocker');
+  const stillOk = await api(bob, { action: 'message', id: alice.id, body: 'hi from bob' });
+  assert.equal(stillOk.status, 200, 'the blocker keeps messaging rights');
+  const unfollowed = (await api(alice)).data.people.find((p: { id: string }) => p.id === bob.id);
+  assert.ok(unfollowed && !unfollowed.followed, 'blocking removes the follow');
+  await api(bob, { action: 'unblock', id: alice.id });
+  const restored = await api(alice, { action: 'message', id: bob.id, body: 'back to normal' });
+  assert.equal(restored.status, 200);
+});
+
+test('reports are recorded once per reason and validated', async () => {
+  const first = await api(alice, { action: 'report', id: bob.id, target_type: 'profile', reason: 'spam' });
+  assert.equal(first.status, 200);
+  const duplicate = await api(alice, { action: 'report', id: bob.id, target_type: 'profile', reason: 'spam', details: 'again' });
+  assert.equal(duplicate.status, 200, 'repeat reports are idempotent');
+  const rows = await (await getPool()).query('SELECT * FROM reports WHERE target_id=$1 AND target_type=$2', [bob.id, 'profile']);
+  assert.equal(rows.rowCount, 1, 'only one report row per reporter/reason');
+  assert.equal((await api(alice, { action: 'report', id: bob.id, target_type: 'profile', reason: 'made_up' })).status, 400);
+  assert.equal((await api(alice, { action: 'report', id: alice.id, target_type: 'profile', reason: 'spam' })).status, 400, 'cannot report yourself');
+  const postReport = await api(alice, { action: 'report', id: 'demo_coast', target_type: 'post', reason: 'misleading' });
+  assert.equal(postReport.status, 200, 'posts can be reported');
+  assert.equal((await api(alice, { action: 'report', id: crypto.randomUUID(), target_type: 'post', reason: 'spam' })).status, 404);
+});
+
+test('saved collections are owned, named, and kept in sync with saves', async () => {
+  const post = (await api(alice, null, '?post=demo_coast')).data[0];
+  const created = await api(bob, { action: 'create_collection', name: 'Nature finds' });
+  assert.equal(created.status, 200);
+  const id = created.data.id as string;
+  const duplicate = await api(bob, { action: 'create_collection', name: 'Nature finds' });
+  assert.equal(duplicate.data.id, id, 'duplicate names resolve to the same collection');
+  assert.equal((await api(bob, { action: 'create_collection', name: 'x' })).status, 400, 'names are length validated');
+  await api(bob, { action: 'save_to_collection', id, post_id: post.id, active: true });
+  const collections = await api(bob, null, '?collections=1');
+  const mine = collections.data.find((c: { id: string }) => c.id === id);
+  assert.deepEqual(mine.post_ids, [post.id]);
+  const savedNow = (await api(bob, null, '?saved=1')).data;
+  assert.ok(savedNow.some((p: { id: string }) => p.id === post.id), 'collection membership implies saved');
+  const otherOwner = await api(alice, { action: 'save_to_collection', id, post_id: post.id, active: false });
+  assert.equal(otherOwner.status, 404, 'other users cannot touch a collection');
+  await api(bob, { action: 'save_to_collection', id, post_id: post.id, active: false });
+  const emptied = (await api(bob, null, '?collections=1')).data.find((c: { id: string }) => c.id === id);
+  assert.deepEqual(emptied.post_ids, []);
+  await api(bob, { action: 'delete_collection', id });
+  assert.equal((await api(bob, { action: 'delete_collection', id })).status, 404);
+});
+
+test('messages support deletion and story replies with lifecycle checks', async () => {
+  const sent = await api(alice, { action: 'message', id: bob.id, body: 'delete me' });
+  assert.equal(sent.status, 200);
+  const messageId = sent.data.id as string;
+  const stranger = await api(carol, { action: 'delete_message', id: messageId });
+  assert.equal(stranger.status, 404, 'participants only');
+  assert.equal((await api(alice, { action: 'delete_message', id: messageId })).data.ok, true);
+  assert.equal((await api(alice, { action: 'delete_message', id: messageId })).status, 404, 'deleted twice is a 404');
+  // Story reply: carol replies to alice's new story and it lands in alice's inbox.
+  const key = await grantAsset(alice.id);
+  const story = await api(alice, { action: 'create_post', kind: 'story', media: ['/api/media/' + key], caption: 'reply to me' });
+  const storyId = story.data.id as string;
+  const reply = await api(carol, { action: 'message', post_id: storyId, body: 'love this!' });
+  assert.equal(reply.status, 200);
+  assert.equal(reply.data.recipient_id, alice.id, 'replies reach the story author');
+  const inbox = await api(alice, null, '?inbox=1');
+  const replyRow = inbox.data.find((m: { body: string }) => m.body === 'love this!');
+  assert.ok(replyRow && replyRow.post_id === storyId, 'reply is stored with the story reference');
+  const viewers = await api(alice, null, '?story-viewers=' + storyId);
+  assert.equal(viewers.data.length, 0, 'no viewers until someone marks it seen');
+  await api(carol, { action: 'reaction', id: storyId, kind: 'seen', active: true });
+  const seen = await api(alice, null, '?story-viewers=' + storyId);
+  assert.equal(seen.status, 200);
+  assert.ok(seen.data.some((v: { username: string }) => Boolean(v.username)));
+  const notOwner = await api(carol, null, '?story-viewers=' + storyId);
+  assert.equal(notOwner.status, 404, 'only the story owner sees the viewer list');
+  // Expired stories reject new replies.
+  await (await getPool()).query('UPDATE posts SET expires_at=$1 WHERE id=$2', [Date.now() - 1000, storyId]);
+  assert.equal((await api(carol, { action: 'message', post_id: storyId, body: 'late reply' })).status, 404);
+});
+
+test('conversation search finds partners by message text', async () => {
+  await api(bob, { action: 'message', id: alice.id, body: 'zebra crossing test' });
+  const hits = await api(alice, null, '?messages_search=zebra');
+  assert.equal(hits.status, 200);
+  assert.ok(hits.data.some((p: { id: string }) => p.id === bob.id));
+  const none = await api(alice, null, '?messages_search=nonexistentterm42');
+  assert.equal(none.data.length, 0);
+  const short = await api(alice, null, '?messages_search=z');
+  assert.equal(short.status, 400, 'single-character searches are rejected');
+});
+
+test('profile edits keep the existing validation rules', async () => {
+  const me = (await api(alice)).data.me;
+  assert.equal((await api(bob, { action: 'profile', username: me.username, name: 'Bob', bio: '', avatar: '' })).status, 409, 'duplicate usernames rejected');
+  assert.equal((await api(bob, { action: 'profile', username: 'bad username!', name: 'Bob', bio: '', avatar: '' })).status, 400, 'invalid usernames rejected');
+  const updated = await api(alice, { action: 'profile', username: 'alice_test', name: 'Alice T', bio: 'test', website: 'https://example.com', avatar: '' });
+  assert.equal(updated.status, 200);
+  assert.equal((await api(alice)).data.me.username, 'alice_test');
+  await api(alice, { action: 'profile', username: me.username, name: me.name, bio: me.bio, website: '', avatar: '' });
+});

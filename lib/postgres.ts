@@ -1,8 +1,7 @@
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
+import { Pool, types, type QueryResultRow } from 'pg';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -20,6 +19,7 @@ const migrations = [
   { version: 1, statements: schemaStatements },
   { version: 2, statements: socialUpgradeStatements },
   { version: 3, statements: aspectUpgradeStatements },
+  { version: 4, statements: accountUpgradeStatements },
 ];
 
 let pool: Pool | undefined;
@@ -46,6 +46,12 @@ interface PGliteInstance {
 }
 const LOCAL_POOL_KEY = '__functiongramLocalPool__';
 
+// Tests point this at a throwaway directory; local development uses the
+// project-local .pglite folder.
+export function localDataDir(): string {
+  return process.env.FUNCTIONGRAM_PGLITE_DIR || path.join(process.cwd(), '.pglite');
+}
+
 async function createLocalPool(): Promise<PoolLike> {
   // createRequire bypasses bundler analysis so PGlite is always loaded as a
   // native Node dependency (see also serverExternalPackages in next.config.ts).
@@ -54,7 +60,7 @@ async function createLocalPool(): Promise<PoolLike> {
   const { PGlite } = require('@electric-sql/pglite') as {
     PGlite: new (dataDir: string) => PGliteInstance;
   };
-  const instance = new PGlite(path.join(process.cwd(), '.pglite'));
+  const instance = new PGlite(localDataDir());
   const query = async (text: string, values?: unknown[]) => {
     const result = await instance.query(text, values as unknown[]);
     // PGlite returns int8/numeric columns as strings; the pg driver parses
@@ -62,7 +68,11 @@ async function createLocalPool(): Promise<PoolLike> {
     const numeric = (result.fields ?? []).filter(field => field.dataTypeID === 20 || field.dataTypeID === 1700).map(field => field.name);
     if (numeric.length) for (const row of result.rows as Record<string, unknown>[])
       for (const column of numeric) if (typeof row[column] === 'string') row[column] = Number(row[column]);
-    return { rows: result.rows as QueryResultRow[], rowCount: result.affectedRows ?? result.rows.length };
+    // The pg driver reports SELECT rowCount as the number of rows returned,
+    // while PGlite reports 0 affectedRows for reads. Mirror pg's behavior so
+    // callers see the same contract on both drivers.
+    const isRead = /^\s*(SELECT|WITH|VALUES|TABLE|SHOW)\b/i.test(text);
+    return { rows: result.rows as QueryResultRow[], rowCount: isRead ? result.rows.length : result.affectedRows ?? result.rows.length };
   };
   return {
     query,
@@ -112,7 +122,7 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements]] as const) {
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements]] as const) {
         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
         if (!applied.rowCount) {
           for (const statement of statements) await client.query(statement);
