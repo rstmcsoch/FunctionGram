@@ -224,7 +224,7 @@ export function MediaFrame({
   }
   return (
     <div className={"media-frame " + (fit === "contain" ? "media-contain " : "") + className} style={style} onDoubleClick={onDoubleClick}>
-      <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async"
+      <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async" draggable={false}
         onLoad={event => { if (!ratio) { const image = event.currentTarget; if (image.naturalWidth && image.naturalHeight) setMeasured(image.naturalWidth / image.naturalHeight); } }}
         onError={event => { event.currentTarget.alt = "This photo could not be loaded."; }} />
       {children}
@@ -237,38 +237,118 @@ export function MediaFrame({
 export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
   items: string[]; aspects?: number[] | null; render: (item: string, index: number, eager: boolean) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
 }) {
-  // A short, smooth slide animation (22ms felt like a jump cut); adjacent
-  // slides are preloaded so swipes never show a spinner.
-  const [emblaRef, embla] = useEmblaCarousel({ loop: false, watchDrag: true, duration: 300 });
+  const [emblaRef, embla] = useEmblaCarousel({
+    loop: false,
+    watchDrag: true,
+    duration: 25,
+  });
   const [index, setIndex] = useState(0);
+  const [canScrollPrev, setCanScrollPrev] = useState(false);
+  const [canScrollNext, setCanScrollNext] = useState(items.length > 1);
+
   useEffect(() => {
     if (!embla) return;
-    const sync = () => setIndex(embla.selectedScrollSnap());
+    const sync = () => {
+      setIndex(embla.selectedScrollSnap());
+      setCanScrollPrev(embla.canScrollPrev());
+      setCanScrollNext(embla.canScrollNext());
+    };
+    sync();
     embla.on("select", sync);
     embla.on("reInit", sync);
-    return () => { embla.off("select", sync); embla.off("reInit", sync); };
+    return () => {
+      embla.off("select", sync);
+      embla.off("reInit", sync);
+    };
   }, [embla]);
-  const ratio = aspects && aspects[index] && Number.isFinite(aspects[index]) ? clampRatio(aspects[index]) : null;
+
+  useEffect(() => {
+    if (embla) embla.reInit();
+  }, [embla, items]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      embla?.scrollPrev();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      embla?.scrollNext();
+    }
+  };
+
+  const ratio = aspects && aspects[index] && Number.isFinite(aspects[index])
+    ? clampRatio(aspects[index])
+    : (aspects && aspects[0] && Number.isFinite(aspects[0]) ? clampRatio(aspects[0]) : null);
+
   return (
-    <div className={"carousel " + (ratio ? "" : "carousel-measuring")} style={ratio ? { aspectRatio: String(ratio) } : undefined} onDoubleClick={onDoubleClick} role="group" aria-roledescription="carousel" aria-label={ariaLabel}>
-      <div className="carousel-track" ref={emblaRef}>
-        {items.map((item, position) => (
-          <div className="carousel-slide" key={item + ":" + position} aria-hidden={position !== index}>
-            {render(item, position, Math.abs(position - index) <= 1)}
-          </div>
-        ))}
+    <div
+      className={"carousel " + (ratio ? "" : "carousel-measuring")}
+      style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label={ariaLabel}
+    >
+      <div className="carousel-viewport" ref={emblaRef}>
+        <div className="carousel-track">
+          {items.map((item, position) => (
+            <div
+              className="carousel-slide"
+              key={item + ":" + position}
+              aria-hidden={position !== index}
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${position + 1} of ${items.length}`}
+            >
+              {render(item, position, Math.abs(position - index) <= 1)}
+            </div>
+          ))}
+        </div>
       </div>
       {items.length > 1 && (
         <>
           <span className="image-number">{index + 1}/{items.length}</span>
-          <IconButton className="carousel-back" label="Previous photo" disabled={index === 0} onClick={() => embla?.scrollPrev()}>
-            <ChevronLeft size={17} />
-          </IconButton>
-          <IconButton className="carousel-next" label="Next photo" disabled={index === items.length - 1} onClick={() => embla?.scrollNext()}>
-            <ChevronRight size={17} />
-          </IconButton>
-          <div className="carousel-dots" aria-hidden="true">
-            {items.map((_, position) => <span key={position} className={position === index ? "active" : ""} />)}
+          <button
+            type="button"
+            className="carousel-back icon-button"
+            aria-label="Previous photo"
+            disabled={!canScrollPrev}
+            onClick={(e) => {
+              e.stopPropagation();
+              embla?.scrollPrev();
+            }}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <button
+            type="button"
+            className="carousel-next icon-button"
+            aria-label="Next photo"
+            disabled={!canScrollNext}
+            onClick={(e) => {
+              e.stopPropagation();
+              embla?.scrollNext();
+            }}
+          >
+            <ChevronRight size={18} />
+          </button>
+          <div className="carousel-dots" role="tablist" aria-label="Photo navigation">
+            {items.map((_, position) => (
+              <button
+                type="button"
+                key={position}
+                role="tab"
+                aria-selected={position === index}
+                aria-label={`Go to photo ${position + 1}`}
+                className={"carousel-dot " + (position === index ? "active" : "")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  embla?.scrollTo(position);
+                }}
+              />
+            ))}
           </div>
         </>
       )}

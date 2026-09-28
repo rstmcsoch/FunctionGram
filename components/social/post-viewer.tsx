@@ -71,12 +71,26 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
         <DialogDescription className="sr-only">View the photo or video with its comments. Press Escape to close.</DialogDescription>
         <IconButton className="close-post" label="Close post" onClick={onClose}><X size={22} /></IconButton>
         <div className="post-viewer-layout">
+          <header className="post-viewer-header post-viewer-header-mobile">
+            <Avatar person={post.author} size={36} onClick={() => { onClose(); actions.openProfile(post.author_id); }} />
+            <div className="post-user">
+              <div>
+                <button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button>
+                {post.location && <span className="post-location">{post.location}</span>}
+              </div>
+              <span className="post-time">{timeAgo(post.created_at)}</span>
+            </div>
+            <div className="post-viewer-header-actions">
+              <PostMenu post={post} actions={actions} />
+              <IconButton className="close-post-inline" label="Close post" onClick={onClose}><X size={20} /></IconButton>
+            </div>
+          </header>
           <div className="post-viewer-media">
             <PostMedia post={post} onDoubleClick={doubleTapLike} />
             <HeartBurst show={burst} />
           </div>
           <section className="post-viewer-panel">
-            <header className="post-viewer-header">
+            <header className="post-viewer-header post-viewer-header-desktop">
               <Avatar person={post.author} size={38} onClick={() => { onClose(); actions.openProfile(post.author_id); }} />
               <div className="post-user">
                 <div>
