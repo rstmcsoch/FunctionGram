@@ -18,7 +18,7 @@ import { Messages } from "./messages";
 import { FloatingDock } from "./floating-dock";
 import { Reels } from "./reels";
 import { StoryViewer } from "./stories";
-import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView } from "./views";
+import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView, TagView } from "./views";
 import type { SocialData, Post, Person, Comment } from "@/lib/types";
 
 const navItems = [
@@ -33,7 +33,7 @@ const navItems = [
 ] as const;
 
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
-type View = "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved";
+type View = "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
 export default function RstmcApp({ initial }: { initial: SocialData | null }) {
   const [data, setData] = useState<SocialData>(initial || emptyData);
@@ -117,7 +117,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
         return;
       }
       setSelectedPost(null);
-      const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved"];
+      const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
       if (!target || allowed.includes(target)) {
         setView((target || "home") as View);
         setProfileId(id || null);
@@ -272,10 +272,12 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     react, submitComment,
     openPost: post => { setSelectedPost(post); window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); },
     openProfile: id => navigate("profile", id),
+    openTag: tag => navigate("tag", tag),
     share: setSharePost,
     deletePost: setDeleteTarget,
     copyLink,
     editPost: setEditingPost,
+    people: data.people,
     me: data.me,
   };
 
@@ -458,6 +460,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
               : <Empty icon={<UserRound />} heading="Your own corner of RSTMC" body="Sign in to create a profile and share your world."
                   action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
             {view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
+            {view === "tag" && profileId && <TagView tag={profileId} openPost={actions.openPost} />}
             {view === "messages" && (data.me
               ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} onProfile={id => navigate("profile", id)} />
               : <Empty icon={<Send />} heading="Your conversations, here" body="Sign in to send messages and save notes to yourself."
@@ -475,9 +478,9 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       {editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
       {story !== null && stories[story] && (
-        <StoryViewer stories={stories} start={story} me={data.me} onClose={() => setStory(null)}
+        <StoryViewer stories={stories} start={story} me={data.me} people={data.people} onClose={() => setStory(null)}
           onSeen={post => { if (data.me && !post.seen) void react(post, "seen", true); }}
-          onProfile={id => navigate("profile", id)} />
+          onProfile={id => navigate("profile", id)} onTag={tag => navigate("tag", tag)} />
       )}
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}

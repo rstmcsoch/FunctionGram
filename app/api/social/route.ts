@@ -53,6 +53,13 @@ export async function GET(request:Request){try{
   if(query.has('search')){const term=clean(query.get('search'),80);if(!term)return json({people:[],posts:[]});const viewer=await identity(headers);const [users,posts]=await Promise.all([searchPeople(viewer,term),feed(viewer,30,0,{search:term,discovery:true})]);return json({people:users,posts});}
   if(query.has('reels')){const offset=Math.max(0,Math.min(10000,Number(query.get('offset'))||0));return json(await feed(await identity(headers),20,offset,{reels:true}));}
   if(query.has('explore')){const category=clean(query.get('category')||'For you',50);const offset=Math.max(0,Math.min(10000,Number(query.get('offset'))||0));return json(await feed(await identity(headers),24,offset,{category,discovery:true}));}
+  if(query.has('hashtag')){
+    const tag=clean(query.get('hashtag'),50).replace(/^#/,'').toLowerCase();
+    if(!/^[a-z0-9_]{1,50}$/.test(tag))throw new AppError('Invalid hashtag.');
+    const offset=Math.max(0,Math.min(10000,Number(query.get('offset'))||0));
+    const posts=await feed(await identity(headers),30,offset,{hashtag:tag,discovery:true});
+    return json({posts,hasMore:posts.length===30});
+  }
   if(query.has('following')){
     const user=await identity(headers,true);
     const offset=Math.max(0,Math.min(10000,Number(query.get('offset'))||0));

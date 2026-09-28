@@ -95,7 +95,7 @@ function searchPattern(value:string){return '%'+value.replace(/[\\%_]/g,'\\$&')+
 export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\' ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
 export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
 
-type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean;following?:boolean};
+type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean;following?:boolean;hashtag?:string};
 function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({...p,media:JSON.parse(p.media as string) as string[],aspects:p.aspects?JSON.parse(p.aspects as string) as number[]:null,media_options:p.media_options?JSON.parse(p.media_options as string) as MediaOption[]:[],tagged_users:p.tagged_users?JSON.parse(p.tagged_users as string) as string[]:[],highlighted:!!p.highlighted,author:{id:p.author_id,username:p.username,name:p.name,avatar:p.avatar,bio:p.bio,website:p.website,is_demo:p.is_demo,is_private:p.is_private}})) as unknown as Post[];}
 /**
  * Builds the feed query. The per-row counters (likes, comments) and the
@@ -115,6 +115,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   if(filter.discovery){conditions.push("p.kind!='story'");}
   if(filter.reels){conditions.push("p.kind='reel'");}
   if(filter.following){conditions.push('(p.author_id IN (SELECT followee_id FROM follows WHERE follower_id=?) OR p.author_id=?)');filterArgs.push(v,v);}
+  if(filter.hashtag){conditions.push("p.caption ~* ?");filterArgs.push("(^|[^a-z0-9_])#"+filter.hashtag+"($|[^a-z0-9_])");}
   const extra=conditions.length?' AND '+conditions.join(' AND '):'';
   // Placeholder order matches the SQL text: the viewer-reaction aggregate in
   // the FROM clause first, then the WHERE guards, then the extra conditions.

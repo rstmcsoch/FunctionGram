@@ -12,7 +12,7 @@ Next.js/Vercel codebase.
 | --- | --- | --- |
 | TypeScript strict | `npm run typecheck` (`tsc --noEmit`) | 0 errors |
 | Lint | `npm run lint` | 0 errors, 7 warnings (only the `<img>` LCP notices Next.js emits for user-supplied media) |
-| Test suite | `npm run test:vercel` | 25/25 pass, 0 fail (stable across consecutive runs) |
+| Test suite | `npm run test:vercel` | 26/26 pass, 0 fail |
 | Production build | `npm run build` | compiles; all routes generated incl. `/reset-password` |
 | Install | `npm ci` | clean (746 packages) |
 | Runtime smoke test | `next dev` + local PGlite + dummy Brevo env | bootstrap, guest 401s, following/search/explore/story-viewers/messages/report/block/collections/upload/create/edit all verified over HTTP |
@@ -22,7 +22,7 @@ inboxes, Vercel Blob durable uploads, real Neon `DATABASE_URL` connectivity,
 and Vercel deployment cookies. These are covered as far as possible with the
 fake-Brevo and local-Blob paths and fail-closed checks below.
 
-## Test inventory (25)
+## Test inventory (26)
 
 - `tests/auth.test.ts` (3): trusted-origin config; signup→verification→sign-in
   E2E with Brevo capture; **password recovery E2E** — unknown email returns a
@@ -30,9 +30,9 @@ fake-Brevo and local-Blob paths and fail-closed checks below.
   `/api/auth/reset-password/<token>?callbackURL=…`, expired token →
   `INVALID_TOKEN`, single-use token, session revocation on reset, wrong/old
   password 401, rate limit 429 on the 4th reset request in 60s.
-- `tests/email.test.ts` (2): Brevo transactional email shape and callback
+- `tests/email.test.ts` (3): Brevo transactional email shape and callback
   normalization; setup/provider failure fails safely without claiming delivery.
-- `tests/social.test.ts` (15): guest bootstrap + guest mutation 401s;
+- `tests/social.test.ts` (16): guest bootstrap + guest mutation 401s;
   same-origin/trusted-origin guard on every mutation; canonical idempotent
   reactions; cursor pagination with stable `(created_at, id)` ordering;
   comment deletion 403/404 (never fake `ok`); upload quota + 24h story expiry;
@@ -41,7 +41,9 @@ fake-Brevo and local-Blob paths and fail-closed checks below.
   follows, one-way messaging); report validation and once-per-reason; saved
   collections sync; message deletion and story replies; conversation search;
   profile edit validation; schema/transaction rollback; SQL translation of
-  `?` and escaped quotes inside string literals; media magic-byte checks.
+  `?` and escaped quotes inside string literals; media magic-byte checks;
+  public hashtag discovery with case-insensitive whole-word matching, story
+  exclusion, and invalid-tag rejection.
 - `tests/vercel.test.ts` (4): feed/people query builder contracts (liked/saved/
   seen ints, stable ordering args), account-upgrade statements, media checks,
   and the no-Cloudflare-imports guard over the current route file list.
@@ -121,6 +123,15 @@ fake-Brevo and local-Blob paths and fail-closed checks below.
 - **Accessibility & robustness**: route-level error boundaries
   (`app/error.tsx`, `app/global-error.tsx`) plus `app/not-found.tsx`;
   reduced-motion already honored globally.
+- **Clickable captions**: hashtags open `#/tag/<name>` and show matching posts
+  and reels; known `@mentions` open profiles, while unknown handles remain
+  plain text. Captions are tokenized consistently in feed cards, post viewer,
+  stories, and reels.
+
+Hashtag results use `GET /api/social?hashtag=<tag>[&offset=]`, return `{ posts,
+hasMore }`, allow guest discovery, exclude stories, and preserve the standard
+private-account and blocked-user visibility rules. Tags are case-insensitive,
+whole-word matches and are validated before query construction.
 
 ## Performance & UI
 

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useEffectEvent } from "react"
 import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX, MessageCircle, Eye, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, IconButton, timeAgo, request, Busy } from "./common";
+import { Caption } from "./post-card";
 import { toast } from "sonner";
 import type { Person, Post } from "@/lib/types";
 
@@ -32,8 +33,8 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
   );
 }
 
-export function StoryViewer({ stories, start, me, onClose, onSeen, onProfile }: {
-  stories: Post[]; start: number; me: Person | null; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void;
+export function StoryViewer({ stories, start, me, people, onClose, onSeen, onProfile, onTag }: {
+  stories: Post[]; start: number; me: Person | null; people: Person[]; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
 }) {
   const [index, setIndex] = useState(start);
   const post = stories[index];
@@ -44,13 +45,13 @@ export function StoryViewer({ stories, start, me, onClose, onSeen, onProfile }: 
   useEffect(() => { if (!post) onClose(); }, [post, onClose]);
   if (!post) return null;
   return (
-    <StoryPlayback key={post.id} stories={stories} index={index} setIndex={setIndex} post={post} me={me} next={next} onClose={onClose} onSeen={onSeen} onProfile={onProfile} />
+    <StoryPlayback key={post.id} stories={stories} index={index} setIndex={setIndex} post={post} me={me} people={people} next={next} onClose={onClose} onSeen={onSeen} onProfile={onProfile} onTag={onTag} />
   );
 }
 
-function StoryPlayback({ stories, index, setIndex, post, me, next, onClose, onSeen, onProfile }: {
-  stories: Post[]; index: number; setIndex: React.Dispatch<React.SetStateAction<number>>; post: Post; me: Person | null;
-  next: () => void; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void;
+function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClose, onSeen, onProfile, onTag }: {
+  stories: Post[]; index: number; setIndex: React.Dispatch<React.SetStateAction<number>>; post: Post; me: Person | null; people: Person[];
+  next: () => void; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
 }) {
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -136,7 +137,7 @@ function StoryPlayback({ stories, index, setIndex, post, me, next, onClose, onSe
               : <img key={post.id} src={post.media[0]} alt={post.caption || "Story photo"} onLoad={() => setReady(true)} />}
             <button type="button" className="story-tap previous" aria-label="Previous story" onClick={() => setIndex(value => Math.max(0, value - 1))} />
             <button type="button" className="story-tap next" aria-label="Next story" onClick={next} />
-            {post.caption && <p className="story-caption">{post.caption}</p>}
+            {post.caption && <p className="story-caption"><Caption text={post.caption} people={people} onProfile={id => { onClose(); onProfile(id); }} onTag={tag => { onClose(); onTag(tag); }} /></p>}
             {replyTo && <ReplyComposer post={post} onClose={() => setReplyTo(false)} />}
             {showViewers && <StoryViewers post={post} onClose={() => setShowViewers(false)} />}
           </div>

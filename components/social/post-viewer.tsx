@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Avatar, IconButton, request, timeAgo, HeartBurst, Busy } from "./common";
-import { PostActionsRow, PostMenu, PostMedia, CommentForm, CommentRow, type PostActions } from "./post-card";
+import { Caption, PostActionsRow, PostMenu, PostMedia, CommentForm, CommentRow, type PostActions } from "./post-card";
 import type { Post, Person, Comment } from "@/lib/types";
 
 export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
@@ -90,7 +90,9 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
             <div className="post-viewer-comments" ref={listRef}>
               <div className="post-viewer-posted">
                 <Avatar person={post.author} size={33} onClick={() => { onClose(); actions.openProfile(post.author_id); }} />
-                <p><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> {post.caption || <span className="muted">{post.location || "Shared a moment."}</span>}</p>
+                <p><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> {post.caption
+                  ? <Caption text={post.caption} people={actions.people} onProfile={id => { onClose(); actions.openProfile(id); }} onTag={tag => { onClose(); actions.openTag(tag); }} />
+                  : <span className="muted">{post.location || "Shared a moment."}</span>}</p>
                 <span>{timeAgo(post.created_at)}</span>
               </div>
               {comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
@@ -110,7 +112,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
             </div>
             <div className="post-viewer-side">
               <PostActionsRow post={post} actions={actions} />
-              <p className="post-caption"><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> {post.caption}</p>
+              <p className="post-caption"><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> <Caption text={post.caption} people={actions.people} onProfile={id => { onClose(); actions.openProfile(id); }} onTag={tag => { onClose(); actions.openTag(tag); }} /></p>
               <p className="post-time">{new Date(post.created_at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</p>
             </div>
             <div className="post-viewer-compose">

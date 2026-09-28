@@ -374,3 +374,28 @@ test('profile edits keep the existing validation rules', async () => {
   assert.equal((await api(alice)).data.me.username, 'alice_test');
   await api(alice, { action: 'profile', username: me.username, name: me.name, bio: me.bio, website: '', avatar: '' });
 });
+
+test('hashtag discovery matches whole words case-insensitively and excludes stories', async () => {
+  const key = await grantAsset(alice.id);
+  const post = await api(alice, {
+    action: 'create_post', kind: 'post', media: ['/api/media/' + key],
+    caption: '#WholeWordTag #wholewordtagged #WHOLEWORDTAG!',
+  });
+  assert.equal(post.status, 200);
+  const story = await api(alice, {
+    action: 'create_post', kind: 'story', media: ['/api/media/' + key], caption: '#wholewordtag',
+  });
+  assert.equal(story.status, 200);
+
+  const result = await api(null, null, '?hashtag=WHOLEWORDTAG');
+  assert.equal(result.status, 200, 'guests can browse public hashtag results');
+  assert.equal(result.data.posts.length, 1, 'only the complete hashtag matches');
+  assert.equal(result.data.posts[0].id, post.data.id);
+  assert.equal(result.data.hasMore, false);
+  assert.equal((await api(alice, null, '?hashtag=wholewordtagged')).data.posts.length, 1, 'longer tags match independently');
+  assert.equal((await api(alice, null, '?hashtag=bad!!')).status, 400);
+  assert.equal((await api(alice, null, '?hashtag=' + 'a'.repeat(51))).status, 400);
+
+  await api(alice, { action: 'delete_post', id: post.data.id });
+  await api(alice, { action: 'delete_post', id: story.data.id });
+});

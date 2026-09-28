@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useMemo, type FormEvent } from "react";
 import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Smile, Link as LinkIcon, EyeOff, UserRound, Trash2, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Avatar, IconButton, MediaFrame, Carousel, HeartBurst, count, timeAgo, Busy } from "./common";
@@ -10,10 +10,12 @@ export type PostActions = {
   submitComment: (p: Post, body: string) => Promise<Comment>;
   openPost: (p: Post) => void;
   openProfile: (id: string) => void;
+  openTag: (tag: string) => void;
   share: (p: Post) => void;
   deletePost: (p: Post) => void;
   copyLink: (p: Post) => void;
   editPost: (p: Post) => void;
+  people: Person[];
   me: Person | null;
 };
 
@@ -67,15 +69,30 @@ export function PostActionsRow({ post, actions, compact = false }: { post: Post;
 }
 
 export function PostCaption({ post, actions }: { post: Post; actions: PostActions }) {
-  return <p className="post-caption"><button className="username" onClick={() => actions.openProfile(post.author_id)}>{post.author.username}</button> <Caption text={post.caption} /></p>;
+  return <p className="post-caption"><button className="username" onClick={() => actions.openProfile(post.author_id)}>{post.author.username}</button> <Caption text={post.caption} people={actions.people} onProfile={actions.openProfile} onTag={actions.openTag} /></p>;
 }
-function Caption({ text }: { text: string }) {
+export function Caption({ text, people, onProfile, onTag }: {
+  text: string; people: Person[]; onProfile: (id: string) => void; onTag: (tag: string) => void;
+}) {
   const [more, setMore] = useState(false);
   const shortened = !more && text.length > 160;
+  const byUsername = useMemo(() => new Map(people.map(person => [person.username.toLowerCase(), person])), [people]);
+  const parts = (shortened ? text.slice(0, 160) : text).split(/(#[\p{L}\p{N}_]+|@[A-Za-z0-9_.]+)/gu);
   return (
     <>
-      {(shortened ? text.slice(0, 160) : text).split(/(#[\p{L}\p{N}_]+)/u).map((part, index) =>
-        part.startsWith("#") ? <span className="hashtag" key={index}>{part}</span> : part)}
+      {parts.map((part, index) => {
+        if (part.startsWith("#")) return <button type="button" className="hashtag" key={index} onClick={() => onTag(part.slice(1))}>{part}</button>;
+        if (part.startsWith("@")) {
+          const raw = part.slice(1);
+          let person = byUsername.get(raw.toLowerCase());
+          for (let end = raw.length - 1; !person && end >= 3; end--) {
+            if (!/[._]/.test(raw[end])) break;
+            person = byUsername.get(raw.slice(0, end).toLowerCase());
+          }
+          return person ? <button type="button" className="mention" key={index} onClick={() => onProfile(person.id)}>{part}</button> : part;
+        }
+        return part;
+      })}
       {shortened && <>… <button className="muted" onClick={() => setMore(true)}>more</button></>}
     </>
   );

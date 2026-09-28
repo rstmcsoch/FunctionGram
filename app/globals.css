@@ -492,8 +492,19 @@ button:hover>.avatar{transform:scale(1.04)}
 .post-caption{font-size:14px;line-height:1.55;overflow-wrap:anywhere;padding-bottom:4px}
 .post-caption .username{margin-right:4px}
 .my-comment{animation:view-in var(--motion) var(--ease)}
-.hashtag{color:#516c99;font-weight:550}
-[data-theme=dark] .hashtag{color:#8fb0e8}
+.hashtag,.mention{font:inherit;line-height:inherit;border:0;background:none;padding:0;cursor:pointer;border-radius:3px}
+.hashtag{color:#1e40af;font-weight:600}
+.hashtag:hover{color:#1d4ed8;text-decoration:underline}
+[data-theme=dark] .hashtag{color:#93b5f5}
+[data-theme=dark] .hashtag:hover{color:#b7ccfa}
+.mention{font-weight:600;background:linear-gradient(90deg,#e11d48 0%,#f472b6 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+.mention:hover{opacity:.85}
+.mention:focus-visible,.hashtag:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.story-caption .hashtag{color:#9db9f2}
+.story-caption .hashtag:hover{color:#c0d3fa}
+.tag-view .hashtag{cursor:default}
+.tag-view .hashtag:hover{color:#1e40af;text-decoration:none}
+[data-theme=dark] .tag-view .hashtag:hover{color:#93b5f5}
 .view-comments{display:block;font-size:14px;color:var(--muted-foreground);padding:4px 0 2px}
 .view-comments:hover{color:var(--foreground)}
 .comment-form{display:flex;align-items:center;gap:7px;margin:4px -6px -2px;padding-top:6px;border-top:1px solid var(--border)}

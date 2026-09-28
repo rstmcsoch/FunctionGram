@@ -381,6 +381,47 @@ export function ExploreView({ category, setCategory, openPost }: {
   );
 }
 
+export function TagView({ tag, openPost }: { tag: string; openPost: (post: Post) => void }) {
+  const [page, setPage] = useState<{ tag: string; posts: Post[]; hasMore: boolean } | null>(null);
+  const [error, setError] = useState<{ tag: string; message: string } | null>(null);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const current = page?.tag === tag ? page : null;
+  const currentError = error?.tag === tag ? error.message : "";
+
+  useEffect(() => {
+    let active = true;
+    void request<{ posts: Post[]; hasMore: boolean }>("/api/social?hashtag=" + encodeURIComponent(tag))
+      .then(result => { if (active) { setPage({ tag, ...result }); setError(null); } })
+      .catch(e => { if (active) setError({ tag, message: (e as Error).message }); });
+    return () => { active = false; };
+  }, [tag, retry]);
+
+  const loadMore = async () => {
+    if (moreLoading || !current) return;
+    setMoreLoading(true);
+    try {
+      const result = await request<{ posts: Post[]; hasMore: boolean }>("/api/social?hashtag=" + encodeURIComponent(tag) + "&offset=" + current.posts.length);
+      setPage(value => value?.tag === tag ? { ...value, posts: [...value.posts, ...result.posts], hasMore: result.hasMore } : value);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setMoreLoading(false); }
+  };
+
+  return (
+    <section className="discovery-view tag-view">
+      <div className="section-heading"><h1><span className="hashtag">#</span>{tag}</h1><span>Posts and reels shared with this hashtag.</span></div>
+      {currentError
+        ? <p className="muted" role="alert">{currentError} <button className="text-action" onClick={() => setRetry(value => value + 1)}>Retry</button></p>
+        : !current
+          ? <div className="loading-row" role="status"><Busy /></div>
+          : <>
+              <PostGrid posts={current.posts} onPost={openPost} empty="No posts use this hashtag yet." />
+              {current.hasMore && <div className="feed-end"><button className="secondary-button" disabled={moreLoading} onClick={() => void loadMore()}>{moreLoading ? <Busy /> : "Load more posts"}</button></div>}
+            </>}
+    </section>
+  );
+}
+
 /* -------------------------------- notifications -------------------------------- */
 
 type NotificationGroup = { key: string; kind: string; actors: Notification[]; postId: string | null; media: string | null; created_at: number; unread: boolean };

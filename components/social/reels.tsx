@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { Heart, MessageCircle, Send, Bookmark, Play, Pause, Volume2, VolumeX, Film } from "lucide-react";
 import { Avatar, IconButton, Empty, count, Busy } from "./common";
 import type { Post } from "@/lib/types";
-import type { PostActions } from "./post-card";
+import { Caption, type PostActions } from "./post-card";
 
 export function Reels({ posts, actions, onCreate }: { posts: Post[]; actions: PostActions; onCreate: () => void }) {
   const videos = posts.filter(p => p.media_type === "video" && p.kind !== "story");
@@ -114,7 +114,7 @@ function Reel({ post: p, index, isActive, actions }: { post: Post; index: number
             <Avatar person={p.author} size={38} onClick={() => actions.openProfile(p.author_id)} />
             <button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
           </div>
-          {p.caption && <p>{p.caption}</p>}
+          {p.caption && <p><Caption text={p.caption} people={actions.people} onProfile={actions.openProfile} onTag={actions.openTag} /></p>}
           <small>{p.author.is_demo ? "Sample reel · Original clip" : "Original video"} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
         </div>
         <div className="reel-actions">
