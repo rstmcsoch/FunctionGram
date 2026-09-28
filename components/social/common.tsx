@@ -125,9 +125,9 @@ export function Avatar({ person, size = 42, ring = false, onClick, className = "
 
 /* ---------------------------------- buttons --------------------------------- */
 
-export function IconButton({ children, label, onClick, active, disabled, className = "" }: { children: ReactNode; label: string; onClick?: () => void; active?: boolean; disabled?: boolean; className?: string }) {
+export function IconButton({ children, label, onClick, active, current, disabled, className = "" }: { children: ReactNode; label: string; onClick?: () => void; active?: boolean; current?: boolean; disabled?: boolean; className?: string }) {
   return (
-    <button type="button" className={"icon-button " + (active ? "is-active " : "") + className} aria-label={label} aria-pressed={active} title={label} onClick={onClick} disabled={disabled}>
+    <button type="button" className={"icon-button " + (active ? "is-active " : "") + className} aria-label={label} aria-pressed={active} aria-current={current ? "page" : undefined} title={label} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );
