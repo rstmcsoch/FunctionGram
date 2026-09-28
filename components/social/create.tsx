@@ -302,7 +302,7 @@ export function EditPostDialog({ post, people, onClose, onSaved }: {
             </select>
           </label>
           <TagPicker people={people} me={post.author} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} />
-          {post.media.every(url => !post.media_type.startsWith("video/")) && (
+          {post.media.length > 0 && !post.media_type.startsWith("video/") && (
             <div className="media-details">
               {post.media.map((url, index) => (
                 <label key={url} className="media-detail-row">

@@ -27,9 +27,10 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
     return () => { active = false; };
   }, [post.id]);
 
+  const commentCount = comments?.length ?? 0;
   useEffect(() => {
-    if (comments) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [comments?.length]);
+    if (commentCount > 0) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [commentCount]);
 
   const loadOlder = async () => {
     if (!nextCursor || moreLoading) return;

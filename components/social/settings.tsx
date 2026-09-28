@@ -3,7 +3,7 @@ import { useState, useEffect, type FormEvent } from "react";
 import { Shield, Plus, Trash2, Mail, Lock, Bookmark } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
-import { Modal, Avatar, Busy, request } from "./common";
+import { Modal, Busy, request } from "./common";
 import type { Person, SavedCollection } from "@/lib/types";
 
 export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
