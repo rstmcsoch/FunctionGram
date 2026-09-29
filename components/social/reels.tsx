@@ -6,7 +6,7 @@ import type { Post } from "@/lib/types";
 import { Caption, type PostActions } from "./post-card";
 
 export function Reels({ posts, actions, onCreate }: { posts: Post[]; actions: PostActions; onCreate: () => void }) {
-  const videos = posts.filter(p => p.media_type === "video" && p.kind !== "story");
+  const videos = posts.filter(p => p.media_type === "video" && p.kind === "reel");
   const [active, setActive] = useState(0);
   const track = useRef<HTMLDivElement>(null);
 
@@ -115,7 +115,7 @@ function Reel({ post: p, index, isActive, actions }: { post: Post; index: number
             <button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
           </div>
           {p.caption && <p><Caption text={p.caption} people={actions.people} onProfile={actions.openProfile} onTag={actions.openTag} /></p>}
-          <small>{p.author.is_demo ? "Sample reel · Original clip" : "Original video"} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
+          <small>{p.reel_credit || (p.author.is_demo ? "Sample reel · Original clip" : "Original video")} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
         </div>
         <div className="reel-actions">
           <IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>

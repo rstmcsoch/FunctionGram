@@ -75,6 +75,25 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   /* --------------------------------- data layer --------------------------------- */
 
+  // Always revalidate a viewer open, even when the feed already holds the item.
+  // A cached card must never resurrect an administratively hidden direct link.
+  const postRequest = useRef(0);
+  const loadPost = useCallback(async (id: string) => {
+    const requestId = ++postRequest.current;
+    setSelectedPost(null);
+    try {
+      const items = await request<Post[]>("/api/social?post=" + encodeURIComponent(id));
+      if (postRequest.current !== requestId) return;
+      if (items[0]) setSelectedPost(items[0]);
+      else {
+        setData(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
+        setFollowingFeed(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
+        toast.error("This post is no longer available.");
+      }
+    } catch { if (postRequest.current === requestId) toast.error("Could not load this post."); }
+  }, []);
+
+
   const refresh = useCallback(async () => {
     try {
       const value = await request<SocialData>("/api/social");
@@ -94,6 +113,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     const fromKey = view + ":" + (profileId || "");
     const toKey = target + ":" + (id || "");
     scrollMemory.current[fromKey] = window.scrollY;
+    ++postRequest.current;
     setView(target); setProfileId(id || null); setSelectedPost(null);
     if (target === "messages") setRecipient(id || null);
     if (target === "profile") setProfileTab("posts");
@@ -109,13 +129,10 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       let id = "";
       try { id = decodeURIComponent(parts[1] || ""); } catch {}
       if (target === "post") {
-        const existing = data.posts.find(post => post.id === id);
-        if (existing) { setSelectedPost(existing); return; }
-        void request<Post[]>("/api/social?post=" + encodeURIComponent(id))
-          .then(items => { if (items[0]) setSelectedPost(items[0]); else toast.error("This post is no longer available."); })
-          .catch(() => toast.error("Could not load this post."));
+        void loadPost(id);
         return;
       }
+      ++postRequest.current;
       setSelectedPost(null);
       const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
       if (!target || allowed.includes(target)) {
@@ -128,7 +145,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
     window.addEventListener("hashchange", update);
     window.addEventListener("popstate", update);
     return () => { window.removeEventListener("hashchange", update); window.removeEventListener("popstate", update); };
-  }, [data.posts]);
+  }, [loadPost]);
 
   useEffect(() => {
     if (view === "notifications" && viewerId) {
@@ -270,7 +287,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   const actions: PostActions = {
     react, submitComment,
-    openPost: post => { setSelectedPost(post); window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); },
+    openPost: post => { window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); void loadPost(post.id); },
     openProfile: id => navigate("profile", id),
     openTag: tag => navigate("tag", tag),
     share: setSharePost,
@@ -488,7 +505,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       )}
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
-          onClose={() => { setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
+          onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
           onCommentCountChange={delta => patchPost(selectedPost.id, post => ({ ...post, comment_count: Math.max(0, post.comment_count + delta) }))} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
