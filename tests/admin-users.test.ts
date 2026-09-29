@@ -98,6 +98,7 @@ test('ban/unban, expiry, signout, trash/restore and verification are atomic and 
       CREATE TRIGGER reject_user_audit BEFORE INSERT ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_user_audit()`);
     await session(); await assert.rejects(changeUser(pool,'admin',command('ban')));
     assert.equal(await accountCanSignIn(pool,'target'),true); assert.equal((await pool.query('SELECT * FROM session')).rows.length,1);
+    // Admin guard uses expiry and deletion checks too.
     await pool.query('UPDATE "user" SET banned=true,"banExpires"=now()-interval \'1 day\' WHERE id=\'admin\'');
     assert.equal((await authorizeAdmin(pool,'admin')).role,'admin');
     await pool.query('UPDATE "user" SET deleted_at=1 WHERE id=\'admin\'');
