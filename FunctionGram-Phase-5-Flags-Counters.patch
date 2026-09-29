@@ -1,0 +1,1569 @@
+diff --git a/app/api/admin/features/route.ts b/app/api/admin/features/route.ts
+new file mode 100644
+index 0000000..57e7b27
+--- /dev/null
++++ b/app/api/admin/features/route.ts
+@@ -0,0 +1,17 @@
++import {adminRoute} from '@/lib/admin/route';
++import {adminBody} from '@/lib/admin/body';
++import {loadSettings,saveSetting} from '@/lib/admin/core';
++import {AdminError} from '@/lib/admin/validation';
++import {featureConfig,validateFeatures} from '@/lib/features';
++import {getPool} from '@/lib/postgres';
++import {revalidatePath,revalidateTag} from 'next/cache';
++export const dynamic='force-dynamic';
++export const runtime='nodejs';
++export const GET=adminRoute(async()=>Response.json(featureConfig(await loadSettings(await getPool()))));
++export const POST=adminRoute(async(request,actor)=>{
++ const body=await adminBody(request);let config;
++ try{config=validateFeatures(body.value);}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid feature configuration.');}
++ if(config.maintenance.enabled&&body.confirmation!=='MAINTENANCE')throw new AdminError('Type MAINTENANCE to confirm maintenance mode.');
++ await saveSetting(await getPool(),actor.userId,'features.config',JSON.stringify(config));
++ revalidateTag('settings',{expire:0});revalidatePath('/','layout');return Response.json({ok:true});
++});
+diff --git a/app/api/dev-session/route.ts b/app/api/dev-session/route.ts
+index 2ea5caa..887bdfa 100644
+--- a/app/api/dev-session/route.ts
++++ b/app/api/dev-session/route.ts
+@@ -1,3 +1,4 @@
++import {featurePolicy,requireFeature,FeatureError} from '@/lib/feature-policy';
+ import { AppError, db, sameOrigin, fail } from '@/lib/server';
+ import { localDevDatabase } from '@/lib/postgres';
+ 
+@@ -27,6 +28,7 @@ export async function POST(request: Request) {
+     sameOrigin(request);
+     const database = db();
+     const existing = await database.prepare('SELECT id FROM "user" WHERE email=?').bind(PREVIEW_EMAIL).first<{ id: string }>();
++    const policy=await featurePolicy(null);if(policy.config.maintenance.enabled)throw new FeatureError('Preview accounts are unavailable during maintenance.',503);if(!existing)requireFeature(policy,'signups');
+     const userId = existing?.id ?? crypto.randomUUID();
+     const now = new Date();
+     const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+diff --git a/app/api/dev-upload/route.ts b/app/api/dev-upload/route.ts
+index 7eec9fa..080ab40 100644
+--- a/app/api/dev-upload/route.ts
++++ b/app/api/dev-upload/route.ts
+@@ -1,3 +1,4 @@
++import {requireUpload} from '@/lib/feature-policy';
+ import { promises as fs } from 'node:fs';
+ import { AppError, db, identity, requestHeadersWithHost, sameOrigin, fail, json } from '@/lib/server';
+ import { localDevDatabase } from '@/lib/postgres';
+@@ -16,6 +17,7 @@ export async function POST(request: Request) {
+     if (!localDevDatabase()) throw new AppError('Not found.', 404);
+     sameOrigin(request);
+     const user = (await identity(requestHeadersWithHost(request), true))!;
++    await requireUpload(user);
+     const form = await request.formData();
+     const key = String(form.get('key') || '');
+     const file = form.get('file');
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 056290d..1fc47b3 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -1,9 +1,11 @@
++import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
++import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
+ import { checkReelDuration } from '@/lib/reel-duration';
+ import { AdminError } from '@/lib/admin/validation';
+ import { visibleComment, visiblePost, readablePost } from '@/lib/content-visibility';
+ import { loadSettings } from '@/lib/admin/core';
+ import { getPool } from '@/lib/postgres';
+-import { AppError,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
++import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+ import type {MediaOption} from '@/lib/types';
+ export const dynamic='force-dynamic';
+ 
+@@ -23,7 +25,9 @@ function parseCursor(value:string|null):[number,string]|null{
+ export async function GET(request:Request){try{
+   const query=new URL(request.url).searchParams;
+   const headers=requestHeadersWithHost(request);
+-  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>()]);return json({notifications:notifs.results,unreadMessages:unread?.count||0});}
++  const policyViewer=await identity(headers);const policy=await featurePolicy(policyViewer);requirePublic(policy,policyViewer);
++  for(const [key,feature]of Object.entries(QUERY_FEATURES))if(query.has(key))requireFeature(policy,feature);
++  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);return json({features:policy.flags,notifications:notifs.results,unreadMessages:unread?.count||0});}
+   if(query.has('comments')){
+     const postId=clean(query.get('comments'),100,true);
+     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
+@@ -42,7 +46,7 @@ export async function GET(request:Request){try{
+   if(query.has('messages')){const user=await identity(headers,true);const other=clean(query.get('messages'),100,true);
+     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
+     const cursor=parseCursor(query.get('cursor'));
+-    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
++    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
+     const args:unknown[]=[user,user,user,user,other,other,user];
+     if(cursor){sql+=' AND (created_at<? OR (created_at=? AND id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
+     sql+=' ORDER BY created_at DESC,id DESC LIMIT ?';args.push(limit+1);
+@@ -50,7 +54,7 @@ export async function GET(request:Request){try{
+     const items=rows.slice(0,limit);
+     const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
+     return json({items,next_cursor});}
+-  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
++  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
+   if(query.has('person'))return json(await person(await identity(headers),clean(query.get('person'),100,true)));
+   if(query.has('highlights'))return json(await highlights(await identity(headers),clean(query.get('highlights'),100,true)));
+   if(query.has('tagged'))return json(await feed(await identity(headers),300,0,{tagged:clean(query.get('tagged'),100,true)}));
+@@ -114,32 +118,35 @@ function taggedUsers(value:unknown,database:ReturnType<typeof db>):Promise<strin
+ }
+ export async function POST(request:Request){try{
+   sameOrigin(request);const user=(await identity(requestHeadersWithHost(request),true))!;const input=await readBody(request);const action=clean(input.action,40,true);const database=db();
++  const policy=await featurePolicy(user);requirePublic(policy,user);
++  if(ACTION_FEATURES[action])requireFeature(policy,ACTION_FEATURES[action]);
++  if(action==='reaction'&&input.kind==='like')requireFeature(policy,'likes');
++  if(action==='reaction'&&input.kind==='save')requireFeature(policy,'saves');
++  if(action==='create_post'&&input.kind==='reel')requireFeature(policy,'reels');
++  if(action==='create_post'&&input.kind==='story')requireFeature(policy,'stories');
++  if(action==='message'&&input.post_id)requireFeature(policy,'shares');
++  if(!policy.flags.tagging){if(action==='update_post')delete input.tagged_users;else if(Array.isArray(input.tagged_users)&&input.tagged_users.length)requireFeature(policy,'tagging');}
++  if(action==='profile'&&!policy.flags.uploads){const existing=await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>();if(input.avatar!==undefined&&input.avatar!==existing?.avatar)requireFeature(policy,'uploads');input.avatar=existing?.avatar||'';}
+   const id=typeof input.id==='string'?clean(input.id,100):'';const now=Date.now();
+   if(action==='reaction'){
+     const kind=clean(input.kind,20,true);if(!['like','save','seen','hidden'].includes(kind)||typeof input.active!=='boolean')throw new AppError('Invalid action.');
+     const post=await availablePost(user,id);if(!post)throw new AppError('This post is no longer available.',404);
+     const statements=[input.active?database.prepare('INSERT OR IGNORE INTO reactions (user_id,post_id,kind) VALUES (?,?,?)').bind(user,id,kind):database.prepare('DELETE FROM reactions WHERE user_id=? AND post_id=? AND kind=?').bind(user,id,kind)];
+-    if(kind==='like'&&user!==post.author_id){const notificationId='like:'+user+':'+id;statements.push(input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(notificationId,post.author_id,user,'like',id,now):database.prepare('DELETE FROM notifications WHERE id=?').bind(notificationId));}
++    if(policy.flags.notifications&&kind==='like'&&user!==post.author_id){const notificationId='like:'+user+':'+id;statements.push(input.active&&policy.flags.notifications?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(notificationId,post.author_id,user,'like',id,now):database.prepare('DELETE FROM notifications WHERE id=?').bind(notificationId));}
+     await database.batch(statements);
+     // Canonical post-reaction state, so clients never derive counts from a
+     // snapshot: like totals come from base_likes plus real reactions.
+-    const [liked,saved,seen,likes]=await Promise.all([
+-      input.active&&kind==='like'?1:0,
+-      input.active&&kind==='save'?1:0,
+-      input.active&&kind==='seen'?1:0,
+-      database.prepare('SELECT COALESCE((SELECT base_likes FROM posts WHERE id=?),0)+(SELECT COUNT(*) FROM reactions WHERE post_id=? AND kind=\'like\') likes').bind(id,id).first<{likes:number}>(),
+-    ]);
+-    return json({ok:true,liked,saved,seen,likes:likes?.likes||0});
++    return json({ok:true,...await postCounters(user,id)});
+   }
+   if(action==='follow'){
+     if(id===user||typeof input.active!=='boolean')throw new AppError('Choose another profile.');
+     if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(id).first())throw new AppError('Profile not found.',404);
+-    await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
++    await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active&&policy.flags.notifications?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
+   }
+   if(action==='comment'){
+     const body=clean(input.body,1000,true);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
+     const commentId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO comments (id,post_id,author_id,body,created_at) VALUES (?,?,?,?,?)').bind(commentId,id,user,body,now)];
+-    if(user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
++    if(policy.flags.notifications&&user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
+     await database.batch(stmts);const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
+     return json({id:commentId,post_id:id,author_id:user,body,created_at:now,username:author?.username||'',avatar:author?.avatar||''});
+   }
+@@ -176,7 +183,7 @@ export async function POST(request:Request){try{
+     // at its true size without cropping or layout shift.
+     const ratios=aspectRatios(input.aspects,media.length);
+     const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+contentSettings['content.storyHours']*3600000:null,ratios?JSON.stringify(ratios):null)];
+-    for(const tagged of tags){if(tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
++    for(const tagged of tags){if(policy.flags.notifications&&tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
+     await database.batch(stmts);return json({id:postId});
+   }
+   if(action==='update_post'){
+diff --git a/app/globals.css b/app/globals.css
+index 0f98eb1..2ef8899 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -1645,3 +1645,4 @@ button.story-tap:focus-visible{outline:2px solid rgba(255,255,255,.9);outline-of
+ .app-shell[data-sidebar-mode=hidden][data-header-position=static] .main-surface{padding-top:0}.app-shell .glass-card{border-radius:calc(var(--radius) + 5px)}.app-shell .primary-button,.app-shell .secondary-button,.app-shell .nav-link{border-radius:var(--radius)}
+ 
+ html[data-theme=dark] .brand-wordmark-dark-logo{display:none}
++.access-screen{max-width:720px;margin:0 auto;padding:clamp(20px,6vw,64px) 16px;min-height:100vh}.access-screen>section{padding:clamp(20px,5vw,40px)}.access-screen h1{font-size:clamp(26px,5vw,40px);margin:24px 0 12px;font-weight:700}.access-screen p{line-height:1.7;margin-bottom:24px;overflow-wrap:anywhere}.post-view-count{font-size:12px;color:var(--muted-foreground);margin:6px 0}
+diff --git a/app/page.tsx b/app/page.tsx
+index 6e4334c..9cd776c 100644
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -1,3 +1,6 @@
++import {identity} from '@/lib/server';
++import {featurePolicy} from '@/lib/feature-policy';
++import {AccessScreen} from '@/components/social/access-screen';
+ import { publicAppearance } from '@/lib/public-appearance';
+ import {bootstrap} from '@/lib/server';
+ import {missingConfiguration} from '@/lib/config';
+@@ -7,6 +10,9 @@ export const dynamic='force-dynamic';
+ export default async function Home(){
+  const missing=missingConfiguration();
+  if(missing.length)return <main className="setup-page"><section className="setup-card"><span className="brand">RSTMC<span>.</span></span><p className="eyebrow">FunctionGram · deployment preview</p><h1>A home for your moments.</h1><p>The app has been prepared for Vercel. Its database, media storage, or account email delivery still needs configuration before accounts, posts, and messages can be used.</p><p>Project owner: connect Neon PostgreSQL, a public Vercel Blob store, and Brevo transactional email, then configure the missing environment variables and redeploy.</p><ul>{missing.map(key=><li key={key}><code>{key}</code></li>)}</ul><p>The existing RSTMC site is a separate deployment. Its accounts and data have not been migrated.</p></section></main>;
++ const viewer=await identity();const policy=await featurePolicy(viewer);const appearance=await publicAppearance();
++ if(policy.config.maintenance.enabled&&!policy.admin)return <AccessScreen title={policy.config.maintenance.title} message={policy.config.maintenance.message} appearance={appearance} flags={{...policy.flags,signups:false}} maintenance/>;
++ if(!viewer&&!policy.flags.guestBrowsing)return <AccessScreen title="Sign in to continue" message="Browsing is available to signed-in members." appearance={appearance} flags={policy.flags} maintenance={false}/>;
+  let initial:SocialData|null=null;
+  try{initial=await bootstrap();}catch(error){console.error('Feed unavailable',error);}
+  return <RstmcApp initial={initial} appearance={await publicAppearance()}/>;
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 480ce1d..6b2ee90 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -19,3 +19,4 @@
+ 
+ .admin-content-fields{min-width:0;border:0;margin:0;padding:0}
+ .appearance-editor fieldset{min-width:0}.appearance-nav-row{border:1px solid var(--border);border-radius:12px;padding:16px}.appearance-editor select{min-height:44px;width:100%;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}.appearance-editor .appearance-toggle{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:0 8px}.appearance-editor .appearance-toggle input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}.appearance-editor input[type=file]{font-size:12px;max-width:100%}.appearance-editor .admin-button{align-self:start}
++.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-top:20px}.feature-grid fieldset{border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}.feature-grid legend{font-weight:650}.feature-editor .feature-switch{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px}.feature-editor .feature-switch input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+index c58e6b1..48981e1 100644
+--- a/app/rstmcadmin/content/[id]/page.tsx
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -1,3 +1,4 @@
++import {CounterEditor} from '@/components/admin/features';
+ import Link from 'next/link';
+ import { notFound } from 'next/navigation';
+ import { requireAdminPage } from '@/lib/admin/guard';
+@@ -16,6 +17,7 @@ export default async function ContentItem({params,searchParams}:{params:Promise<
+   return <><p className="admin-eyebrow">Control room / {resource}</p><h1>{resource==='posts'?String(item.kind)+' detail':'Comment detail'}</h1><p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
+     <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
+     {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
++    {resource==='posts'&&<section className="admin-card"><h2>Counter baselines</h2><CounterEditor key={String(item.base_likes)+':'+String(item.base_comments)+':'+String(item.base_views)} id={id} likes={Number(item.base_likes)} comments={Number(item.base_comments)} views={Number(item.base_views)} disabled={!!item.deleted_at}/></section>}
+     <section className="admin-card"><h2>Moderation actions</h2><ContentActions ids={[id]} resource={resource} operations={operations}/></section>
+     <section className="admin-card"><h2>{item.deleted_at?'Preview (trashed)':'Edit content'}</h2>{!!item.deleted_at&&<p>Restore before editing. Restoration preserves any moderation hide. Purged media files are not automatically deleted from storage.</p>}<fieldset className="admin-content-fields" disabled={!!item.deleted_at}><ContentEditor key={String(item.edited_at)+String(item.body)} item={item} resource={resource}/></fieldset></section>
+   </>;
+diff --git a/app/rstmcadmin/features/page.tsx b/app/rstmcadmin/features/page.tsx
+new file mode 100644
+index 0000000..9037785
+--- /dev/null
++++ b/app/rstmcadmin/features/page.tsx
+@@ -0,0 +1,6 @@
++import {requireAdminPage} from '@/lib/admin/guard';
++import {loadSettings} from '@/lib/admin/core';
++import {getPool} from '@/lib/postgres';
++import {featureConfig} from '@/lib/features';
++import {FeatureEditor} from '@/components/admin/features';
++export default async function FeaturePage(){await requireAdminPage();return <><p className="admin-eyebrow">Control room / Features</p><h1>Features & availability</h1><FeatureEditor initial={featureConfig(await loadSettings(await getPool()))}/></>;}
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index ff8e998..e560300 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -8,5 +8,5 @@ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: {
+ export const dynamic = 'force-dynamic';
+ export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+   await requireAdminPage();
+-  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href={ADMIN_BASE_PATH + '/content'}>Content</Link><Link href={ADMIN_BASE_PATH + '/appearance'}>Appearance</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
++  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href={ADMIN_BASE_PATH + '/content'}>Content</Link><Link href={ADMIN_BASE_PATH + '/appearance'}>Appearance</Link><Link href={ADMIN_BASE_PATH+'/features'}>Features</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
+ }
+diff --git a/components/admin/features.tsx b/components/admin/features.tsx
+new file mode 100644
+index 0000000..49d8b40
+--- /dev/null
++++ b/components/admin/features.tsx
+@@ -0,0 +1,18 @@
++'use client';
++import {useState} from 'react';
++import {useRouter} from 'next/navigation';
++import {FEATURE_KEYS,type FeatureConfig} from '@/lib/features';
++import {request} from '@/components/social/common';
++export function FeatureEditor({initial}:{initial:FeatureConfig}){
++ const [value,setValue]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState(''),[confirmation,setConfirmation]=useState('');const router=useRouter();
++ return <form className="admin-confirm feature-editor" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/features',{value,confirmation});setMessage('Feature controls saved and audited. Existing public tabs should reload.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not save.');}finally{setPending(false);}}}>
++ <section className="admin-card"><h2>Feature rollouts</h2><p>Assignments are deterministic per feature and account ID. Anonymous visitors (including signup requests) share one stable cohort, not a random percentage of visitors. 100% is everyone; 0% is nobody. Feature flags do not grant permissions or bypass private accounts.</p><div className="feature-grid">{FEATURE_KEYS.map(key=><fieldset key={key}><legend>{key}</legend><label className="feature-switch"><input type="checkbox" checked={value.flags[key].enabled} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],enabled:e.target.checked}}})}/>Enabled</label><label>Rollout percent<input aria-label={key+' rollout percent'} type="number" min={0} max={100} step={1} value={value.flags[key].percent} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],percent:Number(e.target.value)}}})}/></label></fieldset>)}</div></section>
++ <section className="admin-card admin-confirm"><h2>Maintenance</h2><p>Verified, active admins/owners bypass maintenance only. Feature flags still apply to them. Admin pages, sign-in, recovery and sign-out remain reachable. Existing private content stays private.</p><label className="feature-switch"><input type="checkbox" checked={value.maintenance.enabled} onChange={e=>setValue({...value,maintenance:{...value.maintenance,enabled:e.target.checked}})}/>Enable maintenance mode</label><label>Public title<input maxLength={100} required value={value.maintenance.title} onChange={e=>setValue({...value,maintenance:{...value.maintenance,title:e.target.value}})}/></label><label>Public message<input maxLength={500} value={value.maintenance.message} onChange={e=>setValue({...value,maintenance:{...value.maintenance,message:e.target.value}})}/></label>{value.maintenance.enabled&&<label>Type MAINTENANCE to confirm<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required/></label>}</section>
++ <section className="admin-card admin-confirm"><h2>Displayed engagement</h2><p>Displayed total = floor((real interactions + per-post baseline) × multiplier + deterministic jitter), clamped to 0–1 trillion. Jitter is a stable per-post offset, not a fresh random number on each request. Views count unique recorded “seen” reactions, not video plays.</p><label>Multiplier (0–100)<input type="number" min={0} max={100} step="0.01" value={value.counters.multiplier} onChange={e=>setValue({...value,counters:{...value.counters,multiplier:Number(e.target.value)}})}/></label><label>Jitter amplitude (0–1000)<input type="number" min={0} max={1000} step={1} value={value.counters.jitter} onChange={e=>setValue({...value,counters:{...value.counters,jitter:Number(e.target.value)}})}/></label><label className="feature-switch"><input type="checkbox" checked={value.counters.hide} onChange={e=>setValue({...value,counters:{...value.counters,hide:e.target.checked}})}/>Hide public post engagement counts</label><p>Open a post in Content for baseline editing. Hiding displayed counts does not erase actual engagement or alter private-profile access.</p></section>
++ {message&&<p role="status">{message}</p>}<button type="submit" className="admin-button admin-primary" disabled={pending||(value.maintenance.enabled&&confirmation!=='MAINTENANCE')}>{pending?'Saving…':'Publish feature controls'}</button>
++ </form>;
++}
++export function CounterEditor({id,likes,comments,views,disabled}:{id:string;likes:number;comments:number;views:number;disabled:boolean}){
++ const [values,setValues]=useState([likes,comments,views]),[confirmation,setConfirmation]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');const router=useRouter();
++ return <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);try{await request('/api/admin',{action:'moderateContent',resource:'posts',operation:'counters',ids:[id],confirmation,base_likes:values[0],base_comments:values[1],base_views:values[2]});setMessage('Baselines saved and audited.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not save.');}finally{setPending(false);}}}><fieldset disabled={disabled||pending} className="admin-confirm">{['Likes','Comments','Views'].map((name,i)=><label key={name}>{name} baseline<input type="number" min={0} max={1000000000} step={1} required value={values[i]} onChange={e=>setValues(values.map((v,j)=>i===j?Number(e.target.value):v))}/></label>)}<label>Type {id} to confirm baseline changes<input value={confirmation} onChange={e=>setConfirmation(e.target.value)} required autoComplete="off"/></label><button className="admin-button" disabled={confirmation!==id} type="submit">Save counter baselines</button></fieldset>{message&&<p role="status">{message}</p>}</form>;
++}
+diff --git a/components/social/access-screen.tsx b/components/social/access-screen.tsx
+new file mode 100644
+index 0000000..f4ad623
+--- /dev/null
++++ b/components/social/access-screen.tsx
+@@ -0,0 +1,11 @@
++'use client';
++import {useState} from 'react';
++import {AuthForm} from './auth-form';
++import {FeatureContext} from './features';
++import {Brand,PublicFooter} from './appearance';
++import type {Appearance} from '@/lib/appearance';
++import type {Flags} from '@/lib/features';
++export function AccessScreen({title,message,appearance,flags,maintenance}:{title:string;message:string;appearance:Appearance;flags:Flags;maintenance:boolean}){
++ const [login,setLogin]=useState(!maintenance);
++ return <FeatureContext value={flags}><main className="access-screen"><section className="glass-card"><div className="brand"><Brand appearance={appearance}/></div><h1>{title}</h1><p>{message}</p>{login?<AuthForm/>:<button className="primary-button" onClick={()=>setLogin(true)}>Administrator sign-in</button>}</section>{!maintenance&&<PublicFooter appearance={appearance}/>}</main></FeatureContext>;
++}
+diff --git a/components/social/app.tsx b/components/social/app.tsx
+index 72e4b84..da3ed08 100644
+--- a/components/social/app.tsx
++++ b/components/social/app.tsx
+@@ -1,4 +1,6 @@
+ "use client";
++import {Feature,FeatureContext} from "./features";
++import {ALL_FEATURES,VIEW_FEATURES} from "@/lib/features";
+ import { Brand, Banners, PublicFooter, navIcons } from './appearance';
+ import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
+ import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+@@ -26,8 +28,10 @@ import type { SocialData, Post, Person, Comment } from "@/lib/types";
+ const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
+ type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
+ 
+-export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
++export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
+   const [data, setData] = useState<SocialData>(initial || emptyData);
++  const flags=data.features||ALL_FEATURES;
++  const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,enabled:item.enabled&&(!feature||flags[feature])};})};
+   const [loadError, setLoadError] = useState(!initial);
+   const [view, setView] = useState<View>("home");
+   const [profileId, setProfileId] = useState<string | null>(null);
+@@ -82,7 +86,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+         toast.error("This post is no longer available.");
+       }
+     } catch { if (postRequest.current === requestId) toast.error("Could not load this post."); }
+-  }, []);
++  }, [setSelectedPost,setData,setFollowingFeed]);
+ 
+ 
+   const refresh = useCallback(async () => {
+@@ -95,7 +99,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   const patchPost = useCallback((id: string, update: (post: Post) => Post) => {
+     setData(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
+     setSelectedPost(current => (current?.id === id ? update(current) : current));
+-  }, []);
++  }, [setData,setSelectedPost]);
+ 
+   /* --------------------------------- navigation --------------------------------- */
+ 
+@@ -111,7 +115,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+     const hash = target === "home" ? "#/" : "#/" + target + (id ? "/" + encodeURIComponent(id) : "");
+     if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+     requestAnimationFrame(() => { window.scrollTo({ top: scrollMemory.current[toKey] ?? 0 }); });
+-  }, [view, profileId]);
++  }, [view,profileId,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
+ 
+   useEffect(() => {
+     const update = () => {
+@@ -157,7 +161,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+     const poll = async () => {
+       if (active && timer) { clearTimeout(timer); timer = undefined; }
+       try {
+-        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages">>("/api/social?activity=1");
++        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1");
+         if (!active) return;
+         const newest = activity.notifications[0]?.created_at || 0;
+         const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
+@@ -180,7 +184,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+ 
+   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
+   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
+-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
++  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
+ 
+   const setFollowPendingFor = (id: string, pending: boolean) => {
+     setFollowPending(current => {
+@@ -191,7 +195,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   };
+ 
+   const follow = async (person: Person) => {
+-    if (needsLogin() || followPending.has(person.id)) return;
++    if (!flags.follow || needsLogin() || followPending.has(person.id)) return;
+     const active = !person.followed;
+     setFollowPendingFor(person.id, true);
+     setData(current => ({
+@@ -214,6 +218,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   };
+ 
+   const react = async (post: Post, kind: string, active: boolean) => {
++    if((kind==='like'&&!flags.likes)||(kind==='save'&&!flags.saves))return;
+     if (needsLogin()) return;
+     if (kind === "hidden") {
+       if (!active) return;
+@@ -242,8 +247,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+     try {
+       // The response is the canonical post-reaction state; apply it instead of
+       // trusting the optimistic arithmetic (base likes can change meanwhile).
+-      const result = await request<{ liked: number; saved: number; seen: number; likes: number }>("/api/social", { action: "reaction", id: post.id, kind, active });
+-      patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes }));
++      const result = await request<{ liked: number; saved: number; seen: number; likes: number;display_likes:number|null;display_comments:number|null;display_views:number|null }>("/api/social", { action: "reaction", id: post.id, kind, active });
++      patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes,display_likes:result.display_likes,display_comments:result.display_comments,display_views:result.display_views }));
+     } catch (e) {
+       patchPost(post.id, current => ({ ...current, ...snapshot }));
+       toast.error((e as Error).message);
+@@ -251,9 +256,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   };
+ 
+   const submitComment = async (post: Post, body: string): Promise<Comment> => {
++    if(!flags.comments)throw new Error("Comments are unavailable.");
+     if (needsLogin()) throw new Error("Sign in required");
+     const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body });
+-    patchPost(post.id, current => ({ ...current, comment_count: current.comment_count + 1 }));
++    const fresh=await request<Post[]>("/api/social?post="+encodeURIComponent(post.id));if(fresh[0])patchPost(post.id,()=>fresh[0]);
+     return { id: created.id, post_id: post.id, author_id: data.me!.id, body, created_at: Date.now(), username: data.me!.username, avatar: data.me!.avatar };
+   };
+ 
+@@ -272,6 +278,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   };
+ 
+   const copyLink = async (post: Post) => {
++    if(!flags.shares)return;
+     const link = window.location.origin + "/#/post/" + encodeURIComponent(post.id);
+     try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { setSharePost(post); }
+   };
+@@ -281,10 +288,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+     openPost: post => { window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); void loadPost(post.id); },
+     openProfile: id => navigate("profile", id),
+     openTag: tag => navigate("tag", tag),
+-    share: setSharePost,
++    share: post=>{if(flags.shares)setSharePost(post);},
+     deletePost: setDeleteTarget,
+     copyLink,
+-    editPost: setEditingPost,
++    editPost: post=>{if(flags.postEditing)setEditingPost(post);},
+     people: data.people,
+     me: data.me,
+   };
+@@ -324,8 +331,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+   }, [viewerId]);
+ 
+   useEffect(() => {
+-    if (view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
+-  }, [view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
++    if (flags.follow && view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
++  }, [flags.follow, view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
+ 
+   // Blocking removes the follow in both directions on the server; the local
+   // copy just reflects it for instant feedback.
+@@ -354,7 +361,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+ 
+   /* ---------------------------------- derived ---------------------------------- */
+ 
+-  const stories = data.posts.filter(post => post.kind === "story" && (!post.expires_at || post.expires_at > now));
++  const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
+   const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
+     && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
+   const profile = data.people.find(person => person.id === (profileId || data.me?.id)) || null;
+@@ -425,10 +432,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+ 
+   // Full-screen viewers and bottom sheets own the screen, so the floating dock
+   // steps aside instead of floating over them.
+-  const dockCovered = !!create || !!edit || story !== null || !!selectedPost || login || !!deleteTarget || about || !!relation;
++  const dockCovered = !!create || !!edit || (flags.stories && story !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation;
+ 
+   return (
+-    <div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
++    <FeatureContext value={flags}><div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
+       <a className="skip-link" href="#main-content">Skip to content</a>
+       {sidebar}
+       {mobileHeader}
+@@ -440,11 +447,11 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+             <p>Share your moments on {appearance.name}</p>
+             <div>
+               <button className="secondary-button" onClick={() => openAuth("signin")}>Sign in</button>
+-              <button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button>
++              <Feature name="signups"><button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button></Feature>
+             </div>
+           </div>
+         )}
+-        {!targetEnabled(appearance,view)?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
++        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
+           <Empty icon={<RefreshCw />} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment."
+             action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>Reload feed</button>} />
+         ) : (
+@@ -490,8 +497,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+       </main>
+       <FloatingDock items={appearance.nav.filter(item=>item.enabled&&item.dock)} active={view} me={data.me} onSelect={nav} covered={dockCovered} />
+ 
+-      {create && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
+-      {editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
++      {flags.uploads && create && (create!=="reel"||flags.reels) && (create!=="story"||flags.stories) && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
++      {flags.postEditing && editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
+       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
+       {story !== null && stories[story] && (
+         <StoryViewer stories={stories} start={story} me={data.me} people={data.people} onClose={() => setStory(null)}
+@@ -501,7 +508,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+       {selectedPost && (
+         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
+           onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
+-          onCommentCountChange={delta => patchPost(selectedPost.id, post => ({ ...post, comment_count: Math.max(0, post.comment_count + delta) }))} />
++          onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id)).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
+       )}
+       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
+       {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
+@@ -525,7 +532,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
+       {reportTarget && <ReportDialog person={reportTarget} onClose={() => setReportTarget(null)} />}
+       {relation && <Relations person={relation.person} kind={relation.kind} onClose={() => setRelation(null)} onProfile={id => { setRelation(null); navigate("profile", id); }} />}
+       <Toaster position="bottom-center" closeButton />
+-    </div>
++    </div></FeatureContext>
+   );
+ }
+ 
+diff --git a/components/social/auth-form.tsx b/components/social/auth-form.tsx
+index 01a6c8b..39c6666 100644
+--- a/components/social/auth-form.tsx
++++ b/components/social/auth-form.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import {Feature,useFeatures} from './features';
+ import {forwardRef,useEffect,useState,type ComponentPropsWithoutRef,type FormEvent} from 'react';
+ import {toast} from 'sonner';
+ import Link from 'next/link';
+@@ -61,7 +62,8 @@ export function ForgotPasswordForm({onDone,onBack}:{onDone:(message:string)=>voi
+ }
+ 
+ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'signin'|'signup';initialNotice?:string}){
+- const [register,setRegister]=useState(initialMode==='signup');
++ const flags=useFeatures();
++ const [wantsRegister,setRegister]=useState(initialMode==='signup');const register=wantsRegister&&flags.signups;
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [pendingEmail,setPendingEmail]=useState<string|null>(null);
+  const [forgot,setForgot]=useState(false);
+@@ -98,7 +100,7 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
+   {error&&<p role="alert">{error}</p>}
+   <button type="submit" className="primary-button wide" disabled={busy}>{busy?'Please wait…':register?'Create account':'Sign in'}</button>
+   {devMode&&<PreviewAccountButton/>}
+-  <button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button>
++  <Feature name="signups"><button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button></Feature>
+  {!register&&<div className="auth-links">
+   <button type="button" className="text-button" disabled={busy} onClick={()=>setForgot(true)}>Forgot your password?</button>
+   <button type="button" className="text-button" disabled={busy} onClick={()=>setPendingEmail('')}>Resend verification email</button>
+diff --git a/components/social/create.tsx b/components/social/create.tsx
+index 0c57d83..8cd772b 100644
+--- a/components/social/create.tsx
++++ b/components/social/create.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature} from "./features";
+ import { useState, useRef, type FormEvent } from "react";
+ import { ImagePlus, Plus, X, Film, Camera, MapPin, ChevronLeft, ChevronRight, Upload, TrendingUp } from "lucide-react";
+ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+@@ -96,8 +97,8 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+       <Tabs value={kind} onValueChange={value => { setKind(value as typeof kind); setFiles([]); setOptions([]); setTags([]); setTagQuery(""); setStep(1); setError(""); }}>
+         <TabsList variant="line" className="product-tabs">
+           <TabsTrigger value="post"><ImagePlus size={17} />Post</TabsTrigger>
+-          <TabsTrigger value="story"><Camera size={17} />Story</TabsTrigger>
+-          <TabsTrigger value="reel"><Film size={17} />Reel</TabsTrigger>
++          <Feature name="stories"><TabsTrigger value="story"><Camera size={17} />Story</TabsTrigger></Feature>
++          <Feature name="reels"><TabsTrigger value="reel"><Film size={17} />Reel</TabsTrigger></Feature>
+         </TabsList>
+       </Tabs>
+ 
+@@ -185,7 +186,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+                 </select>
+               </label>
+             )}
+-            <TagPicker people={people} me={me} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} />
++            <Feature name="tagging"><TagPicker people={people} me={me} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} /></Feature>
+             {kind === "story" && <p className="form-hint">Your story will disappear after 24 hours. People can reply to it in Messages.</p>}
+             {kind === "reel" && <p className="form-hint">Reels appear in the Reels feed with their original frame size.</p>}
+             <div className="create-preview-actions">
+@@ -301,7 +302,7 @@ export function EditPostDialog({ post, people, onClose, onSaved }: {
+               {CATEGORIES.map(name => <option key={name} value={name}>{name}</option>)}
+             </select>
+           </label>
+-          <TagPicker people={people} me={post.author} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} />
++          <Feature name="tagging"><TagPicker people={people} me={post.author} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} /></Feature>
+           {post.media.length > 0 && !post.media_type.startsWith("video/") && (
+             <div className="media-details">
+               {post.media.map((url, index) => (
+@@ -362,8 +363,9 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: ()
+       <form onSubmit={submit} className="edit-form">
+         <div className="edit-avatar">
+           <Avatar person={{ ...me, avatar }} size={76} />
+-          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Choose profile photo" onChange={e => void photo(e.target.files?.[0])} />
++          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Choose profile photo" onChange={e => void photo(e.target.files?.[0])} />
+           <button type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>Change photo</button>
++</Feature>
+         </div>
+         <label>Name<input required maxLength={60} value={name} onChange={e => setName(e.target.value)} /></label>
+         <label>Username<input required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_][a-zA-Z0-9_.]{2,29}" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" spellCheck={false} /></label>
+diff --git a/components/social/features.tsx b/components/social/features.tsx
+new file mode 100644
+index 0000000..0eb02e6
+--- /dev/null
++++ b/components/social/features.tsx
+@@ -0,0 +1,6 @@
++'use client';
++import {createContext,useContext} from 'react';
++import {ALL_FEATURES,type Feature,type Flags} from '@/lib/features';
++export const FeatureContext=createContext<Flags>(ALL_FEATURES);
++export const useFeatures=()=>useContext(FeatureContext);
++export function Feature({name,children}:{name:Feature;children?:React.ReactNode}){return useFeatures()[name]?children:null;}
+diff --git a/components/social/post-card.tsx b/components/social/post-card.tsx
+index b8bb406..7d65655 100644
+--- a/components/social/post-card.tsx
++++ b/components/social/post-card.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature,useFeatures} from "./features";
+ import { useState, useRef, useMemo, type FormEvent } from "react";
+ import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Smile, Link as LinkIcon, EyeOff, UserRound, Trash2, Pencil } from "lucide-react";
+ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+@@ -29,12 +30,12 @@ export function PostMenu({ post, actions, className = "" }: { post: Post; action
+       </DropdownMenuTrigger>
+       <DropdownMenuContent align="end" className="social-menu">
+         <DropdownMenuItem onClick={() => actions.openProfile(post.author_id)}><UserRound />Go to profile</DropdownMenuItem>
+-        <DropdownMenuItem onClick={() => actions.copyLink(post)}><LinkIcon />Copy link</DropdownMenuItem>
+-        <DropdownMenuItem onClick={() => void actions.react(post, "save", !post.saved)}><Bookmark />{post.saved ? "Remove from saved" : "Save post"}</DropdownMenuItem>
++        <Feature name="shares"><DropdownMenuItem onClick={() => actions.copyLink(post)}><LinkIcon />Copy link</DropdownMenuItem></Feature>
++        <Feature name="saves"><DropdownMenuItem onClick={() => void actions.react(post, "save", !post.saved)}><Bookmark />{post.saved ? "Remove from saved" : "Save post"}</DropdownMenuItem></Feature>
+         <DropdownMenuSeparator />
+         {actions.me?.id === post.author_id
+           ? <>
+-            <DropdownMenuItem onClick={() => actions.editPost(post)}><Pencil />Edit post</DropdownMenuItem>
++            <Feature name="postEditing"><DropdownMenuItem onClick={() => actions.editPost(post)}><Pencil />Edit post</DropdownMenuItem></Feature>
+             <DropdownMenuItem variant="destructive" onClick={() => actions.deletePost(post)}><Trash2 />Delete post</DropdownMenuItem>
+           </>
+           : <DropdownMenuItem onClick={() => void actions.react(post, "hidden", true)}><EyeOff />Hide post</DropdownMenuItem>}
+@@ -53,16 +54,16 @@ export function PostActionsRow({ post, actions, compact = false }: { post: Post;
+   return (
+     <>
+       <div className="post-actions">
+-        <IconButton label={post.liked ? "Unlike" : "Like"} active={!!post.liked} disabled={!!pending} onClick={() => void react("like", !post.liked)}>
++        <Feature name="likes"><IconButton label={post.liked ? "Unlike" : "Like"} active={!!post.liked} disabled={!!pending} onClick={() => void react("like", !post.liked)}>
+           <Heart className={post.liked ? "like-pop" : ""} fill={post.liked ? "currentColor" : "none"} />
+-        </IconButton>
+-        <IconButton label="View comments" onClick={() => actions.openPost(post)}><MessageCircle /></IconButton>
+-        <IconButton label="Share post" onClick={() => actions.share(post)}><Send /></IconButton>
+-        <IconButton className="save-button" label={post.saved ? "Unsave post" : "Save post"} disabled={!!pending} onClick={() => void react("save", !post.saved)}>
++        </IconButton></Feature>
++        <Feature name="comments"><IconButton label="View comments" onClick={() => actions.openPost(post)}><MessageCircle /></IconButton></Feature>
++        <Feature name="shares"><IconButton label="Share post" onClick={() => actions.share(post)}><Send /></IconButton></Feature>
++        <Feature name="saves"><IconButton className="save-button" label={post.saved ? "Unsave post" : "Save post"} disabled={!!pending} onClick={() => void react("save", !post.saved)}>
+           <Bookmark className={post.saved ? "save-pop" : ""} fill={post.saved ? "currentColor" : "none"} />
+-        </IconButton>
++        </IconButton></Feature>
+       </div>
+-      <div className="like-count">{count(post.likes)} {post.likes === 1 ? "like" : "likes"}</div>
++      <Feature name="likes">{post.display_likes!==null&&<div className="like-count">{count(post.display_likes??post.likes)} {(post.display_likes??post.likes)===1?"like":"likes"}</div>}</Feature>{post.display_views!=null&&post.display_views>0&&<div className="post-view-count">{count(post.display_views)} views</div>}
+       {!compact && <span className="sr-only" aria-live="polite">{post.liked ? "Liked" : "Unliked"}</span>}
+     </>
+   );
+@@ -74,6 +75,7 @@ export function PostCaption({ post, actions }: { post: Post; actions: PostAction
+ export function Caption({ text, people, onProfile, onTag }: {
+   text: string; people: Person[]; onProfile: (id: string) => void; onTag: (tag: string) => void;
+ }) {
++  const flags=useFeatures();
+   const [more, setMore] = useState(false);
+   const shortened = !more && text.length > 160;
+   const byUsername = useMemo(() => new Map(people.map(person => [person.username.toLowerCase(), person])), [people]);
+@@ -81,8 +83,8 @@ export function Caption({ text, people, onProfile, onTag }: {
+   return (
+     <>
+       {parts.map((part, index) => {
+-        if (part.startsWith("#")) return <button type="button" className="hashtag" key={index} onClick={() => onTag(part.slice(1))}>{part}</button>;
+-        if (part.startsWith("@")) {
++        if (part.startsWith("#")&&flags.search) return <button type="button" className="hashtag" key={index} onClick={() => onTag(part.slice(1))}>{part}</button>;
++        if (part.startsWith("@")&&flags.tagging) {
+           const raw = part.slice(1);
+           let person = byUsername.get(raw.toLowerCase());
+           for (let end = raw.length - 1; !person && end >= 3; end--) {
+@@ -156,7 +158,9 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
+     const created = await actions.submitComment(p, body);
+     setMine(comments => [...comments, created]);
+   };
++  const flags=useFeatures();
+   const doubleTapLike = () => {
++    if(!flags.likes)return;
+     setBurst(true);
+     setTimeout(() => setBurst(false), 720);
+     if (!p.liked) void actions.react(p, "like", true);
+@@ -178,18 +182,8 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
+       <div className="post-body">
+         <PostActionsRow post={p} actions={actions} />
+         <PostCaption post={p} actions={actions} />
+-        {p.comment_count - mine.length > 0 && (
+-          <button className="view-comments" onClick={() => actions.openPost(p)}>
+-            {p.comment_count - mine.length === 1 ? "View 1 comment" : "View all " + (p.comment_count - mine.length) + " comments"}
+-          </button>
+-        )}
+-        {mine.map(comment => (
+-          <p className="post-caption my-comment" key={comment.id}>
+-            <button className="username" onClick={() => actions.openProfile(comment.author_id)}>{comment.username}</button> {comment.body}
+-          </p>
+-        ))}
+-        {!p.comment_count && !mine.length && <button className="view-comments" onClick={() => actions.openPost(p)}>Start the conversation</button>}
+-        <CommentForm onSubmit={submit} />
++        <Feature name="comments"><button className="view-comments" onClick={() => actions.openPost(p)}>{p.display_comments===null?'View comments':(p.display_comments??p.comment_count)>0?'View all '+(p.display_comments??p.comment_count)+' comments':'Start the conversation'}</button>{mine.map(comment=><p className="post-caption my-comment" key={comment.id}><button className="username" onClick={()=>actions.openProfile(comment.author_id)}>{comment.username}</button> {comment.body}</p>)}</Feature>
++        <Feature name="comments"><CommentForm onSubmit={submit} /></Feature>
+       </div>
+       <HeartBurst show={burst} />
+     </article>
+diff --git a/components/social/post-viewer.tsx b/components/social/post-viewer.tsx
+index a12db23..af10daa 100644
+--- a/components/social/post-viewer.tsx
++++ b/components/social/post-viewer.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature,useFeatures} from "./features";
+ import { useState, useEffect, useRef } from "react";
+ import { X } from "lucide-react";
+ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+@@ -10,6 +11,7 @@ import type { Post, Person, Comment } from "@/lib/types";
+ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+   post: Post; actions: PostActions; onClose: () => void; onCommentCountChange: (delta: number) => void;
+ }) {
++  const flags=useFeatures();
+   const [comments, setComments] = useState<Comment[] | null>(null);
+   const [nextCursor, setNextCursor] = useState<string | null>(null);
+   const [moreLoading, setMoreLoading] = useState(false);
+@@ -21,12 +23,13 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+   // The parent remounts this viewer per post (key={post.id}), so state starts
+   // clean for every post and only the fetch runs here.
+   useEffect(() => {
++    if(!flags.comments)return;
+     let active = true;
+     void request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30")
+       .then(page => { if (active) { setComments(page.items); setNextCursor(page.next_cursor); } })
+       .catch(e => { if (active) { setError((e as Error).message); if (e instanceof RequestError && e.status === 404) setUnavailable(true); } });
+     return () => { active = false; };
+-  }, [post.id]);
++  }, [post.id,flags.comments]);
+ 
+   const commentCount = comments?.length ?? 0;
+   useEffect(() => {
+@@ -51,15 +54,16 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+   const removeComment = async (comment: Comment) => {
+     const previous = comments ?? [];
+     setComments(items => (items ?? []).filter(item => item.id !== comment.id));
+-    onCommentCountChange(-1);
+-    try { await request("/api/social", { action: "delete_comment", id: comment.id }); }
++
++    try { await request("/api/social", { action: "delete_comment", id: comment.id }); onCommentCountChange(-1); }
+     catch (e) {
+       setComments(previous);
+-      onCommentCountChange(1);
++
+       toast.error((e as Error).message);
+     }
+   };
+   const doubleTapLike = () => {
++    if(!flags.likes)return;
+     setBurst(true);
+     setTimeout(() => setBurst(false), 720);
+     if (!post.liked) void actions.react(post, "like", true);
+@@ -112,7 +116,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+                   : <span className="muted">{post.location || "Shared a moment."}</span>}</p>
+                 <span>{timeAgo(post.created_at)}</span>
+               </div>
+-              {comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
++              <Feature name="comments">{comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
+               {comments?.map(comment => (
+                 <CommentRow key={comment.id} comment={comment}
+                   canDelete={comment.author_id === actions.me?.id || post.author_id === actions.me?.id}
+@@ -126,6 +130,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+               )}
+               {error && <p className="form-error" role="alert">{error} <button className="text-action" onClick={() => setComments(null)}>Retry</button></p>}
+               {comments !== null && !comments.length && !error && <p className="muted viewer-empty">Be the first to say something.</p>}
++              </Feature>
+             </div>
+             <div className="post-viewer-side">
+               <PostActionsRow post={post} actions={actions} />
+@@ -133,7 +138,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+               <p className="post-time">{new Date(post.created_at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</p>
+             </div>
+             <div className="post-viewer-compose">
+-              <CommentForm onSubmit={submit} autoFocus={false} placeholder="Add a comment…" />
++              <Feature name="comments"><CommentForm onSubmit={submit} autoFocus={false} placeholder="Add a comment…" /></Feature>
+             </div>
+           </section>
+         </div>
+diff --git a/components/social/reels.tsx b/components/social/reels.tsx
+index 64e5b5f..26538be 100644
+--- a/components/social/reels.tsx
++++ b/components/social/reels.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature} from "./features";
+ import { useState, useRef, useEffect } from "react";
+ import { Heart, MessageCircle, Send, Bookmark, Play, Pause, Volume2, VolumeX, Film } from "lucide-react";
+ import { Avatar, IconButton, Empty, count, Busy } from "./common";
+@@ -118,16 +119,16 @@ function Reel({ post: p, index, isActive, actions }: { post: Post; index: number
+           <small>{p.reel_credit || (p.author.is_demo ? "Sample reel · Original clip" : "Original video")} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
+         </div>
+         <div className="reel-actions">
+-          <IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
++          <Feature name="likes"><IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
+             <Heart className={p.liked ? "like-pop" : ""} fill={p.liked ? "currentColor" : "none"} />
+-          </IconButton>
+-          <span>{count(p.likes)}</span>
+-          <IconButton label="View comments" onClick={() => actions.openPost(p)}><MessageCircle /></IconButton>
+-          <span>{p.comment_count}</span>
+-          <IconButton label="Share reel" onClick={() => actions.share(p)}><Send /></IconButton>
+-          <IconButton label={p.saved ? "Unsave reel" : "Save reel"} disabled={pending} onClick={() => void react("save", !p.saved)}>
++          </IconButton></Feature>
++          <Feature name="likes">{p.display_likes!==null&&<span>{count(p.display_likes??p.likes)}</span>}</Feature>
++          <Feature name="comments"><IconButton label="View comments" onClick={() => actions.openPost(p)}><MessageCircle /></IconButton></Feature>
++          <Feature name="comments">{p.display_comments!==null&&<span>{count(p.display_comments??p.comment_count)}</span>}</Feature>{p.display_views!=null&&p.display_views>0&&<span>{count(p.display_views)} views</span>}
++          <Feature name="shares"><IconButton label="Share reel" onClick={() => actions.share(p)}><Send /></IconButton></Feature>
++          <Feature name="saves"><IconButton label={p.saved ? "Unsave reel" : "Save reel"} disabled={pending} onClick={() => void react("save", !p.saved)}>
+             <Bookmark fill={p.saved ? "currentColor" : "none"} />
+-          </IconButton>
++          </IconButton></Feature>
+         </div>
+         <input className="reel-seek" aria-label="Seek video" type="range" min="0" max="100" step="0.1" value={progress * 100}
+           onChange={event => { if (video.current && Number.isFinite(duration)) video.current.currentTime = Number(event.target.value) / 100 * duration; }} />
+diff --git a/components/social/settings.tsx b/components/social/settings.tsx
+index d36a0ce..c6e5eb2 100644
+--- a/components/social/settings.tsx
++++ b/components/social/settings.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature,useFeatures} from "./features";
+ import { useState, useEffect, type FormEvent } from "react";
+ import { Shield, Plus, Trash2, Mail, Lock, Bookmark } from "lucide-react";
+ import { toast } from "sonner";
+@@ -9,6 +10,7 @@ import type { Person, SavedCollection } from "@/lib/types";
+ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
+   me: Person; onClose: () => void; onSaved: () => Promise<void> | void; onSignOut: () => void;
+ }) {
++  const flags=useFeatures();
+   const [busy, setBusy] = useState("");
+   const [privacy, setPrivacy] = useState<number>(me.is_private ? 1 : 0);
+   const [collections, setCollections] = useState<SavedCollection[] | null>(null);
+@@ -17,10 +19,11 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
+   const [deleteConfirm, setDeleteConfirm] = useState(false);
+ 
+   useEffect(() => {
++    if(!flags.saves)return;
+     let active = true;
+     void request<SavedCollection[]>("/api/social?collections=1").then(items => { if (active) setCollections(items); }).catch(() => { if (active) setCollections([]); });
+     return () => { active = false; };
+-  }, []);
++  }, [flags.saves]);
+ 
+   const togglePrivacy = async () => {
+     const next = privacy ? 0 : 1;
+@@ -84,7 +87,7 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
+   return (
+     <Modal open onClose={() => !busy && onClose()} title="Settings and privacy" description="Privacy, collections, and your account.">
+       <div className="settings-sections">
+-        <section className="settings-section">
++        <Feature name="privateAccounts"><section className="settings-section">
+           <h3><Shield size={18} />Privacy</h3>
+           <div className="settings-row">
+             <div>
+@@ -95,9 +98,9 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
+               <span />
+             </button>
+           </div>
+-        </section>
++        </section></Feature>
+ 
+-        <section className="settings-section">
++        <Feature name="saves"><section className="settings-section">
+           <h3><Bookmark size={18} />Collections</h3>
+           <p className="settings-hint">Organize saved posts into groups of your own.</p>
+           <form onSubmit={addCollection} className="collection-form">
+@@ -117,7 +120,7 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
+               ))}
+             </ul>
+           )}
+-        </section>
++        </section></Feature>
+ 
+         <section className="settings-section">
+           <h3><Mail size={18} />Account email</h3>
+diff --git a/components/social/stories.tsx b/components/social/stories.tsx
+index 32f78f8..89979d3 100644
+--- a/components/social/stories.tsx
++++ b/components/social/stories.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature} from "./features";
+ import { useState, useEffect, useRef, useCallback, useEffectEvent } from "react";
+ import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX, MessageCircle, Eye, Send } from "lucide-react";
+ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+@@ -12,13 +13,13 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
+   return (
+     <div className="stories-wrapper">
+       <div className="stories" ref={rail}>
+-        <button className="story story-yours" onClick={onCreate}>
++        <Feature name="uploads"><button className="story story-yours" onClick={onCreate}>
+           <span className="your-story">
+             <Avatar person={me} size={66} />
+             <span className="story-plus"><Plus size={15} /></span>
+           </span>
+           <span>Your story</span>
+-        </button>
++        </button></Feature>
+         {stories.map((post, index) => (
+           <button className={"story " + (post.seen ? "story-seen" : "")} key={post.id} onClick={() => onOpen(index)}>
+             <Avatar person={post.author} size={70} ring />
+@@ -118,7 +119,7 @@ function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClo
+               <span>{timeAgo(post.created_at)}</span>
+               <div className="story-tools">
+                 {isOwn && <IconButton label="View who saw this story" onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
+-                {canReply && <IconButton label={replyTo ? "Close reply" : "Reply to this story"} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton>}
++                {canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? "Close reply" : "Reply to this story"} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}
+                 <IconButton label={paused ? "Play story" : "Pause story"} onClick={() => setPaused(value => !value)}>
+                   {paused ? <Play size={20} /> : <Pause size={20} />}
+                 </IconButton>
+diff --git a/components/social/views.tsx b/components/social/views.tsx
+index 8d5d5ff..05f04ce 100644
+--- a/components/social/views.tsx
++++ b/components/social/views.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import {Feature} from "./features";
+ import { useState, useEffect, useMemo, useRef } from "react";
+ import { Search, X, Users, Heart, Bookmark, Film, Grid3X3, UserRound, Camera, TrendingUp, Send, BadgeCheck, Flag, UserX, UserCheck, Lock } from "lucide-react";
+ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+@@ -40,7 +41,7 @@ function GridTile({ post, onPost, natural = false }: { post: Post; onPost: (post
+       {(post.media_type === "video" || post.media.length > 1) && (
+         <span className="grid-media-icon">{post.media_type === "video" ? <Film size={20} /> : <Grid3X3 size={18} />}</span>
+       )}
+-      <span className="grid-hover"><Heart size={20} fill="white" />{count(post.likes)}<span>·</span>{post.comment_count} comments</span>
++      <span className="grid-hover"><Feature name="likes">{post.display_likes!==null&&<><Heart size={20} fill="white" />{count(post.display_likes??post.likes)}</>}</Feature><Feature name="comments">{post.display_comments!==null&&<span>{count(post.display_comments??post.comment_count)} comments</span>}</Feature></span>
+     </button>
+   );
+ }
+@@ -66,7 +67,7 @@ export function ProfileGrid({ id, tab, posts, onPost, onCreate, own }: {
+       <Empty icon={tab === "saved" ? <Bookmark /> : <Camera />}
+         heading={tab === "saved" ? "Keep a little inspiration" : own ? "Share your first moment" : "No posts yet"}
+         body={tab === "saved" ? "Tap the bookmark on a post to keep it here." : own ? "Your photos and videos deserve a place here." : "Their next moment will appear here."}
+-        action={own && <button className="primary-button" onClick={onCreate}>{tab === "saved" ? "Explore posts" : "Create a post"}</button>} />
++        action={own && <Feature name="uploads"><button className="primary-button" onClick={onCreate}>{tab === "saved" ? "Explore posts" : "Create a post"}</button></Feature>} />
+     );
+   }
+   return <PostGrid posts={list} onPost={onPost} />;
+@@ -94,18 +95,18 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
+         <Tabs value={feedTab} onValueChange={setFeedTab}>
+           <TabsList variant="line" className="feed-tabs">
+             <TabsTrigger value="for-you">For you</TabsTrigger>
+-            <TabsTrigger value="following">Following</TabsTrigger>
++            <Feature name="follow"><TabsTrigger value="following">Following</TabsTrigger></Feature>
+           </TabsList>
+         </Tabs>
+-        <Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} />
++        <Feature name="stories"><Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} /></Feature>
+         <div className="feed-posts">
+           {visiblePosts.map(post => <PostCard key={post.id} post={post} actions={actions} />)}
+           {!visiblePosts.length && (isFollowing && !following.loading
+-            ? <Empty icon={<Users />} heading="Follow a few people" body="Their latest moments will appear here."
+-                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
++            ? <Empty icon={<Users />} heading="Your following feed" body="Their latest moments will appear here."
++                action={<Feature name="search"><button className="primary-button" onClick={() => navigate("search")}>Find people</button></Feature>} />
+             : !isFollowing && (
+               <Empty icon={<Users />} heading="Make this feed yours" body="Follow a few people to see their latest moments here."
+-                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
++                action={<Feature name="search"><button className="primary-button" onClick={() => navigate("search")}>Find people</button></Feature>} />
+             ))}
+           {isFollowing && following.loading && !visiblePosts.length && <div className="loading-row"><Busy /></div>}
+           <div className="feed-end">
+@@ -131,7 +132,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
+           <>
+             <div className="suggestions-heading">
+               <h2>Suggested for you</h2>
+-              <button onClick={() => navigate("search")}>See all</button>
++              <Feature name="search"><button onClick={() => navigate("search")}>See all</button></Feature>
+             </div>
+             {suggestions.map(person => (
+               <div key={person.id} className="suggestion">
+@@ -140,9 +141,9 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
+                   <strong>{person.username}</strong>
+                   <span>{person.is_demo ? "Suggested for you" : person.name}</span>
+                 </button>
+-                <button className="follow-button" onClick={() => follow(person)} disabled={followPending.has(person.id)}>
++                <Feature name="follow"><button className="follow-button" onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                   {followPending.has(person.id) ? <Busy size={14} /> : "Follow"}
+-                </button>
++                </button></Feature>
+               </div>
+             ))}
+           </>
+@@ -264,9 +265,9 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
+                         </button>
+                         {person.id === data.me?.id
+                           ? <button className="follow-button" disabled>You</button>
+-                          : <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
++                          : <Feature name="follow"><button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                               {person.followed ? "Following" : "Follow"}
+-                            </button>}
++                            </button></Feature>}
+                       </div>
+                     ))}
+                   </div>
+@@ -295,19 +296,19 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
+                     <strong>{person.username}</strong>
+                     <span>{person.name}</span>
+                   </button>
+-                  <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
++                  <Feature name="follow"><button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                     {person.followed ? "Following" : "Follow"}
+-                  </button>
++                  </button></Feature>
+                 </div>
+               ))}
+             </div>
+           </>
+         )}
+       {!needle && (
+-        <button className="explore-cta glass-card" onClick={() => navigate("explore")}>
++        <Feature name="explore"><button className="explore-cta glass-card" onClick={() => navigate("explore")}>
+           <TrendingUp size={22} />
+           <span><strong>Explore what’s new</strong><span>Photos and reels from across RSTMC.</span></span>
+-        </button>
++        </button></Feature>
+       )}
+     </section>
+   );
+@@ -540,17 +541,17 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
+             {own ? (
+               <>
+                 <button className="secondary-button" onClick={onEdit}>Edit profile</button>
+-                <button className="secondary-button" onClick={onShare}><Send size={15} />Share</button>
++                <Feature name="shares"><button className="secondary-button" onClick={onShare}><Send size={15} />Share</button></Feature>
+               </>
+             ) : (
+               <>
+-                <button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending.has(profile.id) || !!profile.blocked}>
++                <Feature name="follow"><button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending.has(profile.id) || !!profile.blocked}>
+                   {followPending.has(profile.id) ? <Busy size={14} /> : profile.followed ? "Following" : "Follow"}
+-                </button>
+-                <button className="secondary-button" onClick={() => onMessage(profile)} disabled={!!profile.blocked}>Message</button>
+-                <button className="secondary-button icon-only" onClick={onShare} aria-label="Share profile"><Send size={15} /></button>
++                </button></Feature>
++                <Feature name="messages"><button className="secondary-button" onClick={() => onMessage(profile)} disabled={!!profile.blocked}>Message</button></Feature>
++                <Feature name="shares"><button className="secondary-button icon-only" onClick={onShare} aria-label="Share profile"><Send size={15} /></button></Feature>
+                 <div className="profile-safety">
+-                  <button className="icon-button" onClick={() => onReport(profile)} aria-label={"Report " + profile.username} title="Report"><Flag size={16} /></button>
++                  <Feature name="reports"><button className="icon-button" onClick={() => onReport(profile)} aria-label={"Report " + profile.username} title="Report"><Flag size={16} /></button></Feature>
+                   <button className={"icon-button " + (profile.blocked ? "is-active" : "")} onClick={() => onBlock(profile)}
+                     aria-label={profile.blocked ? "Unblock " + profile.username : "Block " + profile.username}
+                     title={profile.blocked ? "Unblock" : "Block"}>
+@@ -562,8 +563,8 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
+           </div>
+           <div className="profile-stats">
+             <span><strong>{count(profile.post_count)}</strong> posts</span>
+-            <button onClick={() => onRelations(profile, "followers")}><strong>{count(profile.followers)}</strong> followers</button>
+-            <button onClick={() => onRelations(profile, "following")}><strong>{count(profile.following)}</strong> following</button>
++            <Feature name="follow"><button onClick={() => onRelations(profile, "followers")}><strong>{count(profile.followers)}</strong> followers</button></Feature>
++            <Feature name="follow"><button onClick={() => onRelations(profile, "following")}><strong>{count(profile.following)}</strong> following</button></Feature>
+           </div>
+           <strong className="profile-name">{profile.name}</strong>
+           <p className="profile-bio">{profile.bio || "A little space to share your world."}</p>
+@@ -574,8 +575,8 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
+       <Tabs value={tab} onValueChange={setTab}>
+         <TabsList variant="line" className="profile-tabs">
+           <TabsTrigger value="posts"><Grid3X3 size={17} />Posts</TabsTrigger>
+-          <TabsTrigger value="reels"><Film size={17} />Reels</TabsTrigger>
+-          {own && <TabsTrigger value="saved"><Bookmark size={17} />Saved</TabsTrigger>}
++          <Feature name="reels"><TabsTrigger value="reels"><Film size={17} />Reels</TabsTrigger></Feature>
++          {own && <Feature name="saves"><TabsTrigger value="saved"><Bookmark size={17} />Saved</TabsTrigger></Feature>}
+         </TabsList>
+       </Tabs>
+       <ProfileGrid key={profile.id + ":" + tab} id={profile.id} tab={tab} posts={posts} onPost={openPost} onCreate={onCreate} own={own} />
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+index d585762..6a460f1 100644
+--- a/lib/admin/config.ts
++++ b/lib/admin/config.ts
+@@ -9,6 +9,7 @@ export type AdminActor = { userId: string; email: string; role: AdminRole };
+ // No secrets, bootstrap state, role policy or audit-disable switch belongs here.
+ export const SETTINGS_DEFAULTS = {
+   'appearance.config': '',
++  'features.config': '',
+   'content.reelMaxSeconds': 0,
+   'content.storyHours': 24,
+   'content.reelsEnabled': true,
+diff --git a/lib/admin/content.ts b/lib/admin/content.ts
+index c9f1f7e..4e28426 100644
+--- a/lib/admin/content.ts
++++ b/lib/admin/content.ts
+@@ -87,13 +87,13 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
+ }
+ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<string,unknown>) {
+   const resource=contentResource(body.resource);const action=text(body.operation,20,true),reason=text(body.reason??'',500);
+-  if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit'].includes(action))throw new AdminError('Unknown content operation.');
++  if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit','counters'].includes(action))throw new AdminError('Unknown content operation.');
+   const ids=body.ids;
+   if(!Array.isArray(ids)||!ids.length||ids.length>50||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id||id.length>100))throw new AdminError('Select 1–50 unique items.');
+   if(body.confirmation!==(ids.length===1?ids[0]:`CONFIRM ${ids.length}`))throw new AdminError('Confirmation does not match the selection.');
+   if(action==='hide'&&!reason)throw new AdminError('A reason is required to hide content.');
+-  if(['edit','purge'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
+-  if(resource==='comments'&&['pin','unpin','expire','highlight'].includes(action))throw new AdminError('This operation is only for posts.');
++  if(['edit','purge','counters'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
++  if(resource==='comments'&&['pin','unpin','expire','highlight','counters'].includes(action))throw new AdminError('This operation is only for posts.');
+   await authorizeAdmin(pool,actorId,action==='purge');
+   // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
+   // compare the row again under lock so a concurrent edit cannot be overwritten.
+@@ -128,6 +128,7 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
+         if(JSON.stringify(row)!==JSON.stringify(original))throw new AdminError('This item changed while editing. Reload before trying again.',409);
+         update={...patch,...resource==='posts'?{edited_at:now}:{}};
+       }
++      if(action==='counters'){for(const key of ['base_likes','base_comments','base_views']){const value=body[key];if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0||value>1000000000)throw new AdminError('Baselines must be whole numbers from 0 to 1 billion.');update[key]=value;}}
+       if(action==='purge')await db.query(`DELETE FROM ${resource} WHERE id=$1`,[row.id]);
+       else {
+         const keys=Object.keys(update); // Keys are constructed above, never from raw request fields.
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+index e1dc0a9..0528123 100644
+--- a/lib/admin/validation.ts
++++ b/lib/admin/validation.ts
+@@ -1,3 +1,4 @@
++import { validateFeatures } from '../features';
+ import { validateAppearance } from '../appearance';
+ import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
+ 
+@@ -9,6 +10,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
+   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
+   let valid = false;
+   switch (key as SettingKey) {
++    case 'features.config': {
++      if(typeof value!=='string'||value.length>8000)throw new AdminError('Invalid features configuration.');
++      if(value==='')return '';
++      try{return JSON.stringify(validateFeatures(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid configuration.');}
++    }
+     case 'appearance.config': {
+       if(typeof value!=='string'||value.length>12000)throw new AdminError('Invalid appearance configuration.');
+       if(value==='')return '';
+diff --git a/lib/auth.ts b/lib/auth.ts
+index a69279d..c58d9e5 100644
+--- a/lib/auth.ts
++++ b/lib/auth.ts
+@@ -1,3 +1,5 @@
++import {featurePolicy} from './feature-policy';
++import {APIError,createAuthMiddleware} from 'better-auth/api';
+ import { betterAuth } from 'better-auth';
+ import { headers } from 'next/headers';
+ import { after } from 'next/server';
+@@ -40,6 +42,9 @@ async function createAuth() {
+   return betterAuth({
+     ...config, appName:'FunctionGram', secret, database: await getPool(),
+     databaseHooks: accountSessionHooks(await getPool()),
++    // Run before Better Auth opens a transaction. A pool read inside a user-create
++    // database hook would deadlock the serialized local driver.
++    hooks:{before:createAuthMiddleware(async context=>{if(context.path?.startsWith('/sign-up')){const policy=await featurePolicy(null);if(policy.config.maintenance.enabled||!policy.flags.signups)throw new APIError('FORBIDDEN',{message:'New registrations are currently unavailable.'});}})},
+     emailVerification: {
+       ...config.emailVerification,
+       async sendVerificationEmail(details) {
+diff --git a/lib/counters.ts b/lib/counters.ts
+new file mode 100644
+index 0000000..2cea88a
+--- /dev/null
++++ b/lib/counters.ts
+@@ -0,0 +1,10 @@
++import type {FeatureConfig} from './features';
++/** Constants originate from the validated registry; expressions/alias are source-code only. */
++export function counterSql(real:string,base:string,metric:string,c:FeatureConfig['counters'],alias='p'){
++ if(c.hide)return 'NULL::bigint';
++ const jitter=c.jitter?`(abs(hashtext(${alias}.id||':${metric}')::bigint)%${2*c.jitter+1}-${c.jitter})`:'0';
++ return `LEAST(1000000000000,GREATEST(0,FLOOR(((${real})+${alias}.${base})*${c.multiplier}+${jitter})))::bigint`;
++}
++export function displayCounterColumns(c:FeatureConfig['counters'],alias='p'){
++ return [counterSql(`SELECT COUNT(*) FROM reactions WHERE post_id=${alias}.id AND kind='like'`,'base_likes','likes',c,alias)+' AS display_likes',counterSql(`SELECT COUNT(*) FROM comments c JOIN profiles ca ON ca.id=c.author_id WHERE c.post_id=${alias}.id AND c.hidden_at IS NULL AND c.deleted_at IS NULL AND ca.deleted_at IS NULL`,'base_comments','comments',c,alias)+' AS display_comments',counterSql(`SELECT COUNT(*) FROM reactions WHERE post_id=${alias}.id AND kind='seen'`,'base_views','views',c,alias)+' AS display_views'].join(',');
++}
+diff --git a/lib/feature-policy.ts b/lib/feature-policy.ts
+new file mode 100644
+index 0000000..ffe5dd1
+--- /dev/null
++++ b/lib/feature-policy.ts
+@@ -0,0 +1,15 @@
++import {ensureSchema,getPool} from './postgres';
++import {loadSettings} from './admin/core';
++import {accountEnabled} from './account-policy';
++import {featureConfig,resolveFeatures,type Feature,type FeatureConfig,type Flags} from './features';
++export class FeatureError extends Error {constructor(message:string,public status=403){super(message);}}
++export type FeaturePolicy={config:FeatureConfig;flags:Flags;admin:boolean};
++export async function featurePolicy(viewer:string|null):Promise<FeaturePolicy>{
++ await ensureSchema();const db=await getPool();const settings=await loadSettings(db);const config=featureConfig(settings);const flags=resolveFeatures(config,viewer);
++ let admin=false;
++ if(viewer&&config.maintenance.enabled){const {rows:[row]}=await db.query('SELECT role,"emailVerified",banned,"banExpires",deleted_at FROM "user" WHERE id=$1',[viewer]);admin=!!row&&row.emailVerified===true&&['admin','owner'].includes(row.role)&&accountEnabled(row);}
++ return {config,flags,admin};
++}
++export function requirePublic(policy:FeaturePolicy,viewer:string|null){if(policy.config.maintenance.enabled&&!policy.admin)throw new FeatureError(policy.config.maintenance.message,503);if(!viewer&&!policy.flags.guestBrowsing)throw new FeatureError('Sign in to browse.',401);}
++export function requireFeature(policy:FeaturePolicy,key:Feature){if(!policy.flags[key])throw new FeatureError('This feature is currently unavailable.');}
++export async function requireUpload(owner:string){const p=await featurePolicy(owner);requirePublic(p,owner);requireFeature(p,'uploads');}
+diff --git a/lib/features.ts b/lib/features.ts
+new file mode 100644
+index 0000000..6fe3bfd
+--- /dev/null
++++ b/lib/features.ts
+@@ -0,0 +1,22 @@
++/** Rollouts are deterministic by account ID; anonymous visitors share one cohort. */
++export const FEATURE_KEYS=['reels','stories','explore','search','messages','notifications','comments','likes','saves','shares','follow','reports','uploads','signups','guestBrowsing','privateAccounts','tagging','postEditing'] as const;
++export type Feature=typeof FEATURE_KEYS[number];
++export type Flags=Record<Feature,boolean>;
++export type FeatureConfig={flags:Record<Feature,{enabled:boolean;percent:number}>;maintenance:{enabled:boolean;title:string;message:string};counters:{multiplier:number;jitter:number;hide:boolean}};
++export const DEFAULT_FEATURES:FeatureConfig={flags:Object.fromEntries(FEATURE_KEYS.map(key=>[key,{enabled:true,percent:100}])) as FeatureConfig['flags'],maintenance:{enabled:false,title:'We’ll be back soon',message:'We’re making a few improvements. Please check back shortly.'},counters:{multiplier:1,jitter:0,hide:false}};
++export function validateFeatures(value:unknown):FeatureConfig {
++ if(!value||typeof value!=='object')throw new Error('Invalid feature configuration.');const input=value as FeatureConfig;
++ const flags={} as FeatureConfig['flags'];
++ for(const key of FEATURE_KEYS){const f=input.flags?.[key];if(!f||typeof f.enabled!=='boolean'||!Number.isInteger(f.percent)||f.percent<0||f.percent>100)throw new Error('Each feature needs an on/off value and a rollout from 0 to 100.');flags[key]={enabled:f.enabled,percent:f.percent};}
++ const m=input.maintenance,c=input.counters;
++ if(!m||typeof m.enabled!=='boolean'||typeof m.title!=='string'||!m.title.trim()||m.title.length>100||typeof m.message!=='string'||m.message.length>500||/[\x00-\x1f]/.test(m.title+m.message))throw new Error('Invalid maintenance text.');
++ if(!c||typeof c.multiplier!=='number'||!Number.isFinite(c.multiplier)||c.multiplier<0||c.multiplier>100||!Number.isInteger(c.jitter)||c.jitter<0||c.jitter>1000||typeof c.hide!=='boolean')throw new Error('Counters require multiplier 0–100, jitter 0–1000 and hide on/off.');
++ return{flags,maintenance:{enabled:m.enabled,title:m.title.trim(),message:m.message.trim()},counters:{multiplier:c.multiplier,jitter:c.jitter,hide:c.hide}};
++}
++export function rolloutBucket(feature:Feature,id:string|null):number {let hash=2166136261;for(const char of feature+':'+(id||'anonymous'))hash=Math.imul(hash^char.charCodeAt(0),16777619);return(hash>>>0)%100;}
++export function resolveFeatures(config:FeatureConfig,id:string|null):Flags{return Object.fromEntries(FEATURE_KEYS.map(key=>[key,config.flags[key].enabled&&rolloutBucket(key,id)<config.flags[key].percent])) as Flags;}
++export const ALL_FEATURES=resolveFeatures(DEFAULT_FEATURES,null);
++export function featureConfig(settings:Record<string,unknown>):FeatureConfig {if(!settings['features.config'])return structuredClone(DEFAULT_FEATURES);try{return validateFeatures(JSON.parse(String(settings['features.config'])));}catch{return structuredClone(DEFAULT_FEATURES);}}
++export const VIEW_FEATURES:Record<string,Feature>={reels:'reels',search:'search',tag:'search',explore:'explore',messages:'messages',notifications:'notifications',saved:'saves',create:'uploads'};
++export const QUERY_FEATURES:Record<string,Feature>={comments:'comments',messages:'messages',inbox:'messages',messages_search:'messages',highlights:'stories','story-viewers':'stories',tagged:'tagging',accounts:'search',search:'search',hashtag:'search',reels:'reels',explore:'explore',saved:'saves',collections:'saves',following:'follow',relations:'follow'};
++export const ACTION_FEATURES:Record<string,Feature>={comment:'comments',delete_comment:'comments',follow:'follow',message:'messages',delete_message:'messages',read_messages:'messages',read_notifications:'notifications',set_privacy:'privateAccounts',report:'reports',highlight:'stories',create_collection:'saves',delete_collection:'saves',save_to_collection:'saves',update_post:'postEditing',create_post:'uploads'};
+diff --git a/lib/server.ts b/lib/server.ts
+index d71899e..21d4d22 100644
+--- a/lib/server.ts
++++ b/lib/server.ts
+@@ -1,3 +1,6 @@
++import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
++import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
++import {displayCounterColumns} from './counters';
+ import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
+ import { database } from './postgres';
+ import { getAppUser } from '@/lib/auth';
+@@ -6,7 +9,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
+ 
+ export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
+ export function db(){return database();}
+-export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
++export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
+ export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
+ 
+ // Origins the deployment explicitly trusts (custom domains, preview domains).
+@@ -104,9 +107,10 @@ function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({.
+  * correlated subqueries, so a 40-row page no longer runs five extra scans per
+  * row. The output columns are identical to the legacy query.
+  */
+-export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedFilter={}):{sql:string;args:unknown[]}{
++export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedFilter={},flags:Flags=ALL_FEATURES,counters:FeatureConfig['counters']=DEFAULT_FEATURES.counters):{sql:string;args:unknown[]}{
+   const v=viewer||'';
+   const conditions:string[]=[];const filterArgs:unknown[]=[];
++  if(!flags.reels)conditions.push("p.kind!='reel'");if(!flags.stories)conditions.push("p.kind!='story'");
+   if(filter.author){conditions.push('p.author_id=?');filterArgs.push(filter.author);}
+   if(filter.post){conditions.push('p.id=?');filterArgs.push(filter.post);}
+   if(filter.saved){conditions.push("EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')");filterArgs.push(v);}
+@@ -123,7 +127,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
+   const args:unknown[]=[v,Date.now(),v,v,v,...filterArgs,limit,offset];
+   return {
+     sql:
+-      'SELECT p.*,p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
++      'SELECT p.*,'+displayCounterColumns(counters)+',p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
+       'COALESCE(cc.n,0) comment_count,'+
+       `(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
+       'EXISTS(SELECT 1 FROM story_highlights WHERE post_id=p.id) highlighted,'+
+@@ -138,32 +142,36 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
+   };
+ }
+ export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilter={}):Promise<Post[]>{
+-  const {sql,args}=buildFeedQuery(viewer,limit,offset,filter);
++  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
++  const {sql,args}=buildFeedQuery(viewer,limit,offset,filter,policy.flags,policy.config.counters);
+   const r=await db().prepare(sql).bind(...args).all<Record<string,unknown>>();
+-  return parsePosts(r.results);
++  return publicPosts(parsePosts(r.results),policy.flags);
+ }
+ export async function highlights(viewer:string|null,owner:string):Promise<Post[]>{
++  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'stories');
+   const v=viewer||'';
+-  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
+-  return parsePosts(r.results);
++  const r=await db().prepare(`SELECT p.*,${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
++  return publicPosts(parsePosts(r.results),policy.flags);
+ }
+ export async function availablePost(viewer:string|null,id:string) {
++  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
+   const v=viewer||'';
+   const row=await db().prepare(`SELECT p.* FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=? AND ${readablePost()}`).bind(id,v,v,v).first();
+-  if(!row)throw new AppError('This post is no longer available.',404);
++  if(!row||(row.kind==='reel'&&!policy.flags.reels)||(row.kind==='story'&&!policy.flags.stories))throw new AppError('This post is no longer available.',404);
+   return row;
+ }
+ export async function notifications(viewer:string) {
++  const policy=await featurePolicy(viewer);if(!policy.flags.notifications)return {results:[]};
+   return db().prepare(`SELECT n.*,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
+     JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
+-    WHERE n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
++    WHERE ${policy.flags.stories?'TRUE':"(p.kind IS NULL OR p.kind!='story')"} AND ${policy.flags.reels?'TRUE':"(p.kind IS NULL OR p.kind!='reel')"} AND ${policy.flags.comments?'TRUE':"n.kind!='comment'"} AND ${policy.flags.likes?'TRUE':"n.kind!='like'"} AND ${policy.flags.follow?'TRUE':"n.kind!='follow'"} AND ${policy.flags.tagging?'TRUE':"n.kind!='tag'"} AND n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
+     AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))
+     ORDER BY n.created_at DESC LIMIT 100`).bind(viewer,viewer,viewer,viewer).all();
+ }
+ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
+-  await seed();const viewer=await identity(requestHeaders);
+-  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
+-  return {me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
++  await seed();const viewer=await identity(requestHeaders);const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
++  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
++  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
+ }
+ /* ------------------------------ account features ------------------------------ */
+ 
+@@ -173,8 +181,9 @@ export async function storyViewers(viewer:string,storyId:string):Promise<StoryVi
+   return r.results;
+ }
+ export async function savedCollections(viewer:string):Promise<SavedCollection[]>{
++  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'saves');
+   const r=await db().prepare(`SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at)
+-    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${readablePost()})),'[]') post_ids
++    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${readablePost()})),'[]') post_ids
+     FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100`).bind(viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
+   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
+ }
+@@ -183,3 +192,13 @@ export async function messageSearch(viewer:string,term:string):Promise<Person[]>
+   const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
+   return r.results;
+ }
++
++function publicPosts(posts:Post[],flags:Flags):Post[]{return posts.map(post=>({...post,tagged_users:flags.tagging?post.tagged_users:[],comment_preview:flags.comments?post.comment_preview:null,display_comments:flags.comments?post.display_comments:null,display_likes:flags.likes?post.display_likes:null,saved:flags.saves?post.saved:0,liked:flags.likes?post.liked:0}));}
++export async function postCounters(viewer:string,id:string){
++ const policy=await featurePolicy(viewer);
++ const row=await db().prepare(`SELECT ${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes,
++ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like')::int liked,
++ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')::int saved,
++ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen')::int seen FROM posts p WHERE p.id=?`).bind(viewer,viewer,viewer,id).first();
++ return row?{...row,display_likes:policy.flags.likes?row.display_likes:null,display_comments:policy.flags.comments?row.display_comments:null,liked:policy.flags.likes?row.liked:0,saved:policy.flags.saves?row.saved:0}:{};
++}
+diff --git a/lib/types.ts b/lib/types.ts
+index 31df573..ae229ff 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -1,10 +1,10 @@
+ export type Person={id:string;username:string;name:string;bio:string;website?:string;avatar:string;is_demo:number;is_private?:number;followers:number;following:number;post_count:number;followed:number;blocked?:number;last_message?:string|null};
+ export type MediaOption={ratio:'original'|'1:1'|'4:5'|'16:9';fit:'contain'|'cover';alt:string};
+-export type Post={reel_credit?:string;id:string;author_id:string;media:string[];aspects?:number[]|null;media_options?:MediaOption[];tagged_users?:string[];highlighted?:boolean;edited_at?:number|null;media_type:'image'|'video';kind:'post'|'reel'|'story';caption:string;location:string;category:string;created_at:number;expires_at:number|null;likes:number;liked:number;saved:number;seen:number;comment_count:number;comment_preview?:{body:string;username:string}|null;author:Person};
++export type Post={display_likes?:number|null;display_comments?:number|null;display_views?:number|null;reel_credit?:string;id:string;author_id:string;media:string[];aspects?:number[]|null;media_options?:MediaOption[];tagged_users?:string[];highlighted?:boolean;edited_at?:number|null;media_type:'image'|'video';kind:'post'|'reel'|'story';caption:string;location:string;category:string;created_at:number;expires_at:number|null;likes:number;liked:number;saved:number;seen:number;comment_count:number;comment_preview?:{body:string;username:string}|null;author:Person};
+ export type Comment={id:string;post_id:string;author_id:string;body:string;created_at:number;username:string;avatar:string};
+ export type Message={id:string;sender_id:string;recipient_id:string;body:string;post_id?:string|null;created_at:number;read_at:number|null};
+ export type Notification={id:string;actor_id:string;kind:string;post_id:string|null;created_at:number;read_at:number|null;username:string;avatar:string;media:string|null;media_type:string|null};
+ export type SavedCollection={id:string;name:string;created_at:number;post_ids:string[]};
+ export type StoryViewer={username:string;name:string;avatar:string};
+-export type SocialData={me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
++export type SocialData={features?:import('./features').Flags;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
+ export type SearchResults={people:Person[];posts:Post[]};
+diff --git a/lib/uploads.ts b/lib/uploads.ts
+index 9b0b060..2c8c051 100644
+--- a/lib/uploads.ts
++++ b/lib/uploads.ts
+@@ -1,9 +1,11 @@
++import {requireUpload} from './feature-policy';
+ import {head,del} from '@vercel/blob';
+ import {AppError,db} from './server';
+ import {getPool} from './postgres';
+ import {detectMediaType,mediaTypes} from './media-type';
+ const keyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+ export async function reserveUpload(key:string,owner:string,payload:string|null){
++ await requireUpload(owner);
+  if(!keyPattern.test(key))throw new AppError('Invalid upload name.');
+  let input:{size:number;type:string};try{input=JSON.parse(payload||'');}catch{throw new AppError('Invalid upload.');}
+  if(!Number.isSafeInteger(input.size)||input.size<1||input.size>20*1024*1024||!mediaTypes.includes(input.type))throw new AppError('Choose a supported photo or video smaller than 20 MB.');
+@@ -25,6 +27,7 @@ export async function reserveUpload(key:string,owner:string,payload:string|null)
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+ }
+ export async function finishUpload(key:string,owner:string){
++ await requireUpload(owner);
+  if(!keyPattern.test(key))throw new AppError('Invalid upload.');
+  const claim=await db().prepare('SELECT * FROM upload_claims WHERE key=? AND owner_id=?').bind(key,owner).first<{expected_size:number;mime:string;created_at:number;completed:boolean}>();
+  if(!claim)throw new AppError('Upload not found.',404);
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 78d366d..63fabd7 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -290,3 +290,47 @@ Phase 3 — content control. Implement moderation-aware public queries across fe
+ - `patches/phase-03-content.patch`: 162,664 bytes, 1,862 lines; both root download copies are identical.
+ - SHA-256: `c77c61a176a7c7134d07eea289101ddcee255df6be89b3b1e4ea3fe602fcae79`.
+ - Independently exported the Phase 2 baseline outside the checkout, ran `git apply --check`, applied the patch, and compared all 32 changed files byte-for-byte with the implementation. All matched. This post-generation checksum note is outside the application patch to avoid self-reference.
++
++## Phase 5 — Feature flags, counters & maintenance
++
++Implemented after the preserved Phase 4 application baseline (`a0a3aab`). No remote push/PR and no Phase 6 work.
++
++### Controls and enforcement
++
++- `/rstmcadmin/features` provides all 18 flags with enable/disable and integer rollout percentages: Reels, Stories, Explore, Search, Messages, Notifications, Comments, Likes, Saves, Shares, Follow, Reports, Uploads, Signups, Guest browsing, Private accounts, Tagging and Post editing.
++- Assignments are stable per feature/account ID. Anonymous visitors and signup requests share one anonymous cohort; anonymous rollout is deliberately not a percentage of individual visitors. Defaults enable all features at 100%.
++- Navigation, dock/header, configured links, direct hashes and feature controls are gated; server reads/writes independently enforce policy. Disabled story/reel types are filtered from general feeds and message references. Notification/activity filtering respects independently disabled features. Upload registration/completion and dev helpers enforce policy. Signup is checked before Better Auth starts its transaction, avoiding nested-pool deadlocks.
++- Maintenance has configurable public title/message and requires typed `MAINTENANCE` confirmation. Guests and normal members see a styled sign-in-capable screen; public APIs return 503. Freshly verified, active admins/owners bypass maintenance only, never feature flags. Admin panel, authentication/recovery and sign-out remain accessible.
++- Existing private profiles remain private when private-account controls are disabled. Disabling uploads still permits profile text changes that retain the existing avatar; replacing it is denied. Disabled tagging preserves existing tags on otherwise permitted edits.
++- Admin page/API use independent fresh-role guards. Settings writes are same-origin, size-limited, validated and audited, with public cache invalidation. No new dependency or schema migration is needed.
++
++### Displayed counters
++
++- Global multiplier (0–100), integer jitter amplitude (0–1000), and hide-counts controls. Each post has an audited base-likes/base-comments/base-views editor in Content, with integer values 0–1 billion and typed post-ID confirmation. Trashed posts cannot be edited.
++- SQL computes `floor((real + baseline) * multiplier + stable jitter)`, clamped to 0–1 trillion. The jitter is deterministic per post/metric, not freshly randomized. Hidden display counts are null, not fake zeroes.
++- Visible comments and unique recorded `seen` reactions are the real comment/view inputs; views are not video play counts. Real engagement/state is retained separately. Feed, profile, discovery, direct viewer and mutation responses use canonical display fields; comment mutations refetch rather than incrementing a multiplied count locally.
++
++### Request-time limitations
++
++- Policy is read on new requests. Signed-in activity polling refreshes resolved flags, but there is no push channel to erase an idle tab's already displayed content or immediately replace it with maintenance. Reload existing tabs after publishing changes; anonymous tabs require reload.
++- Known public Blob/bundled media URLs remain accessible. Disabling uploads prevents new registration/completion, not retroactive revocation of issued storage URLs or cached bytes. Storage cleanup and CDN policy remain later-phase work.
++- The earlier content-level reels pause remains independent of the new feature flag. Admin maintenance bypass does not bypass private-content authorization in public APIs.
++
++### Validation
++
++- Typecheck, lint and production build passed. Lint: 0 errors, the 7 pre-existing image warnings.
++- Automated suite: 66 tests, 63 passed, 0 failed/cancelled, 3 optional managed-PostgreSQL tests skipped (no isolated PostgreSQL URL provided).
++- Added tests for registry validation/rollouts, SSR control omission, every feature family, signup denial, upload policy, maintenance/admin bypass, privacy preservation, bounded baseline editing and consistent/hidden counters across feeds and mutation responses.
++- `scripts/features-check.mts` passed against an isolated local dev database: guest/member/unverified/banned/revoked/expired/admin page/API guards, foreign-origin denial, validation, maintenance confirmation, SSR screen, admin bypass and disabled guest/reel API access.
++- `scripts/features-browser.mjs` passed in Chromium: public and admin pages at 320/390/768/1024px in light/dark themes, no horizontal overflow, disabled controls and seven direct hashes, all 18 editor entries, actual maintenance confirmation/save, mobile guest screen and admin bypass. No public browser page errors.
++- No production data, real email, storage objects, deployment environment or secrets changed. QA tooling/databases are ignored and excluded from the patch.
++
++### Apply and operate
++
++1. Apply `patches/phase-05-flags-counters.patch` **after Phases 1–4**, not instead of them. First run `git apply --check`, then `git apply`, then your normal install, tests and build.
++2. Sign in with the existing admin account and open **Features** in `/rstmcadmin`. Publish desired flags/rollouts, counter settings or maintenance text.
++3. For per-post baselines, open **Content → post → Displayed counters** and confirm the post ID.
++4. Reload existing public tabs to verify new settings. Keep an active verified admin account available when enabling maintenance or disabling guest browsing.
++5. The root `FunctionGram-Phase-5-Flags-Counters.patch` is an identical downloadable copy. Apply only one copy.
++
++**Next phase:** Phase 6 is not authorized; awaiting the user's request.
+diff --git a/scripts/features-browser.mjs b/scripts/features-browser.mjs
+new file mode 100644
+index 0000000..9c5011e
+--- /dev/null
++++ b/scripts/features-browser.mjs
+@@ -0,0 +1,22 @@
++// Optional browser QA; isolated fixture/tool setup matches scripts/admin-browser.mjs.
++import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';
++const require=createRequire(path.resolve('.local/browser-tools/package.json'));const{chromium:playwright}=require('playwright-core');const{default:chromium}=await import(require.resolve('@sparticuz/chromium'));
++const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';const cookies=JSON.parse(fs.readFileSync('.local/admin-check.json','utf8'));
++const browser=await playwright.launch({executablePath:await chromium.executablePath(),args:chromium.args.filter(a=>a!=='--single-process'),headless:true});
++const admin=await browser.newContext();const [key,...value]=cookies.admin.split('=');await admin.addCookies([{name:key,value:value.join('='),domain:new URL(origin).hostname,path:'/'}]);
++const original=await admin.request.get(origin+'/api/admin/features').then(r=>r.json());
++const save=async value=>{const r=await admin.request.post(origin+'/api/admin/features',{headers:{origin},data:{value,confirmation:value.maintenance.enabled?'MAINTENANCE':''}});assert.equal(r.status(),200,await r.text());};
++try{
++ const config=structuredClone(original);for(const key of ['reels','stories','search','explore','messages','notifications','likes','comments','shares','saves','follow','reports','uploads','signups'])config.flags[key].enabled=false;await save(config);
++ for(const width of [320,390,768,1024])for(const theme of ['light','dark']){
++  const context=await browser.newContext({viewport:{width,height:900},colorScheme:theme});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.bringToFront();await page.goto(origin);await page.waitForLoadState('networkidle');
++  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`public overflow ${width}`);
++  assert.equal(await page.getByRole('button',{name:'Like',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'Sign up',exact:true}).count(),0);
++  for(const section of ['reels','search','explore','messages','notifications','saved','create']){await page.evaluate(section=>{location.hash='#/'+section;},section);await page.getByRole('heading',{name:'This section is not available'}).waitFor();}
++  assert.deepEqual(errors,[]);await context.close();
++  const editor=await admin.newPage();await editor.setViewportSize({width,height:900});await editor.goto(origin+'/rstmcadmin/features');await editor.waitForLoadState('networkidle');await editor.evaluate(t=>document.documentElement.dataset.theme=t,theme);assert.ok(await editor.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`editor overflow ${width}`);assert.equal(await editor.locator('.feature-grid fieldset').count(),18);await editor.close();
++ }
++ const page=await admin.newPage();await page.goto(origin+'/rstmcadmin/features');await page.getByLabel('Public title',{exact:true}).fill('Browser maintenance test');await page.getByLabel('Enable maintenance mode',{exact:true}).check();assert.equal(await page.getByRole('button',{name:'Publish feature controls'}).isEnabled(),false);await page.getByLabel('Type MAINTENANCE to confirm',{exact:true}).fill('MAINTENANCE');await page.getByRole('button',{name:'Publish feature controls'}).click();await page.getByRole('status').filter({hasText:'saved and audited'}).waitFor();
++ const guest=await browser.newPage({viewport:{width:320,height:900}});await guest.goto(origin);await guest.getByRole('heading',{name:'Browser maintenance test'}).waitFor();assert.ok(await guest.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.goto(origin);assert.equal(await page.getByRole('heading',{name:'Browser maintenance test'}).count(),0);
++ console.log('Feature browser QA passed: 8 public/admin viewport-theme pairs, disabled controls/direct hashes, actual maintenance form confirmation/save, guest screen/admin bypass.');
++}finally{await save(original);await browser.close();}
+diff --git a/scripts/features-check.mts b/scripts/features-check.mts
+new file mode 100644
+index 0000000..aa30ede
+--- /dev/null
++++ b/scripts/features-check.mts
+@@ -0,0 +1,27 @@
++/** Optional HTTP QA against isolated scripts/admin-check.mts fixtures only. */
++import assert from 'node:assert/strict';
++import {validateFeatures} from '../lib/features';
++import {readFile} from 'node:fs/promises';
++const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';
++const cookies=JSON.parse(await readFile('.local/admin-check.json','utf8')) as Record<string,string>;
++if(process.env.ADMIN_TEST_SECURE_COOKIES==='1')for(const id of Object.keys(cookies))cookies[id]='__Secure-'+cookies[id];
++await fetch(origin+'/api/social');
++for(const [who,status]of [['guest',401],['regular',403],['unverified',401],['banned',403],['revoked',401],['expired',401],['admin',200]] as const){
++ for(const path of ['/rstmcadmin/features','/api/admin/features']){const res=await fetch(origin+path,{headers:{cookie:cookies[who]||''}});assert.equal(res.status,status,who+' '+path);}
++}
++const original=validateFeatures(await fetch(origin+'/api/admin/features',{headers:{cookie:cookies.admin}}).then(r=>r.json()));
++const save=(value:unknown,confirmation='',from=origin)=>fetch(origin+'/api/admin/features',{method:'POST',headers:{cookie:cookies.admin,origin:from,'content-type':'application/json'},body:JSON.stringify({value,confirmation})});
++try{
++ assert.equal((await save(original,'','https://foreign.test')).status,403);
++ const value=structuredClone(original);value.flags.likes.percent=101;assert.equal((await save(value)).status,400);value.flags.likes.percent=100;
++ value.maintenance.enabled=true;value.maintenance.title='Feature QA maintenance';assert.equal((await save(value)).status,400);assert.equal((await save(value,'MAINTENANCE')).status,200);
++ assert.match(await fetch(origin).then(r=>r.text()),/Feature QA maintenance/);
++ assert.equal((await fetch(origin+'/api/social')).status,503);
++ assert.equal((await fetch(origin+'/api/social',{headers:{cookie:cookies.regular}})).status,503);
++ assert.equal((await fetch(origin+'/api/social',{headers:{cookie:cookies.admin}})).status,200);
++ assert.equal((await fetch(origin+'/rstmcadmin/features',{headers:{cookie:cookies.admin}})).status,200);
++ value.maintenance.enabled=false;value.flags.reels.enabled=false;value.flags.guestBrowsing.enabled=false;assert.equal((await save(value)).status,200);
++ assert.equal((await fetch(origin+'/api/social')).status,401);
++ assert.equal((await fetch(origin+'/api/social?reels=1',{headers:{cookie:cookies.admin}})).status,403);
++ console.log('Feature HTTP QA passed: role guards, CSRF, validation, maintenance confirmation/SSR/admin bypass, guest and reel API denial.');
++}finally{assert.equal((await save(original,original.maintenance.enabled?'MAINTENANCE':'')).status,200);}
+diff --git a/tests/features.test.ts b/tests/features.test.ts
+new file mode 100644
+index 0000000..3062e43
+--- /dev/null
++++ b/tests/features.test.ts
+@@ -0,0 +1,39 @@
++import assert from 'node:assert/strict';
++import {test} from 'node:test';
++import React from 'react';
++import {renderToStaticMarkup} from 'react-dom/server';
++import {DEFAULT_FEATURES,FEATURE_KEYS,resolveFeatures,rolloutBucket,validateFeatures} from '../lib/features';
++import {validateSetting} from '../lib/admin/validation';
++import {requirePublic,requireFeature} from '../lib/feature-policy';
++import {FeatureContext,Feature} from '../components/social/features';
++import {counterSql} from '../lib/counters';
++test('all feature defaults are on; rollouts have stable buckets and strict 0/100 boundaries',()=>{
++ const c=structuredClone(DEFAULT_FEATURES);
++ assert.ok(Object.values(resolveFeatures(c,null)).every(Boolean));
++ for(const key of FEATURE_KEYS){c.flags[key].percent=0;assert.equal(resolveFeatures(c,'account')[key],false);c.flags[key].percent=100;assert.equal(resolveFeatures(c,'account')[key],true);c.flags[key].enabled=false;assert.equal(resolveFeatures(c,'account')[key],false);}
++ assert.equal(rolloutBucket('reels','account'),rolloutBucket('reels','account'));
++ const buckets=new Set(Array.from({length:1000},(_,i)=>rolloutBucket('reels','user'+i)));assert.ok(buckets.size>90);
++});
++test('feature configuration rejects invalid limits and strips unknown fields',()=>{
++ const c=structuredClone(DEFAULT_FEATURES);
++ for(const percent of [-1,101,1.5,NaN]){c.flags.likes.percent=percent;assert.throws(()=>validateFeatures(c));}
++ c.flags.likes.percent=100;
++ for(const multiplier of [-1,101,Infinity]){c.counters.multiplier=multiplier;assert.throws(()=>validateFeatures(c));}
++ c.counters.multiplier=1;c.counters.jitter=1001;assert.throws(()=>validateFeatures(c));c.counters.jitter=0;
++ assert.deepEqual(validateFeatures({...c,secret:'not persisted'}),c);
++ assert.equal(validateSetting('features.config',JSON.stringify(c)),JSON.stringify(c));
++ assert.throws(()=>validateSetting('features.config','{}'));
++});
++test('maintenance bypass is explicit and never bypasses a disabled feature; guest browsing requires login',()=>{
++ const config=structuredClone(DEFAULT_FEATURES);config.maintenance.enabled=true;const policy={config,flags:resolveFeatures(config,null),admin:false};
++ assert.throws(()=>requirePublic(policy,null),{status:503});assert.throws(()=>requirePublic(policy,'regular'),{status:503});
++ policy.admin=true;assert.doesNotThrow(()=>requirePublic(policy,'verified-admin'));policy.flags.likes=false;assert.throws(()=>requireFeature(policy,'likes'),{status:403});
++ config.maintenance.enabled=false;policy.flags.guestBrowsing=false;assert.throws(()=>requirePublic(policy,null),{status:401});assert.doesNotThrow(()=>requirePublic(policy,'regular'));
++});
++test('feature wrappers omit disabled controls from SSR rather than merely hiding them with CSS',()=>{
++ const flags=resolveFeatures(DEFAULT_FEATURES,null);flags.likes=false;
++ const html=renderToStaticMarkup(React.createElement(FeatureContext,{value:flags},React.createElement(Feature,{name:'likes'},React.createElement('button',null,'Like'))));
++ assert.equal(html,'');
++ assert.equal(counterSql('0','base_likes','likes',{multiplier:1,jitter:0,hide:true}),'NULL::bigint');
++ assert.match(counterSql('0','base_likes','likes',{multiplier:2,jitter:10,hide:false}),/hashtext/);
++});
+diff --git a/tests/social.test.ts b/tests/social.test.ts
+index 1d369bb..5440b93 100644
+--- a/tests/social.test.ts
++++ b/tests/social.test.ts
+@@ -489,3 +489,67 @@ test('expired highlights stay unavailable until explicit admin promotion clears
+   await act('hide');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+  }finally{await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+ });
++
++test('Phase 5 flags guard every social feature family and hide disabled media from general feeds',async()=>{
++ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');const {requireUpload}=await import('../lib/feature-policy');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ const set=async(key:string)=>{const c=structuredClone(DEFAULT_FEATURES);c.flags[key as keyof typeof c.flags].enabled=false;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));};
++ try{
++  for(const [flag,query,body]of [
++   ['comments','?comments=demo_coast',{action:'comment',id:'demo_coast',body:'denied'}],
++   ['likes','',{action:'reaction',id:'demo_coast',kind:'like',active:true}],
++   ['saves','?saved=1',{action:'create_collection',name:'denied'}],
++   ['follow','?following=1',{action:'follow',id:bob.id,active:true}],
++   ['reels','?reels=1',{action:'create_post',kind:'reel'}],
++   ['stories','?highlights='+alice.id,{action:'highlight',id:'story_coast',active:true}],
++   ['messages','?messages='+bob.id,{action:'message',id:bob.id,body:'denied'}],
++   ['notifications','',{action:'read_notifications'}],
++   ['search','?search=mountain',null],['explore','?explore=1',null],
++   ['shares','',{action:'message',id:bob.id,body:'denied',post_id:'story_coast'}],
++   ['reports','',{action:'report',target_type:'post',target_id:'demo_coast',reason:'spam'}],
++   ['privateAccounts','',{action:'set_privacy',private:true}],
++   ['tagging','?tagged='+bob.id,{action:'create_post',kind:'post',tagged_users:[bob.id]}],
++   ['postEditing','',{action:'update_post',id:'demo_coast',caption:'denied'}],
++   ['uploads','',{action:'create_post',kind:'post'}],
++  ] as const){await set(flag);if(query)assert.equal((await api(alice,null,query)).status,403,flag+' read');if(body)assert.equal((await api(alice,body)).status,403,flag+' write');
++   if(flag==='reels'||flag==='stories'){const data=(await api(alice)).data;assert.ok(data.posts.every((p:{kind:string})=>p.kind!==(flag==='reels'?'reel':'story')));}
++  }
++  await assert.rejects(requireUpload(alice.id),{status:403});
++  await set('notifications');assert.deepEqual((await api(alice,null,'?activity=1')).data.notifications,[]);
++  await set('guestBrowsing');assert.equal((await api(null)).status,401);assert.equal((await api(alice)).status,200);
++  await set('signups');const {getAuth}=await import('../lib/auth');await assert.rejects((await getAuth()).api.signUpEmail({body:{email:'disabled-signup@example.test',password:'Password-for-disabled-test-123',name:'Denied'},headers:new Headers({host,origin})}));
++  assert.equal((await pool.query('SELECT id FROM "user" WHERE email=\'disabled-signup@example.test\'')).rows.length,0);
++ }finally{await saveSetting(pool,carol.id,'features.config','');await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
++
++test('Phase 5 maintenance denies users/guests but permits active verified admin; disabling privacy retains private-post protection',async()=>{
++ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ try{
++  const c=structuredClone(DEFAULT_FEATURES);c.maintenance.enabled=true;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
++  assert.equal((await api(null)).status,503);assert.equal((await api(alice)).status,503);assert.equal((await api(carol)).status,200);
++  assert.equal((await api(alice,{action:'comment',id:'demo_coast',body:'denied'})).status,503);
++  await saveSetting(pool,carol.id,'features.config','');const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key]})).data.id;
++  await api(alice,{action:'set_privacy',private:true});c.maintenance.enabled=false;c.flags.privateAccounts.enabled=false;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
++  assert.equal((await api(null,null,'?post='+id)).data.length,0);assert.equal((await api(null,null,'?comments='+id)).status,404);
++ }finally{await saveSetting(pool,carol.id,'features.config','');await api(alice,{action:'set_privacy',private:false});await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
++
++test('Phase 5 baseline/multiplier/jitter counts agree in all feeds, direct view and mutation responses; hiding returns null display counts',async()=>{
++ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');const {moderateContent}=await import('../lib/admin/content');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ try{
++  const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'phasefivecounterprobe',tagged_users:[bob.id]})).data.id;
++  await api(bob,{action:'comment',id,body:'one'});await api(bob,{action:'comment',id,body:'two'});await api(bob,{action:'reaction',id,kind:'like',active:true});await api(bob,{action:'reaction',id,kind:'save',active:true});
++  await moderateContent(pool,carol.id,{resource:'posts',operation:'counters',ids:[id],confirmation:id,base_likes:10,base_comments:20,base_views:30});
++  const c=structuredClone(DEFAULT_FEATURES);c.counters.multiplier=2;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
++  const counters=(p:Record<string,number>)=>[p.display_likes,p.display_comments,p.display_views];
++  for(const query of ['?post='+id,'?profile='+alice.id,'?explore=1','?saved=1','?tagged='+bob.id]){const p=(await api(bob,null,query)).data.find((p:{id:string})=>p.id===id);assert.deepEqual(counters(p),[22,44,60],query);}
++  assert.deepEqual(counters((await api(bob,null,'?search=phasefivecounterprobe')).data.posts[0]),[22,44,60]);
++  assert.deepEqual(counters((await api(bob,{action:'reaction',id,kind:'save',active:true})).data),[22,44,60]);
++  c.counters.jitter=10;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));const first=counters((await api(bob,null,'?post='+id)).data[0]);assert.deepEqual(counters((await api(bob,null,'?profile='+alice.id)).data.find((p:{id:string})=>p.id===id)),first);
++  c.counters.hide=true;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));assert.deepEqual(counters((await api(bob,null,'?post='+id)).data[0]),[null,null,null]);
++  await assert.rejects(moderateContent(pool,carol.id,{resource:'posts',operation:'counters',ids:[id],confirmation:id,base_likes:-1,base_comments:0,base_views:0}),{status:400});
++  assert.equal((await pool.query('SELECT base_likes FROM posts WHERE id=$1',[id])).rows[0].base_likes,10);
++ }finally{await saveSetting(pool,carol.id,'features.config','');await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
