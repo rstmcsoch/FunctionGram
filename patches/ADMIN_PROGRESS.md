@@ -11,7 +11,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 0 | Discovery | Done; access defaults and bootstrap role confirmed | This report (notes-only exception in §7) |
 | 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
 | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
-| 3–12 | Content through handover | Not started | — |
+| 3 | Content control | Done locally; deployment pending | `phase-03-content.patch` |
+| 4–12 | Appearance through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
