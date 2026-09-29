@@ -10,7 +10,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | --- | --- | --- | --- |
 | 0 | Discovery | Done; access defaults and bootstrap role confirmed | This report (notes-only exception in §7) |
 | 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
-| 2–12 | Users through handover | Not started | — |
+| 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
+| 3–12 | Content through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -128,3 +129,59 @@ Phase 2 only: dashboard/users table and guarded, validated, audited user actions
 - Phase implementation commit: `bd0bdbe`.
 - `patches/phase-01-foundation.patch` generated with `git format-patch`; `git apply --check` passed against a scratch export of its parent (`1dccaa7`).
 - Phase 2 has not been started.
+
+
+## Phase 2 — Dashboard & users (2026-09-29)
+
+### Repository/session state
+
+- Phase 1 files and its patch survived, but this checkout's history only contained the original baseline. Preserved the entire existing working tree in local baseline commit `2b5070a` before changing application code. Nothing was discarded or reapplied over the retained files.
+- The session's pull request is closed. No remote GitHub operations were attempted in Phase 2. Changes, commits and the independent patch are local; start a new coding session to publish them.
+- Scope is Phase 2 only. Phase 3 has not started. Prior decisions remain: bootstrap role is admin; granting/revoking admin roles is owner-only. No credentials or owner identity were guessed.
+
+### Delivered
+
+- Separate responsive admin header/navigation and dashboard. SQL aggregates show registered/new accounts, recently updated active sessions (explicitly not DAU), content, open reports and recorded storage.
+- `/rstmcadmin/users`: bounded server-side search (email/name/username), role/status/demo filters, newest-first order, pagination, empty states and CSV export of the selected page. Default 50 / maximum 200 rows; no unbounded export. Standalone demo profiles without login accounts are intentionally excluded and labeled in the UI.
+- `/rstmcadmin/users/[id]`: profile/bio/website/privacy, email/role/ban state, post/comment/message counts, storage and newest 50 active sessions with IP/user agent. No message contents, session tokens, password hashes or OAuth credentials are returned.
+- Reusable DataTable, SearchBar, FilterChips, StatCard, collapsible detail Drawer and controlled ConfirmDialog components. All account actions require typing the exact email; ban additionally requires a reason. Confirmation dialogs return focus to their triggering button.
+- Guarded API GET users/detail and POST actions: ban/unban with optional expiry, force sign-out, mark verified, request password-reset email, soft-delete/restore, owner-only promote/demote. The original ping remains compatible.
+- All database account changes and audit entries commit atomically; audit failure rolls back account/session changes. Role/account operations use a shared advisory lock and fresh actor authorization. CSV export is also audited, capped, quoted and spreadsheet-formula escaped.
+- Self access-changing operations are denied. Owner accounts cannot be altered by another operator through this UI; only self reset/signout is allowed. Admins cannot act on other admins or grant roles. The last owner's role cannot be removed through these actions.
+- Migration 6 adds `user.deleted_at` and user/session/asset query indexes, registered in BOTH migration registries. Existing data is preserved.
+- Better Auth session-creation hooks reject active bans and account trash. Every public authenticated identity check also rechecks DB access policy, covering already-issued/racing sessions. Expired bans permit a new sign-in. Ban/delete/demotion/signout revoke existing sessions. Admin guard now honors ban expiry and account trash too.
+
+### Deliberate boundaries
+
+- No better-auth admin plugin is enabled: it would introduce extra mutation endpoints that bypass the app's auditing/permission policy. Existing `banned` / `banExpires` columns are enforced through Better Auth database hooks and the shared access policy instead.
+- Account trash disables login, revokes sessions and timestamps the account/profile; it does not hard-delete anything. Existing content remains intact/visible until the explicit Phase 3 moderation policy is implemented. Ban never automatically hides content. Restore does not clear a separate ban.
+- Reset-password auditing records an **initiated request**, not successful delivery. The action uses existing Better Auth reset tokens and Brevo delivery/caps outside the DB transaction; requests are throttled per target to once per minute. UI explicitly warns that delivery depends on provider availability and caps. No real email was sent during tests.
+- The user list is newest-first, not a general arbitrary-sort/query builder. Exports cover one page only (maximum 200), preserving the guide's bounded-query requirement.
+- Owner grants remain a recovery/operator task, not a self-service privilege escalation. Your bootstrap admin can manage ordinary users, but cannot promote itself to owner.
+- Full 2FA/session hardening, content controls, audit viewer and bulk/full-dataset exports remain their later phases. No production configuration/data was changed, and no Vercel/Neon deployment was verified.
+
+### Verification
+
+- Re-ran Phase 1 baseline before application changes: lint/build passed, 36 tests passed with the 2 optional managed-Postgres checks skipped.
+- Final `npm run lint`: passed, 0 errors; 7 existing public image warnings unchanged.
+- Final `npm run typecheck` and `npm run build`: passed.
+- `ADMIN_TEST_DATABASE_URL=<isolated-local-PostgreSQL> npm run test:vercel`: **43/43 passed, no skips**. Without that optional test URL, 41 pass and 2 managed-Postgres tests skip. Never use a production URL.
+- New tests cover actual body byte limits, pagination cap, invalid actions/expiry, CSV formula escaping, wildcard/SQL-injection-safe search, real pagination beyond 200 accounts, dashboard sums, session secret exclusion, 401/403 role enforcement, confirmation, owner/self protection, expired bans, account trash/restore, audit rollback, reset request throttling and delivery callback.
+- Real Better Auth signup/sign-in regression: active ban and trash return 403; ban expiry and restore permit sign-in; force signout makes the old cookie unusable. Reset request uses the existing reset-email callback for the selected account (mocked delivery).
+- Live dev/PGlite HTTP matrix: dashboard, list, detail, ping/list/detail APIs independently return 401 for guest/unverified/expired/revoked/forged sessions, 403 for ordinary/banned users, 200 for admin. Actual mutations and export succeed only with admin authorization and confirmation. Foreign-Origin POST returns 403. Requested page size 201 returns 400.
+- Actual managed PostgreSQL migration runner upgraded a ledger at 1–5 to 1–6. Ran the production build against that isolated PostgreSQL database; repeated the HTTP matrix, mutations, CSV, owner promotion/demotion and cross-admin denial successfully.
+- Headless Chromium at **320/360/390/430/768/1024**, light and dark: dashboard/list/detail without document overflow; table scroll stays in its container; tested controls >=44px; keyboard navigation, modal Escape/focus return, confirmation-disabled-until-matching, search results, download and real ban/unban. No browser page errors. Fixed focus restoration found in the first run, then reran all widths/themes successfully.
+- `git diff --check`: passed. Testing tools, databases, fake sessions, logs and screenshots remain ignored/untracked under `.local/` or outside the repository. Package manifest and lockfile unchanged.
+
+### Operator quick start
+
+1. After deploying the reviewed phase, open the admin Overview and choose **Users**.
+2. Search/filter, open an account, inspect its profile/session summary, and select an action. Confirm with the exact displayed email. Record a meaningful ban reason; blank expiry means indefinite, otherwise use a future date in the next year.
+3. For a ban, access stops immediately and old sessions are revoked. Unban allows a fresh sign-in; it does not resurrect old cookies. Expired bans also require a fresh sign-in.
+4. Trash is reversible: filter **deleted**, open the account, choose **Restore account**. Its independent ban state remains unchanged. No permanent deletion exists in this phase.
+5. **Export this page** exports only the current filtered page and is recorded in the audit log. Session tokens and password material are never part of the export.
+6. Owner-only role actions are unavailable to the bootstrap admin by design. Do not change the bootstrap variable to try to elevate an existing account.
+
+### Next phase
+
+Phase 3 — content control. Implement moderation-aware public queries across feed/profile/search/saved/direct links before exposing hide/delete content controls. Preserve both existing phase patches. Do not conflate this phase's account suspension/trash with hiding or purging content.

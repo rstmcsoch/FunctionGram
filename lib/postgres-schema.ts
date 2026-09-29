@@ -104,3 +104,11 @@ export const adminUpgradeStatements: string[] = [
   "CREATE INDEX IF NOT EXISTS post_views_post_idx ON post_views(post_id)",
   "CREATE TABLE IF NOT EXISTS admin_bootstrap (id integer PRIMARY KEY CHECK (id = 1), user_id text NOT NULL, completed_at bigint NOT NULL)"
 ];
+
+// Version 6: account suspension/trash and bounded admin list queries.
+export const adminUsersUpgradeStatements: string[] = [
+  'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS deleted_at bigint',
+  'CREATE INDEX IF NOT EXISTS user_created_idx ON "user"("createdAt" DESC,id)',
+  'CREATE INDEX IF NOT EXISTS session_created_idx ON session("createdAt" DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id,created_at DESC)',
+];

@@ -4,6 +4,7 @@ import { after } from 'next/server';
 import { ensureSchema, getPool } from './postgres';
 import { bootstrapAdmin } from './admin/core';
 import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
+import { accountCanSignIn, accountSessionHooks } from './account-policy';
 import { authConfiguration } from './auth-config';
 import {
   claimTransactionalEmail, claimVerificationEmail, createVerificationEmailSender,
@@ -38,6 +39,7 @@ async function createAuth() {
   const sendDeleteAccountEmail=createDeleteAccountEmailSender();
   return betterAuth({
     ...config, appName:'FunctionGram', secret, database: await getPool(),
+    databaseHooks: accountSessionHooks(await getPool()),
     emailVerification: {
       ...config.emailVerification,
       async sendVerificationEmail(details) {
@@ -85,10 +87,17 @@ async function createAuth() {
 // `requestHeaders` lets callers (API route handlers) hand in their own
 // request headers. When it is absent the Next request context is used, which
 // keeps the helper usable from server components too.
-export async function getAppUser(requestHeaders?: Headers) {
+export async function getSessionIdentity(requestHeaders?: Headers) {
   await ensureSchema();
   const session=await (await getAuth()).api.getSession({headers:requestHeaders??await headers()});
   if(!session?.user.emailVerified) return null;
   await bootstrapAdmin(await getPool(), session.user.id, session.user.email, process.env[ADMIN_BOOTSTRAP_ENV]);
   return {userId:session.user.id,email:session.user.email,fullName:session.user.name,displayName:session.user.name};
+}
+
+// Block existing sessions as well as new sign-ins, including a session issued
+// concurrently with a suspension. Public mutations already use this helper.
+export async function getAppUser(requestHeaders?: Headers) {
+  const user = await getSessionIdentity(requestHeaders);
+  return user && await accountCanSignIn(await getPool(), user.userId) ? user : null;
 }
