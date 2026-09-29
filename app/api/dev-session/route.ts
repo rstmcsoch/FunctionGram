@@ -1,3 +1,4 @@
+import {featurePolicy,requireFeature,FeatureError} from '@/lib/feature-policy';
 import { AppError, db, sameOrigin, fail } from '@/lib/server';
 import { localDevDatabase } from '@/lib/postgres';
 
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     sameOrigin(request);
     const database = db();
     const existing = await database.prepare('SELECT id FROM "user" WHERE email=?').bind(PREVIEW_EMAIL).first<{ id: string }>();
+    const policy=await featurePolicy(null);if(policy.config.maintenance.enabled)throw new FeatureError('Preview accounts are unavailable during maintenance.',503);if(!existing)requireFeature(policy,'signups');
     const userId = existing?.id ?? crypto.randomUUID();
     const now = new Date();
     const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');

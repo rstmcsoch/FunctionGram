@@ -1,3 +1,4 @@
+import {requireUpload} from '@/lib/feature-policy';
 import { promises as fs } from 'node:fs';
 import { AppError, db, identity, requestHeadersWithHost, sameOrigin, fail, json } from '@/lib/server';
 import { localDevDatabase } from '@/lib/postgres';
@@ -16,6 +17,7 @@ export async function POST(request: Request) {
     if (!localDevDatabase()) throw new AppError('Not found.', 404);
     sameOrigin(request);
     const user = (await identity(requestHeadersWithHost(request), true))!;
+    await requireUpload(user);
     const form = await request.formData();
     const key = String(form.get('key') || '');
     const file = form.get('file');

@@ -1,3 +1,5 @@
+import {featurePolicy} from './feature-policy';
+import {APIError,createAuthMiddleware} from 'better-auth/api';
 import { betterAuth } from 'better-auth';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
@@ -40,6 +42,9 @@ async function createAuth() {
   return betterAuth({
     ...config, appName:'FunctionGram', secret, database: await getPool(),
     databaseHooks: accountSessionHooks(await getPool()),
+    // Run before Better Auth opens a transaction. A pool read inside a user-create
+    // database hook would deadlock the serialized local driver.
+    hooks:{before:createAuthMiddleware(async context=>{if(context.path?.startsWith('/sign-up')){const policy=await featurePolicy(null);if(policy.config.maintenance.enabled||!policy.flags.signups)throw new APIError('FORBIDDEN',{message:'New registrations are currently unavailable.'});}})},
     emailVerification: {
       ...config.emailVerification,
       async sendVerificationEmail(details) {

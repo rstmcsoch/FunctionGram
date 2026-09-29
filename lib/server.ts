@@ -1,3 +1,6 @@
+import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
+import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
+import {displayCounterColumns} from './counters';
 import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
 import { database } from './postgres';
 import { getAppUser } from '@/lib/auth';
@@ -6,7 +9,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
 
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
 export function db(){return database();}
-export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
+export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
 
 // Origins the deployment explicitly trusts (custom domains, preview domains).
@@ -104,9 +107,10 @@ function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({.
  * correlated subqueries, so a 40-row page no longer runs five extra scans per
  * row. The output columns are identical to the legacy query.
  */
-export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedFilter={}):{sql:string;args:unknown[]}{
+export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedFilter={},flags:Flags=ALL_FEATURES,counters:FeatureConfig['counters']=DEFAULT_FEATURES.counters):{sql:string;args:unknown[]}{
   const v=viewer||'';
   const conditions:string[]=[];const filterArgs:unknown[]=[];
+  if(!flags.reels)conditions.push("p.kind!='reel'");if(!flags.stories)conditions.push("p.kind!='story'");
   if(filter.author){conditions.push('p.author_id=?');filterArgs.push(filter.author);}
   if(filter.post){conditions.push('p.id=?');filterArgs.push(filter.post);}
   if(filter.saved){conditions.push("EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')");filterArgs.push(v);}
@@ -123,7 +127,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   const args:unknown[]=[v,Date.now(),v,v,v,...filterArgs,limit,offset];
   return {
     sql:
-      'SELECT p.*,p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
+      'SELECT p.*,'+displayCounterColumns(counters)+',p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
       'COALESCE(cc.n,0) comment_count,'+
       `(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
       'EXISTS(SELECT 1 FROM story_highlights WHERE post_id=p.id) highlighted,'+
@@ -138,32 +142,36 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   };
 }
 export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilter={}):Promise<Post[]>{
-  const {sql,args}=buildFeedQuery(viewer,limit,offset,filter);
+  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
+  const {sql,args}=buildFeedQuery(viewer,limit,offset,filter,policy.flags,policy.config.counters);
   const r=await db().prepare(sql).bind(...args).all<Record<string,unknown>>();
-  return parsePosts(r.results);
+  return publicPosts(parsePosts(r.results),policy.flags);
 }
 export async function highlights(viewer:string|null,owner:string):Promise<Post[]>{
+  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'stories');
   const v=viewer||'';
-  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
-  return parsePosts(r.results);
+  const r=await db().prepare(`SELECT p.*,${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
+  return publicPosts(parsePosts(r.results),policy.flags);
 }
 export async function availablePost(viewer:string|null,id:string) {
+  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
   const v=viewer||'';
   const row=await db().prepare(`SELECT p.* FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=? AND ${readablePost()}`).bind(id,v,v,v).first();
-  if(!row)throw new AppError('This post is no longer available.',404);
+  if(!row||(row.kind==='reel'&&!policy.flags.reels)||(row.kind==='story'&&!policy.flags.stories))throw new AppError('This post is no longer available.',404);
   return row;
 }
 export async function notifications(viewer:string) {
+  const policy=await featurePolicy(viewer);if(!policy.flags.notifications)return {results:[]};
   return db().prepare(`SELECT n.*,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
     JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
-    WHERE n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
+    WHERE ${policy.flags.stories?'TRUE':"(p.kind IS NULL OR p.kind!='story')"} AND ${policy.flags.reels?'TRUE':"(p.kind IS NULL OR p.kind!='reel')"} AND ${policy.flags.comments?'TRUE':"n.kind!='comment'"} AND ${policy.flags.likes?'TRUE':"n.kind!='like'"} AND ${policy.flags.follow?'TRUE':"n.kind!='follow'"} AND ${policy.flags.tagging?'TRUE':"n.kind!='tag'"} AND n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
     AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))
     ORDER BY n.created_at DESC LIMIT 100`).bind(viewer,viewer,viewer,viewer).all();
 }
 export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
-  await seed();const viewer=await identity(requestHeaders);
-  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
-  return {me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
+  await seed();const viewer=await identity(requestHeaders);const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
+  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
+  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
 }
 /* ------------------------------ account features ------------------------------ */
 
@@ -173,8 +181,9 @@ export async function storyViewers(viewer:string,storyId:string):Promise<StoryVi
   return r.results;
 }
 export async function savedCollections(viewer:string):Promise<SavedCollection[]>{
+  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'saves');
   const r=await db().prepare(`SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at)
-    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${readablePost()})),'[]') post_ids
+    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${readablePost()})),'[]') post_ids
     FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100`).bind(viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
 }
@@ -182,4 +191,14 @@ export async function messageSearch(viewer:string,term:string):Promise<Person[]>
   const pattern=searchPattern(term);
   const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
   return r.results;
+}
+
+function publicPosts(posts:Post[],flags:Flags):Post[]{return posts.map(post=>({...post,tagged_users:flags.tagging?post.tagged_users:[],comment_preview:flags.comments?post.comment_preview:null,display_comments:flags.comments?post.display_comments:null,display_likes:flags.likes?post.display_likes:null,saved:flags.saves?post.saved:0,liked:flags.likes?post.liked:0}));}
+export async function postCounters(viewer:string,id:string){
+ const policy=await featurePolicy(viewer);
+ const row=await db().prepare(`SELECT ${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes,
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like')::int liked,
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')::int saved,
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen')::int seen FROM posts p WHERE p.id=?`).bind(viewer,viewer,viewer,id).first();
+ return row?{...row,display_likes:policy.flags.likes?row.display_likes:null,display_comments:policy.flags.comments?row.display_comments:null,liked:policy.flags.likes?row.liked:0,saved:policy.flags.saves?row.saved:0}:{};
 }

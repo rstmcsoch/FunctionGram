@@ -489,3 +489,67 @@ test('expired highlights stay unavailable until explicit admin promotion clears 
   await act('hide');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
  }finally{await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
 });
+
+test('Phase 5 flags guard every social feature family and hide disabled media from general feeds',async()=>{
+ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');const {requireUpload}=await import('../lib/feature-policy');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ const set=async(key:string)=>{const c=structuredClone(DEFAULT_FEATURES);c.flags[key as keyof typeof c.flags].enabled=false;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));};
+ try{
+  for(const [flag,query,body]of [
+   ['comments','?comments=demo_coast',{action:'comment',id:'demo_coast',body:'denied'}],
+   ['likes','',{action:'reaction',id:'demo_coast',kind:'like',active:true}],
+   ['saves','?saved=1',{action:'create_collection',name:'denied'}],
+   ['follow','?following=1',{action:'follow',id:bob.id,active:true}],
+   ['reels','?reels=1',{action:'create_post',kind:'reel'}],
+   ['stories','?highlights='+alice.id,{action:'highlight',id:'story_coast',active:true}],
+   ['messages','?messages='+bob.id,{action:'message',id:bob.id,body:'denied'}],
+   ['notifications','',{action:'read_notifications'}],
+   ['search','?search=mountain',null],['explore','?explore=1',null],
+   ['shares','',{action:'message',id:bob.id,body:'denied',post_id:'story_coast'}],
+   ['reports','',{action:'report',target_type:'post',target_id:'demo_coast',reason:'spam'}],
+   ['privateAccounts','',{action:'set_privacy',private:true}],
+   ['tagging','?tagged='+bob.id,{action:'create_post',kind:'post',tagged_users:[bob.id]}],
+   ['postEditing','',{action:'update_post',id:'demo_coast',caption:'denied'}],
+   ['uploads','',{action:'create_post',kind:'post'}],
+  ] as const){await set(flag);if(query)assert.equal((await api(alice,null,query)).status,403,flag+' read');if(body)assert.equal((await api(alice,body)).status,403,flag+' write');
+   if(flag==='reels'||flag==='stories'){const data=(await api(alice)).data;assert.ok(data.posts.every((p:{kind:string})=>p.kind!==(flag==='reels'?'reel':'story')));}
+  }
+  await assert.rejects(requireUpload(alice.id),{status:403});
+  await set('notifications');assert.deepEqual((await api(alice,null,'?activity=1')).data.notifications,[]);
+  await set('guestBrowsing');assert.equal((await api(null)).status,401);assert.equal((await api(alice)).status,200);
+  await set('signups');const {getAuth}=await import('../lib/auth');await assert.rejects((await getAuth()).api.signUpEmail({body:{email:'disabled-signup@example.test',password:'Password-for-disabled-test-123',name:'Denied'},headers:new Headers({host,origin})}));
+  assert.equal((await pool.query('SELECT id FROM "user" WHERE email=\'disabled-signup@example.test\'')).rows.length,0);
+ }finally{await saveSetting(pool,carol.id,'features.config','');await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
+
+test('Phase 5 maintenance denies users/guests but permits active verified admin; disabling privacy retains private-post protection',async()=>{
+ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ try{
+  const c=structuredClone(DEFAULT_FEATURES);c.maintenance.enabled=true;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
+  assert.equal((await api(null)).status,503);assert.equal((await api(alice)).status,503);assert.equal((await api(carol)).status,200);
+  assert.equal((await api(alice,{action:'comment',id:'demo_coast',body:'denied'})).status,503);
+  await saveSetting(pool,carol.id,'features.config','');const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key]})).data.id;
+  await api(alice,{action:'set_privacy',private:true});c.maintenance.enabled=false;c.flags.privateAccounts.enabled=false;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
+  assert.equal((await api(null,null,'?post='+id)).data.length,0);assert.equal((await api(null,null,'?comments='+id)).status,404);
+ }finally{await saveSetting(pool,carol.id,'features.config','');await api(alice,{action:'set_privacy',private:false});await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
+
+test('Phase 5 baseline/multiplier/jitter counts agree in all feeds, direct view and mutation responses; hiding returns null display counts',async()=>{
+ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');const {DEFAULT_FEATURES}=await import('../lib/features');const {moderateContent}=await import('../lib/admin/content');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ try{
+  const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'phasefivecounterprobe',tagged_users:[bob.id]})).data.id;
+  await api(bob,{action:'comment',id,body:'one'});await api(bob,{action:'comment',id,body:'two'});await api(bob,{action:'reaction',id,kind:'like',active:true});await api(bob,{action:'reaction',id,kind:'save',active:true});
+  await moderateContent(pool,carol.id,{resource:'posts',operation:'counters',ids:[id],confirmation:id,base_likes:10,base_comments:20,base_views:30});
+  const c=structuredClone(DEFAULT_FEATURES);c.counters.multiplier=2;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));
+  const counters=(p:Record<string,number>)=>[p.display_likes,p.display_comments,p.display_views];
+  for(const query of ['?post='+id,'?profile='+alice.id,'?explore=1','?saved=1','?tagged='+bob.id]){const p=(await api(bob,null,query)).data.find((p:{id:string})=>p.id===id);assert.deepEqual(counters(p),[22,44,60],query);}
+  assert.deepEqual(counters((await api(bob,null,'?search=phasefivecounterprobe')).data.posts[0]),[22,44,60]);
+  assert.deepEqual(counters((await api(bob,{action:'reaction',id,kind:'save',active:true})).data),[22,44,60]);
+  c.counters.jitter=10;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));const first=counters((await api(bob,null,'?post='+id)).data[0]);assert.deepEqual(counters((await api(bob,null,'?profile='+alice.id)).data.find((p:{id:string})=>p.id===id)),first);
+  c.counters.hide=true;await saveSetting(pool,carol.id,'features.config',JSON.stringify(c));assert.deepEqual(counters((await api(bob,null,'?post='+id)).data[0]),[null,null,null]);
+  await assert.rejects(moderateContent(pool,carol.id,{resource:'posts',operation:'counters',ids:[id],confirmation:id,base_likes:-1,base_comments:0,base_views:0}),{status:400});
+  assert.equal((await pool.query('SELECT base_likes FROM posts WHERE id=$1',[id])).rows[0].base_likes,10);
+ }finally{await saveSetting(pool,carol.id,'features.config','');await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
