@@ -1,4 +1,5 @@
 "use client";
+import {Feature,useFeatures} from "./features";
 import { useState, useRef, useMemo, type FormEvent } from "react";
 import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Smile, Link as LinkIcon, EyeOff, UserRound, Trash2, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -29,12 +30,12 @@ export function PostMenu({ post, actions, className = "" }: { post: Post; action
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="social-menu">
         <DropdownMenuItem onClick={() => actions.openProfile(post.author_id)}><UserRound />Go to profile</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => actions.copyLink(post)}><LinkIcon />Copy link</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void actions.react(post, "save", !post.saved)}><Bookmark />{post.saved ? "Remove from saved" : "Save post"}</DropdownMenuItem>
+        <Feature name="shares"><DropdownMenuItem onClick={() => actions.copyLink(post)}><LinkIcon />Copy link</DropdownMenuItem></Feature>
+        <Feature name="saves"><DropdownMenuItem onClick={() => void actions.react(post, "save", !post.saved)}><Bookmark />{post.saved ? "Remove from saved" : "Save post"}</DropdownMenuItem></Feature>
         <DropdownMenuSeparator />
         {actions.me?.id === post.author_id
           ? <>
-            <DropdownMenuItem onClick={() => actions.editPost(post)}><Pencil />Edit post</DropdownMenuItem>
+            <Feature name="postEditing"><DropdownMenuItem onClick={() => actions.editPost(post)}><Pencil />Edit post</DropdownMenuItem></Feature>
             <DropdownMenuItem variant="destructive" onClick={() => actions.deletePost(post)}><Trash2 />Delete post</DropdownMenuItem>
           </>
           : <DropdownMenuItem onClick={() => void actions.react(post, "hidden", true)}><EyeOff />Hide post</DropdownMenuItem>}
@@ -53,16 +54,16 @@ export function PostActionsRow({ post, actions, compact = false }: { post: Post;
   return (
     <>
       <div className="post-actions">
-        <IconButton label={post.liked ? "Unlike" : "Like"} active={!!post.liked} disabled={!!pending} onClick={() => void react("like", !post.liked)}>
+        <Feature name="likes"><IconButton label={post.liked ? "Unlike" : "Like"} active={!!post.liked} disabled={!!pending} onClick={() => void react("like", !post.liked)}>
           <Heart className={post.liked ? "like-pop" : ""} fill={post.liked ? "currentColor" : "none"} />
-        </IconButton>
-        <IconButton label="View comments" onClick={() => actions.openPost(post)}><MessageCircle /></IconButton>
-        <IconButton label="Share post" onClick={() => actions.share(post)}><Send /></IconButton>
-        <IconButton className="save-button" label={post.saved ? "Unsave post" : "Save post"} disabled={!!pending} onClick={() => void react("save", !post.saved)}>
+        </IconButton></Feature>
+        <Feature name="comments"><IconButton label="View comments" onClick={() => actions.openPost(post)}><MessageCircle /></IconButton></Feature>
+        <Feature name="shares"><IconButton label="Share post" onClick={() => actions.share(post)}><Send /></IconButton></Feature>
+        <Feature name="saves"><IconButton className="save-button" label={post.saved ? "Unsave post" : "Save post"} disabled={!!pending} onClick={() => void react("save", !post.saved)}>
           <Bookmark className={post.saved ? "save-pop" : ""} fill={post.saved ? "currentColor" : "none"} />
-        </IconButton>
+        </IconButton></Feature>
       </div>
-      <div className="like-count">{count(post.likes)} {post.likes === 1 ? "like" : "likes"}</div>
+      <Feature name="likes">{post.display_likes!==null&&<div className="like-count">{count(post.display_likes??post.likes)} {(post.display_likes??post.likes)===1?"like":"likes"}</div>}</Feature>{post.display_views!=null&&post.display_views>0&&<div className="post-view-count">{count(post.display_views)} views</div>}
       {!compact && <span className="sr-only" aria-live="polite">{post.liked ? "Liked" : "Unliked"}</span>}
     </>
   );
@@ -74,6 +75,7 @@ export function PostCaption({ post, actions }: { post: Post; actions: PostAction
 export function Caption({ text, people, onProfile, onTag }: {
   text: string; people: Person[]; onProfile: (id: string) => void; onTag: (tag: string) => void;
 }) {
+  const flags=useFeatures();
   const [more, setMore] = useState(false);
   const shortened = !more && text.length > 160;
   const byUsername = useMemo(() => new Map(people.map(person => [person.username.toLowerCase(), person])), [people]);
@@ -81,8 +83,8 @@ export function Caption({ text, people, onProfile, onTag }: {
   return (
     <>
       {parts.map((part, index) => {
-        if (part.startsWith("#")) return <button type="button" className="hashtag" key={index} onClick={() => onTag(part.slice(1))}>{part}</button>;
-        if (part.startsWith("@")) {
+        if (part.startsWith("#")&&flags.search) return <button type="button" className="hashtag" key={index} onClick={() => onTag(part.slice(1))}>{part}</button>;
+        if (part.startsWith("@")&&flags.tagging) {
           const raw = part.slice(1);
           let person = byUsername.get(raw.toLowerCase());
           for (let end = raw.length - 1; !person && end >= 3; end--) {
@@ -156,7 +158,9 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
     const created = await actions.submitComment(p, body);
     setMine(comments => [...comments, created]);
   };
+  const flags=useFeatures();
   const doubleTapLike = () => {
+    if(!flags.likes)return;
     setBurst(true);
     setTimeout(() => setBurst(false), 720);
     if (!p.liked) void actions.react(p, "like", true);
@@ -178,18 +182,8 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
       <div className="post-body">
         <PostActionsRow post={p} actions={actions} />
         <PostCaption post={p} actions={actions} />
-        {p.comment_count - mine.length > 0 && (
-          <button className="view-comments" onClick={() => actions.openPost(p)}>
-            {p.comment_count - mine.length === 1 ? "View 1 comment" : "View all " + (p.comment_count - mine.length) + " comments"}
-          </button>
-        )}
-        {mine.map(comment => (
-          <p className="post-caption my-comment" key={comment.id}>
-            <button className="username" onClick={() => actions.openProfile(comment.author_id)}>{comment.username}</button> {comment.body}
-          </p>
-        ))}
-        {!p.comment_count && !mine.length && <button className="view-comments" onClick={() => actions.openPost(p)}>Start the conversation</button>}
-        <CommentForm onSubmit={submit} />
+        <Feature name="comments"><button className="view-comments" onClick={() => actions.openPost(p)}>{p.display_comments===null?'View comments':(p.display_comments??p.comment_count)>0?'View all '+(p.display_comments??p.comment_count)+' comments':'Start the conversation'}</button>{mine.map(comment=><p className="post-caption my-comment" key={comment.id}><button className="username" onClick={()=>actions.openProfile(comment.author_id)}>{comment.username}</button> {comment.body}</p>)}</Feature>
+        <Feature name="comments"><CommentForm onSubmit={submit} /></Feature>
       </div>
       <HeartBurst show={burst} />
     </article>

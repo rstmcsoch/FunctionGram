@@ -1,9 +1,11 @@
+import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
+import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
 import { checkReelDuration } from '@/lib/reel-duration';
 import { AdminError } from '@/lib/admin/validation';
 import { visibleComment, visiblePost, readablePost } from '@/lib/content-visibility';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
-import { AppError,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
 export const dynamic='force-dynamic';
 
@@ -23,7 +25,9 @@ function parseCursor(value:string|null):[number,string]|null{
 export async function GET(request:Request){try{
   const query=new URL(request.url).searchParams;
   const headers=requestHeadersWithHost(request);
-  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>()]);return json({notifications:notifs.results,unreadMessages:unread?.count||0});}
+  const policyViewer=await identity(headers);const policy=await featurePolicy(policyViewer);requirePublic(policy,policyViewer);
+  for(const [key,feature]of Object.entries(QUERY_FEATURES))if(query.has(key))requireFeature(policy,feature);
+  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);return json({features:policy.flags,notifications:notifs.results,unreadMessages:unread?.count||0});}
   if(query.has('comments')){
     const postId=clean(query.get('comments'),100,true);
     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
@@ -42,7 +46,7 @@ export async function GET(request:Request){try{
   if(query.has('messages')){const user=await identity(headers,true);const other=clean(query.get('messages'),100,true);
     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
     const cursor=parseCursor(query.get('cursor'));
-    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
+    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
     const args:unknown[]=[user,user,user,user,other,other,user];
     if(cursor){sql+=' AND (created_at<? OR (created_at=? AND id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
     sql+=' ORDER BY created_at DESC,id DESC LIMIT ?';args.push(limit+1);
@@ -50,7 +54,7 @@ export async function GET(request:Request){try{
     const items=rows.slice(0,limit);
     const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
     return json({items,next_cursor});}
-  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
+  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
   if(query.has('person'))return json(await person(await identity(headers),clean(query.get('person'),100,true)));
   if(query.has('highlights'))return json(await highlights(await identity(headers),clean(query.get('highlights'),100,true)));
   if(query.has('tagged'))return json(await feed(await identity(headers),300,0,{tagged:clean(query.get('tagged'),100,true)}));
@@ -114,32 +118,35 @@ function taggedUsers(value:unknown,database:ReturnType<typeof db>):Promise<strin
 }
 export async function POST(request:Request){try{
   sameOrigin(request);const user=(await identity(requestHeadersWithHost(request),true))!;const input=await readBody(request);const action=clean(input.action,40,true);const database=db();
+  const policy=await featurePolicy(user);requirePublic(policy,user);
+  if(ACTION_FEATURES[action])requireFeature(policy,ACTION_FEATURES[action]);
+  if(action==='reaction'&&input.kind==='like')requireFeature(policy,'likes');
+  if(action==='reaction'&&input.kind==='save')requireFeature(policy,'saves');
+  if(action==='create_post'&&input.kind==='reel')requireFeature(policy,'reels');
+  if(action==='create_post'&&input.kind==='story')requireFeature(policy,'stories');
+  if(action==='message'&&input.post_id)requireFeature(policy,'shares');
+  if(!policy.flags.tagging){if(action==='update_post')delete input.tagged_users;else if(Array.isArray(input.tagged_users)&&input.tagged_users.length)requireFeature(policy,'tagging');}
+  if(action==='profile'&&!policy.flags.uploads){const existing=await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>();if(input.avatar!==undefined&&input.avatar!==existing?.avatar)requireFeature(policy,'uploads');input.avatar=existing?.avatar||'';}
   const id=typeof input.id==='string'?clean(input.id,100):'';const now=Date.now();
   if(action==='reaction'){
     const kind=clean(input.kind,20,true);if(!['like','save','seen','hidden'].includes(kind)||typeof input.active!=='boolean')throw new AppError('Invalid action.');
     const post=await availablePost(user,id);if(!post)throw new AppError('This post is no longer available.',404);
     const statements=[input.active?database.prepare('INSERT OR IGNORE INTO reactions (user_id,post_id,kind) VALUES (?,?,?)').bind(user,id,kind):database.prepare('DELETE FROM reactions WHERE user_id=? AND post_id=? AND kind=?').bind(user,id,kind)];
-    if(kind==='like'&&user!==post.author_id){const notificationId='like:'+user+':'+id;statements.push(input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(notificationId,post.author_id,user,'like',id,now):database.prepare('DELETE FROM notifications WHERE id=?').bind(notificationId));}
+    if(policy.flags.notifications&&kind==='like'&&user!==post.author_id){const notificationId='like:'+user+':'+id;statements.push(input.active&&policy.flags.notifications?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(notificationId,post.author_id,user,'like',id,now):database.prepare('DELETE FROM notifications WHERE id=?').bind(notificationId));}
     await database.batch(statements);
     // Canonical post-reaction state, so clients never derive counts from a
     // snapshot: like totals come from base_likes plus real reactions.
-    const [liked,saved,seen,likes]=await Promise.all([
-      input.active&&kind==='like'?1:0,
-      input.active&&kind==='save'?1:0,
-      input.active&&kind==='seen'?1:0,
-      database.prepare('SELECT COALESCE((SELECT base_likes FROM posts WHERE id=?),0)+(SELECT COUNT(*) FROM reactions WHERE post_id=? AND kind=\'like\') likes').bind(id,id).first<{likes:number}>(),
-    ]);
-    return json({ok:true,liked,saved,seen,likes:likes?.likes||0});
+    return json({ok:true,...await postCounters(user,id)});
   }
   if(action==='follow'){
     if(id===user||typeof input.active!=='boolean')throw new AppError('Choose another profile.');
     if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(id).first())throw new AppError('Profile not found.',404);
-    await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
+    await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active&&policy.flags.notifications?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
   }
   if(action==='comment'){
     const body=clean(input.body,1000,true);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
     const commentId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO comments (id,post_id,author_id,body,created_at) VALUES (?,?,?,?,?)').bind(commentId,id,user,body,now)];
-    if(user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
+    if(policy.flags.notifications&&user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
     await database.batch(stmts);const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
     return json({id:commentId,post_id:id,author_id:user,body,created_at:now,username:author?.username||'',avatar:author?.avatar||''});
   }
@@ -176,7 +183,7 @@ export async function POST(request:Request){try{
     // at its true size without cropping or layout shift.
     const ratios=aspectRatios(input.aspects,media.length);
     const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+contentSettings['content.storyHours']*3600000:null,ratios?JSON.stringify(ratios):null)];
-    for(const tagged of tags){if(tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
+    for(const tagged of tags){if(policy.flags.notifications&&tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
     await database.batch(stmts);return json({id:postId});
   }
   if(action==='update_post'){

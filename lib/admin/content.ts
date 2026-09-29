@@ -87,13 +87,13 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
 }
 export async function moderateContent(pool:PoolLike,actorId:string,body:Record<string,unknown>) {
   const resource=contentResource(body.resource);const action=text(body.operation,20,true),reason=text(body.reason??'',500);
-  if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit'].includes(action))throw new AdminError('Unknown content operation.');
+  if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit','counters'].includes(action))throw new AdminError('Unknown content operation.');
   const ids=body.ids;
   if(!Array.isArray(ids)||!ids.length||ids.length>50||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id||id.length>100))throw new AdminError('Select 1–50 unique items.');
   if(body.confirmation!==(ids.length===1?ids[0]:`CONFIRM ${ids.length}`))throw new AdminError('Confirmation does not match the selection.');
   if(action==='hide'&&!reason)throw new AdminError('A reason is required to hide content.');
-  if(['edit','purge'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
-  if(resource==='comments'&&['pin','unpin','expire','highlight'].includes(action))throw new AdminError('This operation is only for posts.');
+  if(['edit','purge','counters'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
+  if(resource==='comments'&&['pin','unpin','expire','highlight','counters'].includes(action))throw new AdminError('This operation is only for posts.');
   await authorizeAdmin(pool,actorId,action==='purge');
   // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
   // compare the row again under lock so a concurrent edit cannot be overwritten.
@@ -128,6 +128,7 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
         if(JSON.stringify(row)!==JSON.stringify(original))throw new AdminError('This item changed while editing. Reload before trying again.',409);
         update={...patch,...resource==='posts'?{edited_at:now}:{}};
       }
+      if(action==='counters'){for(const key of ['base_likes','base_comments','base_views']){const value=body[key];if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0||value>1000000000)throw new AdminError('Baselines must be whole numbers from 0 to 1 billion.');update[key]=value;}}
       if(action==='purge')await db.query(`DELETE FROM ${resource} WHERE id=$1`,[row.id]);
       else {
         const keys=Object.keys(update); // Keys are constructed above, never from raw request fields.

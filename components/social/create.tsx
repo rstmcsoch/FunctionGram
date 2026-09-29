@@ -1,4 +1,5 @@
 "use client";
+import {Feature} from "./features";
 import { useState, useRef, type FormEvent } from "react";
 import { ImagePlus, Plus, X, Film, Camera, MapPin, ChevronLeft, ChevronRight, Upload, TrendingUp } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -96,8 +97,8 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
       <Tabs value={kind} onValueChange={value => { setKind(value as typeof kind); setFiles([]); setOptions([]); setTags([]); setTagQuery(""); setStep(1); setError(""); }}>
         <TabsList variant="line" className="product-tabs">
           <TabsTrigger value="post"><ImagePlus size={17} />Post</TabsTrigger>
-          <TabsTrigger value="story"><Camera size={17} />Story</TabsTrigger>
-          <TabsTrigger value="reel"><Film size={17} />Reel</TabsTrigger>
+          <Feature name="stories"><TabsTrigger value="story"><Camera size={17} />Story</TabsTrigger></Feature>
+          <Feature name="reels"><TabsTrigger value="reel"><Film size={17} />Reel</TabsTrigger></Feature>
         </TabsList>
       </Tabs>
 
@@ -185,7 +186,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
                 </select>
               </label>
             )}
-            <TagPicker people={people} me={me} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} />
+            <Feature name="tagging"><TagPicker people={people} me={me} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} /></Feature>
             {kind === "story" && <p className="form-hint">Your story will disappear after 24 hours. People can reply to it in Messages.</p>}
             {kind === "reel" && <p className="form-hint">Reels appear in the Reels feed with their original frame size.</p>}
             <div className="create-preview-actions">
@@ -301,7 +302,7 @@ export function EditPostDialog({ post, people, onClose, onSaved }: {
               {CATEGORIES.map(name => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
-          <TagPicker people={people} me={post.author} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} />
+          <Feature name="tagging"><TagPicker people={people} me={post.author} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} /></Feature>
           {post.media.length > 0 && !post.media_type.startsWith("video/") && (
             <div className="media-details">
               {post.media.map((url, index) => (
@@ -362,8 +363,9 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
       <form onSubmit={submit} className="edit-form">
         <div className="edit-avatar">
           <Avatar person={{ ...me, avatar }} size={76} />
-          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Choose profile photo" onChange={e => void photo(e.target.files?.[0])} />
+          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Choose profile photo" onChange={e => void photo(e.target.files?.[0])} />
           <button type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>Change photo</button>
+</Feature>
         </div>
         <label>Name<input required maxLength={60} value={name} onChange={e => setName(e.target.value)} /></label>
         <label>Username<input required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_][a-zA-Z0-9_.]{2,29}" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" spellCheck={false} /></label>

@@ -1645,3 +1645,4 @@ button.story-tap:focus-visible{outline:2px solid rgba(255,255,255,.9);outline-of
 .app-shell[data-sidebar-mode=hidden][data-header-position=static] .main-surface{padding-top:0}.app-shell .glass-card{border-radius:calc(var(--radius) + 5px)}.app-shell .primary-button,.app-shell .secondary-button,.app-shell .nav-link{border-radius:var(--radius)}
 
 html[data-theme=dark] .brand-wordmark-dark-logo{display:none}
+.access-screen{max-width:720px;margin:0 auto;padding:clamp(20px,6vw,64px) 16px;min-height:100vh}.access-screen>section{padding:clamp(20px,5vw,40px)}.access-screen h1{font-size:clamp(26px,5vw,40px);margin:24px 0 12px;font-weight:700}.access-screen p{line-height:1.7;margin-bottom:24px;overflow-wrap:anywhere}.post-view-count{font-size:12px;color:var(--muted-foreground);margin:6px 0}

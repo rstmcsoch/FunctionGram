@@ -1,4 +1,5 @@
 "use client";
+import {Feature} from "./features";
 import { useState, useRef, useEffect } from "react";
 import { Heart, MessageCircle, Send, Bookmark, Play, Pause, Volume2, VolumeX, Film } from "lucide-react";
 import { Avatar, IconButton, Empty, count, Busy } from "./common";
@@ -118,16 +119,16 @@ function Reel({ post: p, index, isActive, actions }: { post: Post; index: number
           <small>{p.reel_credit || (p.author.is_demo ? "Sample reel · Original clip" : "Original video")} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
         </div>
         <div className="reel-actions">
-          <IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
+          <Feature name="likes"><IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
             <Heart className={p.liked ? "like-pop" : ""} fill={p.liked ? "currentColor" : "none"} />
-          </IconButton>
-          <span>{count(p.likes)}</span>
-          <IconButton label="View comments" onClick={() => actions.openPost(p)}><MessageCircle /></IconButton>
-          <span>{p.comment_count}</span>
-          <IconButton label="Share reel" onClick={() => actions.share(p)}><Send /></IconButton>
-          <IconButton label={p.saved ? "Unsave reel" : "Save reel"} disabled={pending} onClick={() => void react("save", !p.saved)}>
+          </IconButton></Feature>
+          <Feature name="likes">{p.display_likes!==null&&<span>{count(p.display_likes??p.likes)}</span>}</Feature>
+          <Feature name="comments"><IconButton label="View comments" onClick={() => actions.openPost(p)}><MessageCircle /></IconButton></Feature>
+          <Feature name="comments">{p.display_comments!==null&&<span>{count(p.display_comments??p.comment_count)}</span>}</Feature>{p.display_views!=null&&p.display_views>0&&<span>{count(p.display_views)} views</span>}
+          <Feature name="shares"><IconButton label="Share reel" onClick={() => actions.share(p)}><Send /></IconButton></Feature>
+          <Feature name="saves"><IconButton label={p.saved ? "Unsave reel" : "Save reel"} disabled={pending} onClick={() => void react("save", !p.saved)}>
             <Bookmark fill={p.saved ? "currentColor" : "none"} />
-          </IconButton>
+          </IconButton></Feature>
         </div>
         <input className="reel-seek" aria-label="Seek video" type="range" min="0" max="100" step="0.1" value={progress * 100}
           onChange={event => { if (video.current && Number.isFinite(duration)) video.current.currentTime = Number(event.target.value) / 100 * duration; }} />

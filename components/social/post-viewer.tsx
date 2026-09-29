@@ -1,4 +1,5 @@
 "use client";
+import {Feature,useFeatures} from "./features";
 import { useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -10,6 +11,7 @@ import type { Post, Person, Comment } from "@/lib/types";
 export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   post: Post; actions: PostActions; onClose: () => void; onCommentCountChange: (delta: number) => void;
 }) {
+  const flags=useFeatures();
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [moreLoading, setMoreLoading] = useState(false);
@@ -21,12 +23,13 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   // The parent remounts this viewer per post (key={post.id}), so state starts
   // clean for every post and only the fetch runs here.
   useEffect(() => {
+    if(!flags.comments)return;
     let active = true;
     void request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30")
       .then(page => { if (active) { setComments(page.items); setNextCursor(page.next_cursor); } })
       .catch(e => { if (active) { setError((e as Error).message); if (e instanceof RequestError && e.status === 404) setUnavailable(true); } });
     return () => { active = false; };
-  }, [post.id]);
+  }, [post.id,flags.comments]);
 
   const commentCount = comments?.length ?? 0;
   useEffect(() => {
@@ -51,15 +54,16 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   const removeComment = async (comment: Comment) => {
     const previous = comments ?? [];
     setComments(items => (items ?? []).filter(item => item.id !== comment.id));
-    onCommentCountChange(-1);
-    try { await request("/api/social", { action: "delete_comment", id: comment.id }); }
+
+    try { await request("/api/social", { action: "delete_comment", id: comment.id }); onCommentCountChange(-1); }
     catch (e) {
       setComments(previous);
-      onCommentCountChange(1);
+
       toast.error((e as Error).message);
     }
   };
   const doubleTapLike = () => {
+    if(!flags.likes)return;
     setBurst(true);
     setTimeout(() => setBurst(false), 720);
     if (!post.liked) void actions.react(post, "like", true);
@@ -112,7 +116,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
                   : <span className="muted">{post.location || "Shared a moment."}</span>}</p>
                 <span>{timeAgo(post.created_at)}</span>
               </div>
-              {comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
+              <Feature name="comments">{comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
               {comments?.map(comment => (
                 <CommentRow key={comment.id} comment={comment}
                   canDelete={comment.author_id === actions.me?.id || post.author_id === actions.me?.id}
@@ -126,6 +130,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
               )}
               {error && <p className="form-error" role="alert">{error} <button className="text-action" onClick={() => setComments(null)}>Retry</button></p>}
               {comments !== null && !comments.length && !error && <p className="muted viewer-empty">Be the first to say something.</p>}
+              </Feature>
             </div>
             <div className="post-viewer-side">
               <PostActionsRow post={post} actions={actions} />
@@ -133,7 +138,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
               <p className="post-time">{new Date(post.created_at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</p>
             </div>
             <div className="post-viewer-compose">
-              <CommentForm onSubmit={submit} autoFocus={false} placeholder="Add a comment…" />
+              <Feature name="comments"><CommentForm onSubmit={submit} autoFocus={false} placeholder="Add a comment…" /></Feature>
             </div>
           </section>
         </div>

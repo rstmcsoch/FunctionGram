@@ -9,6 +9,7 @@ export type AdminActor = { userId: string; email: string; role: AdminRole };
 // No secrets, bootstrap state, role policy or audit-disable switch belongs here.
 export const SETTINGS_DEFAULTS = {
   'appearance.config': '',
+  'features.config': '',
   'content.reelMaxSeconds': 0,
   'content.storyHours': 24,
   'content.reelsEnabled': true,
