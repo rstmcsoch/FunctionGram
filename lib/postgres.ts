@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { Pool, types, type QueryResultRow } from 'pg';
+import { serializedPool } from './serialized-pool';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -20,6 +21,7 @@ const migrations = [
   { version: 2, statements: socialUpgradeStatements },
   { version: 3, statements: aspectUpgradeStatements },
   { version: 4, statements: accountUpgradeStatements },
+  { version: 5, statements: adminUpgradeStatements },
 ];
 
 let pool: Pool | undefined;
@@ -74,10 +76,7 @@ async function createLocalPool(): Promise<PoolLike> {
     const isRead = /^\s*(SELECT|WITH|VALUES|TABLE|SHOW)\b/i.test(text);
     return { rows: result.rows as QueryResultRow[], rowCount: isRead ? result.rows.length : result.affectedRows ?? result.rows.length };
   };
-  return {
-    query,
-    async connect() { return { query, release() {} }; },
-  };
+  return serializedPool({ query });
 }
 
 async function getLocalPool(): Promise<PoolLike> {
@@ -113,8 +112,17 @@ export async function ensureSchema() {
   if (!ready) ready = (async () => {
     if (localDevDatabase()) {
       const database = await getLocalPool();
-      for (const migration of migrations)
-        for (const statement of migration.statements) await database.query(statement);
+      const client = await database.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+        for (const migration of migrations) {
+          for (const statement of migration.statements) await client.query(statement);
+          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
+        }
+        await client.query('COMMIT');
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
       return;
     }
     const client = await (await getPool()).connect();
@@ -122,7 +130,7 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements]] as const) {
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements]] as const) {
         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
         if (!applied.rowCount) {
           for (const statement of statements) await client.query(statement);

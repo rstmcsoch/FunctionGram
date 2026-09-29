@@ -2,6 +2,8 @@ import { betterAuth } from 'better-auth';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { ensureSchema, getPool } from './postgres';
+import { bootstrapAdmin } from './admin/core';
+import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
 import { authConfiguration } from './auth-config';
 import {
   claimTransactionalEmail, claimVerificationEmail, createVerificationEmailSender,
@@ -87,5 +89,6 @@ export async function getAppUser(requestHeaders?: Headers) {
   await ensureSchema();
   const session=await (await getAuth()).api.getSession({headers:requestHeaders??await headers()});
   if(!session?.user.emailVerified) return null;
+  await bootstrapAdmin(await getPool(), session.user.id, session.user.email, process.env[ADMIN_BOOTSTRAP_ENV]);
   return {userId:session.user.id,email:session.user.email,fullName:session.user.name,displayName:session.user.name};
 }
