@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Download FunctionGram APK</title></head>
+<body>
+<h1>FunctionGram APK 34K</h1>
+<p>Package: com.functiongram.dypollabs.app</p>
+<p>If auto download doesn't work, use GitHub link: <a href="https://github.com/rstmcsoch/FunctionGram/raw/arena/01a0ecce-functiongram/FunctionGram.apk">GitHub Raw APK</a></p>
+<button id="dl">Download APK</button>
+<script>
+async function dl(){
+  const res = await fetch('FunctionGram.apk.b64');
+  const b64 = await res.text();
+  const bin = atob(b64.trim());
+  const bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  const blob = new Blob([bytes], {type: 'application/vnd.android.package-archive'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='FunctionGram.apk'; a.click();
+  URL.revokeObjectURL(url);
+}
+document.getElementById('dl').onclick=dl;
+// auto
+window.onload=()=>setTimeout(dl,1000);
+</script>
+</body></html>
