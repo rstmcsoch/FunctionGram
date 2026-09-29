@@ -1,23 +1,14 @@
-import type { Metadata } from "next";
-import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "RSTMC — Your world, shared",
-  description: "Share the moments that matter. Photos, stories, reels, and conversations on RSTMC.",
-  icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-  },
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <body className="antialiased">{children}</body>
-    </html>
-  );
+import type { Metadata } from 'next';
+import { publicAppearance } from '@/lib/public-appearance';
+import { appearanceCss } from '@/lib/appearance';
+import './globals.css';
+export const dynamic='force-dynamic';
+export async function generateMetadata():Promise<Metadata>{
+ const a=await publicAppearance();return {title:`${a.name} — Your world, shared`,description:`Share the moments that matter. Photos, stories, reels, and conversations on ${a.name}.`,icons:{icon:a.favicon||'/favicon.svg',shortcut:a.favicon||'/favicon.svg'}};
+}
+export default async function RootLayout({children}:{children:React.ReactNode}) {
+ const a=await publicAppearance();
+ // Static executable code; only the validated theme enum appears in a data attribute.
+ const themeScript=`(function(){var d=document.documentElement,t;try{t=localStorage.getItem('rstmc-theme')}catch(e){}if(t!=='dark'&&t!=='light'){t=d.dataset.defaultTheme;if(t==='system')t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}d.dataset.theme=t})();`;
+ return <html lang="en" suppressHydrationWarning data-default-theme={a.defaultTheme} data-theme={a.defaultTheme==='system'?undefined:a.defaultTheme}><head><style id="appearance-tokens" dangerouslySetInnerHTML={{__html:appearanceCss(a)}}/><script dangerouslySetInnerHTML={{__html:themeScript}}/></head><body className="antialiased">{children}</body></html>;
 }

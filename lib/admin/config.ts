@@ -8,6 +8,7 @@ export type AdminActor = { userId: string; email: string; role: AdminRole };
 // Foundation registry only. Later phases wire these into the public app.
 // No secrets, bootstrap state, role policy or audit-disable switch belongs here.
 export const SETTINGS_DEFAULTS = {
+  'appearance.config': '',
   'content.reelMaxSeconds': 0,
   'content.storyHours': 24,
   'content.reelsEnabled': true,

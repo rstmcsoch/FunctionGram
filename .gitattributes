@@ -1,3 +1,4 @@
 patches/*.patch -diff linguist-generated
 
 FunctionGram-Phase-3-Content.patch text diff
+FunctionGram-Phase-4-Appearance.patch text diff

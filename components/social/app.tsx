@@ -1,7 +1,9 @@
 "use client";
+import { Brand, Banners, PublicFooter, navIcons } from './appearance';
+import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import {
-  Home, Search, Compass, Clapperboard, Send, Heart, SquarePlus, UserRound, Menu, Bookmark,
+  Send, UserRound, Menu, Bookmark,
   Sun, Moon, Info, LogIn, Link as LinkIcon, RefreshCw,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -21,21 +23,10 @@ import { StoryViewer } from "./stories";
 import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView, TagView } from "./views";
 import type { SocialData, Post, Person, Comment } from "@/lib/types";
 
-const navItems = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "search", label: "Search", icon: Search },
-  { id: "explore", label: "Explore", icon: Compass },
-  { id: "reels", label: "Reels", icon: Clapperboard },
-  { id: "messages", label: "Messages", icon: Send },
-  { id: "notifications", label: "Notifications", icon: Heart },
-  { id: "create", label: "Create", icon: SquarePlus },
-  { id: "profile", label: "Profile", icon: UserRound },
-] as const;
-
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
-type View = "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
+type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
-export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
   const [data, setData] = useState<SocialData>(initial || emptyData);
   const [loadError, setLoadError] = useState(!initial);
   const [view, setView] = useState<View>("home");
@@ -71,7 +62,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
   const scrollMemory = useRef<Record<string, number>>({});
 
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
-  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+
 
   /* --------------------------------- data layer --------------------------------- */
 
@@ -134,7 +125,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       }
       ++postRequest.current;
       setSelectedPost(null);
-      const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
+      const allowed = ["create", "home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
       if (!target || allowed.includes(target)) {
         setView((target || "home") as View);
         setProfileId(id || null);
@@ -189,7 +180,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if (!needsLogin()) setCreate(kind); };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
 
   const setFollowPendingFor = (id: string, pending: boolean) => {
     setFollowPending(current => {
@@ -354,6 +345,8 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   const toggleTheme = () => toggleStoredTheme(theme);
   const nav = (id: string) => {
+    if (!targetEnabled(appearance,id)) { navigate(id); return; }
+    if (id.startsWith("/") || id.startsWith("https:")) { window.location.assign(id); return; }
     if (id === "create") { openCreate(); return; }
     if (["messages", "notifications", "profile", "saved"].includes(id) && needsLogin()) return;
     navigate(id);
@@ -369,19 +362,20 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
 
   /* ----------------------------------- shell ----------------------------------- */
 
+  const navItems = appearance.nav.filter(item=>item.enabled).map(item=>({...item,icon:navIcons[item.icon]}));
   const sidebar = (
     <aside className="app-sidebar" aria-label="Main navigation">
-      <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
+      <button className="brand" onClick={() => navigate("home")} aria-label={appearance.name+" home"}><Brand appearance={appearance}/></button>
       <nav className="main-nav">
-        {navItems.map(item => (
-          <button key={item.id} className={"nav-link " + (view === item.id ? "nav-active" : "")}
-            onClick={() => nav(item.id)} aria-label={item.label} aria-current={view === item.id ? "page" : undefined}>
+        {navItems.filter(item=>item.sidebar).map(item => (
+          <button key={item.id} className={"nav-link " + (view === item.target ? "nav-active" : "")}
+            onClick={() => nav(item.target)} aria-label={item.label} aria-current={view === item.target ? "page" : undefined}>
             <span className="nav-icon">
-              <item.icon fill={view === item.id && item.id === "home" ? "currentColor" : "none"} />
-              {item.id === "messages" && data.unreadMessages > 0 && <i />}
-              {item.id === "notifications" && hasNotifications && <i />}
+              <item.icon fill={view === item.target && item.id === "home" ? "currentColor" : "none"} />
+              {item.target === "messages" && data.unreadMessages > 0 && <i />}
+              {item.target === "notifications" && hasNotifications && <i />}
             </span>
-            <span>{item.label}</span>
+            <span>{item.label}</span>{item.badge&&<small className="appearance-badge">{item.badge}</small>}
           </button>
         ))}
       </nav>
@@ -389,7 +383,6 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
         {!data.me && (
           <button className="nav-link" onClick={() => openAuth()} aria-label="Sign in"><LogIn /><span>Sign in</span></button>
         )}
-        <button className={"nav-link " + (view === "saved" ? "nav-active" : "")} onClick={() => nav("saved")} aria-label="Saved"><Bookmark /><span>Saved</span></button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="nav-link" aria-label="More"><Menu /><span>More</span></button>
@@ -409,16 +402,15 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
       {/* Visual layer only: same brand button, same controls, same handlers —
           the pill is the shape the old full-width bar used to have. */}
       <div className="header-bar">
-        <button className="brand" onClick={() => navigate("home")} aria-label="RSTMC home">RSTMC<span>.</span></button>
+        <button className="brand" onClick={() => navigate("home")} aria-label={appearance.name+" home"}><Brand appearance={appearance}/></button>
         <div className="header-actions">
-          <IconButton label="Notifications" onClick={() => nav("notifications")} className={view === "notifications" ? "is-current" : ""} current={view === "notifications"}><Heart /></IconButton>
-          <IconButton label="Messages" onClick={() => nav("messages")} className={view === "messages" ? "is-current" : ""} current={view === "messages"}><Send /></IconButton>
+          {navItems.filter(item=>item.header).map(item=><IconButton key={item.id} label={item.label} onClick={()=>nav(item.target)} current={view===item.target}><item.icon/>{item.badge&&<small className="appearance-badge">{item.badge}</small>}</IconButton>)}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="icon-button" aria-label="More options"><Menu size={22} /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="social-menu">
-              <DropdownMenuItem onClick={() => nav("saved")}><Bookmark />Saved posts</DropdownMenuItem>
+              {targetEnabled(appearance,"saved")&&<DropdownMenuItem onClick={() => nav("saved")}><Bookmark />{navItems.find(n=>n.target==="saved")?.label||"Saved"}</DropdownMenuItem>}
               <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
               {data.me
@@ -436,26 +428,28 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
   const dockCovered = !!create || !!edit || story !== null || !!selectedPost || login || !!deleteTarget || about || !!relation;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       {sidebar}
       {mobileHeader}
 
       <main id="main-content" className={"main-surface view-" + view}>
+        <Banners appearance={appearance}/>
         {!data.me && (
           <div className="guest-auth-bar glass-card">
-            <p>Share your moments on RSTMC.</p>
+            <p>Share your moments on {appearance.name}</p>
             <div>
               <button className="secondary-button" onClick={() => openAuth("signin")}>Sign in</button>
               <button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button>
             </div>
           </div>
         )}
-        {loadError ? (
+        {!targetEnabled(appearance,view)?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
           <Empty icon={<RefreshCw />} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment."
             action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>Reload feed</button>} />
         ) : (
           <div className="view-transition" key={view + ":" + (profileId || "")}>
+            {view === "create" && <Empty icon={<Info/>} heading="Share a moment" body="Create a post, story or reel." action={<button className="primary-button" onClick={()=>openCreate()}>Create</button>}/>}
             {view === "home" && (
               <HomeView data={data} feedTab={feedTab} setFeedTab={setFeedTab} stories={stories}
                 onOpenStory={setStory} onCreateStory={() => openCreate("story")}
@@ -492,8 +486,9 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
             )}
           </div>
         )}
+        <PublicFooter appearance={appearance}/>
       </main>
-      <FloatingDock active={view} me={data.me} onSelect={nav} covered={dockCovered} />
+      <FloatingDock items={appearance.nav.filter(item=>item.enabled&&item.dock)} active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 
       {create && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
       {editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}

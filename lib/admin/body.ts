@@ -1,6 +1,6 @@
 import { AdminError } from './validation';
 // Enforce actual bytes, not the untrusted Content-Length header.
-export async function adminBody(request: Request): Promise<Record<string, unknown>> {
+export async function adminBody(request: Request, maxBytes = 8192): Promise<Record<string, unknown>> {
   const reader = request.body?.getReader();
   if (!reader) throw new AdminError('A JSON body is required.');
   let size = 0; const chunks: Uint8Array[] = [];
@@ -8,7 +8,7 @@ export async function adminBody(request: Request): Promise<Record<string, unknow
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
       size += value.length;
-      if (size > 8192) { await reader.cancel(); throw new AdminError('Request too large.', 413); }
+      if (size > maxBytes) { await reader.cancel(); throw new AdminError('Request too large.', 413); }
       chunks.push(value);
     }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));

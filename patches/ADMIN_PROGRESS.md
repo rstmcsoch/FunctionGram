@@ -12,9 +12,51 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
 | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
 | 3 | Content control | Done locally; deployment pending | `phase-03-content.patch` |
-| 4–12 | Appearance through handover | Not started | — |
+| 4 | Appearance | Done locally; deployment pending | `phase-04-appearance.patch` |
+| 5–12 | Feature flags through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
+
+## Phase 4 — Appearance
+
+**Completed locally; apply after Phase 3. No push or PR.** Preserved the entire current Phase 3 checkout (including pre-existing local changes) as application baseline `c0bc8c3`. No Phase 3 artifact was overwritten. Phase 5 is not started.
+
+### Delivered
+
+- Individually guarded `/rstmcadmin/appearance` editor and `/api/admin/appearance` GET/POST handlers. The editor covers name/wordmark, light/dark logo, favicon, seven palette tokens per theme, radius/blur, default theme, header positioning and desktop sidebar mode.
+- Announcement and hero banners with plain text, optional image and validated links. New public footer with up to three editable columns, six links per column and a legal/copyright row, following §13's recommended default. Banners default off; the new footer defaults on.
+- Navigation builder: add/remove, enable/disable, reorder, labels, icon allowlist, view/URL targets, badges and individual sidebar/dock/header visibility. One ordered configuration powers all three surfaces; limits are 12 entries, 6 dock entries and 2 header entries. Footer/banner links to removed built-in destinations are filtered too. Removed direct hash targets show a clean unavailable state, including a cold direct-link load.
+- Server-generated CSS tokens and metadata in the root layout. A small static pre-paint theme script resolves stored preference / site default / OS preference before content paints; appearance values are not fetched after mount. Existing personal theme choices win over the site default. System preference changes are observed when there is no personal override.
+- Verified image upload controls reuse existing upload completion/storage checks; new branding images must be PNG/JPEG/WebP/GIF, <=2 MB and owned by the acting admin. Previously approved branding may be retained when another admin changes the configuration. No arbitrary remote image URLs, uploaded SVG or arbitrary CSS/HTML are accepted. The bundled favicon remains available.
+- Full configuration is validated, canonicalized and stored in the existing settings table as `appearance.config`; fresh authorization, same-origin checks, atomic audit and immediate settings-cache invalidation apply. The appearance endpoint has its own actual-byte 16 KB request cap; existing admin endpoints retain their 8 KB cap. No migration or new runtime dependency is needed.
+
+### Boundaries and defaults
+
+- This phase controls **appearance/navigation**, not API availability. Feature flags and API-level disablement remain Phase 5; general editable labels remain Phase 6. Hardcoded copy outside the migrated shell is not claimed to be fully renamed.
+- Footer columns/legal text are independently editable; a brand rename does not rewrite the operator's footer text. Shared navigation order may differ from the old independently hardcoded dock order.
+- Blank logo falls back to the wordmark; dark logo falls back to light; blank favicon uses the bundled icon. Supported uploaded favicon format is raster (PNG recommended), not ICO/SVG.
+- Existing valid foundation name, light-primary and default-theme settings seed the initial configuration until the first appearance save. Other appearance values use the RSTMC defaults; footer is the new three-column design requested by the guide. No unanswered owner question blocks the phase.
+- Save publishes the whole configuration atomically, with last completed save winning. The editor tells operators to reload before editing if another admin has published changes. An already-open public tab needs a page reload; this is not a push-update channel.
+- Asset upload alone does not publish a logo. Saving appearance publishes it and records the audit. Unused uploads are not deleted here; storage cleanup is a later phase.
+
+### Verification
+
+- `npm run lint`: 0 errors, the same 7 pre-existing public image warnings. `npm run typecheck` and production build passed.
+- **59/59 tests passed, no skips**, using isolated PostgreSQL 18.4 for optional managed-database tests. Without `ADMIN_TEST_DATABASE_URL`, 56 pass and 3 optional checks skip.
+- New tests cover defaults, legacy fallback, invalid persisted configuration, color/CSS injection, unsafe URLs, image policy, bounds, duplicate navigation IDs, hidden destinations/aliases, actual body limits, role authorization, image ownership, retained shared branding, audited saves and rollback on audit failure.
+- Real HTTP checks in dev/PGlite and production/local PostgreSQL cover independent page/API denial for guest/user/banned/unverified/expired/revoked sessions, foreign-origin rejection, invalid color rejection, server-rendered brand/theme/banner values and settings cache invalidation after saving.
+- Chromium checks in both modes at **320/360/390/430/768/1024/1200/1440**, light and dark: public/editor no document overflow, 44px editor controls, keyboard navigation, hidden nav across sidebar/header/dock/footer, clean disabled hash destinations, form publishing, header/sidebar variants and stored theme precedence. Cold direct hash entry verified in the final production run. No browser page errors. Actual verified logo upload exercised in local dev.
+- Production mode used a disposable local PostgreSQL database and fake service configuration, not a deployed Vercel/Neon/Blob environment. No real emails or production Blob upload were attempted. Preview-host allowlisting was configured only on test process environment; `.env.local` and real credentials were untouched.
+- Existing Phase 1–3 patch copies are unchanged. Test databases, tool installs, cookies and screenshots remain excluded under `.local/`; no generated binaries are included.
+
+### Apply and use
+
+1. Apply Phase 3 first. Check and apply `FunctionGram-Phase-4-Appearance.patch` (identical to `patches/phase-04-appearance.patch`). Do not apply both copies.
+2. Run your normal install/test/build and deploy. This phase uses the existing settings schema; it does not introduce migration 8.
+3. Sign in with your existing admin account and open **Appearance** in `/rstmcadmin`. Edit, then **Publish appearance**. Use **View public site** and reload to check both themes.
+4. **Load defaults into form** is not an immediate destructive reset; it only stages defaults, which must then be published. Keep text/background contrast accessible in both palettes.
+
+Next phase, only when requested: Phase 5 — feature flags, counters and maintenance mode.
 
 ## Source guide
 
