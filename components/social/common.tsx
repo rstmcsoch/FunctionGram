@@ -11,21 +11,23 @@ import type { Person } from "@/lib/types";
 const themeEvent = "rstmc-theme-change";
 export const themeStorageKey = "rstmc-theme";
 export function subscribeTheme(notify: () => void) {
-  window.addEventListener("storage", notify);
-  window.addEventListener(themeEvent, notify);
-  return () => {
-    window.removeEventListener("storage", notify);
-    window.removeEventListener(themeEvent, notify);
-  };
+  const media=window.matchMedia('(prefers-color-scheme:dark)');
+  const update=()=>{document.documentElement.dataset.theme=readTheme();notify();};
+  window.addEventListener('storage',update);window.addEventListener(themeEvent,update);media.addEventListener('change',update);
+  return()=>{window.removeEventListener('storage',update);window.removeEventListener(themeEvent,update);media.removeEventListener('change',update);};
 }
-export function readTheme(): "light" | "dark" {
-  try { return localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light"; } catch { return "light"; }
+export function readTheme(): 'light'|'dark' {
+  let stored:string|null=null;try{stored=localStorage.getItem(themeStorageKey);}catch{}
+  if(stored==='light'||stored==='dark')return stored;
+  const fallback=document.documentElement.dataset.defaultTheme;
+  if(fallback==='light'||fallback==='dark')return fallback;
+  return window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
 }
-export function toggleStoredTheme(current: "light" | "dark") {
-  try {
-    localStorage.setItem(themeStorageKey, current === "light" ? "dark" : "light");
-    window.dispatchEvent(new Event(themeEvent));
-  } catch { /* storage unavailable: theme stays for this page */ }
+export function toggleStoredTheme(current:'light'|'dark') {
+ const next=current==='light'?'dark':'light';
+ document.documentElement.dataset.theme=next;document.documentElement.dataset.defaultTheme=next;
+ try{localStorage.setItem(themeStorageKey,next);}catch{}
+ window.dispatchEvent(new Event(themeEvent));
 }
 
 /* --------------------------------- helpers --------------------------------- */

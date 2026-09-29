@@ -1,3 +1,4 @@
+import { validateAppearance } from '../appearance';
 import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
 
 export class AdminError extends Error {
@@ -8,6 +9,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
   let valid = false;
   switch (key as SettingKey) {
+    case 'appearance.config': {
+      if(typeof value!=='string'||value.length>12000)throw new AdminError('Invalid appearance configuration.');
+      if(value==='')return '';
+      try{return JSON.stringify(validateAppearance(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid appearance configuration.');}
+    }
     case 'content.reelMaxSeconds': valid = typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 600; break;
     case 'content.storyHours': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168; break;
     case 'content.reelsEnabled': valid = typeof value === 'boolean'; break;
