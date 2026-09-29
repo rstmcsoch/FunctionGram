@@ -190,7 +190,17 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast(t("app.creation_is_not_available"));return;} if (!needsLogin()) setCreate(kind); };
+  // Creation can be blocked by three independent switches: the uploads
+  // feature flag, the media upload policy, and the Create navigation item.
+  // Report the exact cause so operators know which admin screen restores it.
+  const createBlockReason = (kind: "post" | "story" | "reel"): string | null => {
+    if (!targetEnabled(appearance, "create")) return t("app.creation_is_removed_from_navigation");
+    if (!resolvedFlags.uploads) return t("app.creation_is_turned_off_in_feature_controls");
+    if (!mediaPolicy.enabled) return t("app.creation_is_turned_off_in_media_settings");
+    if ((kind === "reel" && !flags.reels) || (kind === "story" && !flags.stories)) return t("app.creation_is_not_available");
+    return null;
+  };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { const reason = createBlockReason(kind); if (reason) { toast(reason); return; } if (!needsLogin()) setCreate(kind); };
 
   const setFollowPendingFor = (id: string, pending: boolean) => {
     setFollowPending(current => {
@@ -367,6 +377,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   /* ---------------------------------- derived ---------------------------------- */
 
+  const blockedViewReason = view === "create" ? createBlockReason("post") : null;
   const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
   const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
     && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
@@ -457,7 +468,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
             </div>
           </div>
         )}
-        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading={t("app.this_section_is_not_available")} body={t("app.the_site_administrator_has_removed_this_navigation_destination")}/>:loadError ? (
+        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading={t("app.this_section_is_not_available")} body={blockedViewReason??t("app.the_site_administrator_has_removed_this_navigation_destination")}/>:loadError ? (
           <Empty icon={<RefreshCw />} heading={t("app.let_s_try_that_again")} body={t("app.we_couldn_t_connect_to_your_feed_please_try_again_in_a_moment")}
             action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>{t("app.reload_feed")}</button>} />
         ) : (
