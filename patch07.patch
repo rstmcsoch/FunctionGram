@@ -1,0 +1,1827 @@
+
+
+
+----
+diff --git a/app/api/admin/media/route.ts b/app/api/admin/media/route.ts
+new file mode 100644
+index 0000000..dfa3cc7
+<a href="../../../../dev/null">---</a>
++++ b/app/api/admin/media/route.ts
+@@ -0,0 +1,21 @@
++import {adminRoute} from '@/lib/admin/route';
++import {adminBody} from '@/lib/admin/body';
++import {saveSetting} from '@/lib/admin/core';
++import {AdminError} from '@/lib/admin/validation';
++import {getPool,localDevDatabase} from '@/lib/postgres';
++import {readMediaConfig} from '@/lib/media-policy';
++import {validateMedia} from '@/lib/media-config';
++import {mediaReport,changeMedia,purgeMedia,reconcileReservation} from '@/lib/admin/media';
++import {blobUploadStore,localUploadStore} from '@/lib/uploads';
++import {revalidatePath,revalidateTag} from 'next/cache';
++export const dynamic='force-dynamic';
++export const runtime='nodejs';
++export const GET=adminRoute(async request=>Response.json({config:await readMediaConfig(await getPool()),...await mediaReport(await getPool(),Object.fromEntries(new URL(request.url).searchParams))}));
++export const POST=adminRoute(async(request,actor)=>{
++ const body=await adminBody(request);const pool=await getPool();
++ if(body.action==='settings'){let config;try{config=validateMedia(body.value);}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid media settings.');}await saveSetting(pool,actor.userId,'media.config',JSON.stringify(config));}
++ else if(body.action==='purge')await purgeMedia(pool,actor.userId,body);
++ else if(body.action==='reconcile')await reconcileReservation(pool,actor.userId,body,key=>(localDevDatabase()?localUploadStore:blobUploadStore).inspect(key));
++ else await changeMedia(pool,actor.userId,body);
++ revalidateTag('settings',{expire:0});revalidatePath('/','layout');return Response.json({ok:true});
++});
+diff --git a/app/api/dev-upload/route.ts b/app/api/dev-upload/route.ts
+index 080ab40..0a69c55 100644
+--- a/app/api/dev-upload/route.ts
++++ b/app/api/dev-upload/route.ts
+@@ -1,38 +1,24 @@
++import {promises as fs} from 'node:fs';
++import {AppError,identity,requestHeadersWithHost,sameOrigin,fail,json} from '@/lib/server';
++import {getPool,localDevDatabase} from '@/lib/postgres';
++import {reserveUpload,finishUpload,uploadKeyPattern} from '@/lib/uploads';
++import {readMediaConfig} from '@/lib/media-policy';
++import {readBounded} from '@/lib/media-processing';
++import {MIB} from '@/lib/media-config';
+import {requireUpload} from '@/lib/feature-policy';
+-import { promises as fs } from 'node:fs';
+-import { AppError, db, identity, requestHeadersWithHost, sameOrigin, fail, json } from '@/lib/server';
+-import { localDevDatabase } from '@/lib/postgres';
+-import { detectMediaType, mediaTypes } from '@/lib/media-type';
+-
+-// Development-only upload endpoint for the local preview: stores files on
+-// local disk instead of Vercel Blob. Production (any deployment with a real
+-// DATABASE_URL) always answers 404 and uses the regular client upload flow.
+-export const runtime = 'nodejs';
+-export const dynamic = 'force-dynamic';
+-
+-const keyPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+-
+-export async function POST(request: Request) {
+-  try {
+-    if (!localDevDatabase()) throw new AppError('Not found.', 404);
+-    sameOrigin(request);
+-    const user = (await identity(requestHeadersWithHost(request), true))!;
+-    await requireUpload(user);
+-    const form = await request.formData();
+-    const key = String(form.get('key') || '');
+-    const file = form.get('file');
+-    if (!keyPattern.test(key)) throw new AppError('Invalid upload name.');
+-    if (!(file instanceof File)) throw new AppError('Choose a photo or video.');
+-    if (file.size > 20 * 1024 * 1024) throw new AppError('Choose a file smaller than 20 MB.');
+-    if (!mediaTypes.includes(file.type)) throw new AppError('Choose a supported photo or video type.');
+-    const bytes = Buffer.from(await file.arrayBuffer());
+-    if (detectMediaType(bytes.subarray(0, 16)) !== file.type) throw new AppError('The file contents do not match its photo or video type.');
+-    await fs.mkdir('.local/uploads', { recursive: true });
+-    await fs.writeFile('.local/uploads/' + key, bytes);
+-    await db().batch([
+-      db().prepare('INSERT OR IGNORE INTO assets (key,owner_id,mime,size,created_at,blob_url) VALUES (?,?,?,?,?,?)').bind(key, user, file.type, file.size, Date.now(), 'local'),
+-      db().prepare('INSERT OR IGNORE INTO upload_claims (key,owner_id,expected_size,mime,created_at,completed) VALUES (?,?,?,?,?,true)').bind(key, user, file.size, file.type, Date.now()),
+-    ]);
+-    return json({ url: '/api/media/' + key, type: file.type });
+-  } catch (error) { return fail(error); }
+-}
++export const runtime='nodejs';
++export const dynamic='force-dynamic';
++export const maxDuration=60;
++export async function POST(request:Request){try{
++ if(!localDevDatabase())throw new AppError('Not found.',404);
++ sameOrigin(request);const owner=(await identity(requestHeadersWithHost(request),true))!;await requireUpload(owner);
++ const config=await readMediaConfig(await getPool());if(!config.enabled)throw new AppError('Uploads are currently disabled.',403);if(!request.body)throw new AppError('Choose a photo or video.');
++ const bytes=await readBounded(request.body,config.maxFileMb*MIB+65536);
++ const form=await new Response(new Uint8Array(bytes),{headers:{'content-type':request.headers.get('content-type')||''}}).formData();
++ const key=String(form.get('key')||''),file=form.get('file');
++ if(!uploadKeyPattern.test(key)||!(file instanceof File))throw new AppError('Choose a photo or video.');
++ await reserveUpload(key,owner,JSON.stringify({size:file.size,type:file.type}));
++ await fs.mkdir('.local/upload-staging',{recursive:true});
++ try{await fs.writeFile('.local/upload-staging/'+key,Buffer.from(await file.arrayBuffer()),{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;throw new AppError('Please start a new upload.',409);}
++ return json(await finishUpload(key,owner));
++}catch(error){return fail(error);}}
+diff --git a/app/api/media/[key]/route.ts b/app/api/media/[key]/route.ts
+index 64ce8d8..61dd7d9 100644
+--- a/app/api/media/[key]/route.ts
++++ b/app/api/media/[key]/route.ts
+@@ -1,3 +1,5 @@
++import {localAssetPath} from '@/lib/media-storage';
++export const dynamic='force-dynamic';
+import { promises as fs } from 'node:fs';
+import { db, fail, AppError } from '@/lib/server';
+import { localDevDatabase } from '@/lib/postgres';
+@@ -9,15 +11,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
+// Local preview: serve uploads from disk, including byte ranges so video
+// seeking works exactly like the Blob CDN does in production.
+if (localDevDatabase()) {
+-      const asset = await db().prepare('SELECT mime FROM assets WHERE key=?').bind(key).first<{ mime: string }>();
++      const asset = await db().prepare("SELECT mime,blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string }>();
+if (!asset) throw new AppError('Media not found.', 404);
+-      const path = '.local/uploads/' + key;
++      const path = localAssetPath(key,asset.blob_url);
+let size = 0;
+try { size = (await fs.stat(path)).size; } catch { throw new AppError('Media not found.', 404); }
+const headers: Record<string, string> = {
+'Content-Type': asset.mime,
+'Accept-Ranges': 'bytes',
+-        'Cache-Control': 'private, max-age=300',
++        'Cache-Control': 'private, no-store',
+};
+const range = request.headers.get('range');
+const match = range?.match(/bytes=(\d*)-(\d*)/);
+@@ -38,9 +40,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
+const bytes = await fs.readFile(path);
+return new Response(new Uint8Array(bytes), { headers: { ...headers, 'Content-Length': String(size) } });
+}
+-    const asset = await db().prepare('SELECT blob_url FROM assets WHERE key=?').bind(key).first<{ blob_url: string }>();
++    const asset = await db().prepare("SELECT blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string }>();
+if (!asset?.blob_url) throw new AppError('Media not found.', 404);
+// Blob's CDN serves the media, including byte ranges for video seeking.
+-    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, max-age=300' } });
++    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, no-store' } });
+} catch (error) { return fail(error); }
+}
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 1fc47b3..5a2eb54 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -1,3 +1,5 @@
++import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
++import {MIB} from '@/lib/media-config';
+import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
+import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
+import { checkReelDuration } from '@/lib/reel-duration';
+@@ -7,6 +9,7 @@ import { loadSettings } from '@/lib/admin/core';
+import { getPool } from '@/lib/postgres';
+import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import type {MediaOption} from '@/lib/types';
++export const maxDuration=60;
+export const dynamic='force-dynamic';
+
+// Cursor pagination for comments and messages. Cursors encode the last row's
+@@ -27,6 +30,7 @@ export async function GET(request:Request){try{
+const headers=requestHeadersWithHost(request);
+const policyViewer=await identity(headers);const policy=await featurePolicy(policyViewer);requirePublic(policy,policyViewer);
+for(const [key,feature]of Object.entries(QUERY_FEATURES))if(query.has(key))requireFeature(policy,feature);
++  if(query.has('upload-policy')){requireFeature(policy,'uploads');return json(await readMediaConfig(await getPool()));}
+if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);return json({features:policy.flags,notifications:notifs.results,unreadMessages:unread?.count||0});}
+if(query.has('comments')){
+const postId=clean(query.get('comments'),100,true);
+@@ -162,29 +166,31 @@ export async function POST(request:Request){try{
+const username=clean(input.username,30,true).toLowerCase();if(!/^[a-z0-9_][a-z0-9_.]{2,29}$/.test(username))throw new AppError('Use 3–30 letters, numbers, dots, or underscores for your username.');
+const name=clean(input.name,60,true),bio=clean(input.bio,150),avatar=clean(input.avatar,200),website=clean(input.website||'',200);
+if(website){let url:URL;try{url=new URL(website);}catch{throw new AppError('Enter a complete website URL, starting with https://.');}if(!['https:','http:'].includes(url.protocol)||!url.hostname||url.username||url.password)throw new AppError('Enter a valid http(s) website URL.');}
+-    if(avatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
++    const currentAvatar=(await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>())?.avatar;
++    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
+const taken=await database.prepare('SELECT id FROM profiles WHERE username=? AND id!=?').bind(username,user).first();if(taken)throw new AppError('That username is taken. Try another.',409);
+-    await database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user).run();return json({ok:true});
++    const update=database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user);
++    if(avatar&&avatar!==currentAvatar)await commitMediaUse(await getPool(),[avatar],[user],await readMediaConfig(await getPool()),[update]);else await update.run();return json({ok:true});
+}
+if(action==='create_post'){
+-    const contentSettings=await loadSettings(await getPool());
++    const contentSettings=await loadSettings(await getPool());const mediaPolicy=await readMediaConfig(await getPool());
+const kind=clean(input.kind,10,true);if(!['post','reel','story'].includes(kind))throw new AppError('Choose a post, story, or reel.');
+if(kind==='reel'&&!contentSettings['content.reelsEnabled'])throw new AppError('Reels are currently paused.',403);
+const caption=clean(input.caption,2200),location=clean(input.location,100);const media=input.media;
+-    if(!Array.isArray(media)||media.length<1||media.length>6||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Add up to 6 photos or one video.');
++    if(!Array.isArray(media)||media.length<1||media.length>mediaPolicy.maxMedia||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Check the current media-per-post limit.');
+const options=mediaOptions(input.media_options,media.length);
+const tags=input.tagged_users??[];if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
+for(const tagged of tags){if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');}
+const category=clean(input.category||'For you',50);if(!categories.includes(category))throw new AppError('Choose a valid category.');
+-    const types:string[]=[];for(const url of media){const asset=await database.prepare('SELECT mime FROM assets WHERE key=? AND owner_id=?').bind(url.replace('/api/media/',''),user).first<{mime:string}>();if(!asset)throw new AppError('One of your uploads is unavailable. Please upload it again.');types.push(asset.mime);}
+-    const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. A photo post can include up to 6 images.');
+-    if(kind==='reel')await checkReelDuration(await getPool(),media,contentSettings['content.reelMaxSeconds']);
++    const assets=await checkAssets(await getPool(),media,[user],mediaPolicy);const types=assets.map(asset=>String(asset.mime));
++    const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. Photo posts must contain only images.');
++    if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?contentSettings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(await getPool(),media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
+// Optional per-item aspect ratios (width/height) let the feed render media
+// at its true size without cropping or layout shift.
+const ratios=aspectRatios(input.aspects,media.length);
+const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+contentSettings['content.storyHours']*3600000:null,ratios?JSON.stringify(ratios):null)];
+for(const tagged of tags){if(policy.flags.notifications&&tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
+-    await database.batch(stmts);return json({id:postId});
++    await commitMediaUse(await getPool(),media,[user],mediaPolicy,stmts);return json({id:postId});
+}
+if(action==='update_post'){
+const post=await availablePost(user,id);
+diff --git a/app/api/upload/complete/route.ts b/app/api/upload/complete/route.ts
+index 735dca7..a5cd90e 100644
+--- a/app/api/upload/complete/route.ts
++++ b/app/api/upload/complete/route.ts
+@@ -1,3 +1,5 @@
++export const runtime='nodejs';
++export const maxDuration=60;
+import {identity,sameOrigin,fail,readBody,clean,json} from '@/lib/server';
+import {finishUpload} from '@/lib/uploads';
+export async function POST(request:Request){try{sameOrigin(request);const owner=(await identity(true))!;const body=await readBody(request);return json(await finishUpload(clean(body.key,36,true),owner));}catch(error){return fail(error);}}
+diff --git a/app/api/upload/route.ts b/app/api/upload/route.ts
+index dbbe1e0..b1baf4e 100644
+--- a/app/api/upload/route.ts
++++ b/app/api/upload/route.ts
+@@ -1,16 +1,19 @@
++import {adminBody} from '@/lib/admin/body';
+import {handleUpload,type HandleUploadBody} from '@vercel/blob/client';
+import {identity,sameOrigin,fail} from '@/lib/server';
+-import {reserveUpload,finishUpload} from '@/lib/uploads';
++import {reserveUpload} from '@/lib/uploads';
+export const runtime='nodejs';
+export async function POST(request:Request){try{
+- const body=await request.json() as HandleUploadBody;
++ const body=await adminBody(request,20000) as unknown as HandleUploadBody;
+const response=await handleUpload({body,request,
+onBeforeGenerateToken:async(pathname,clientPayload)=>{
+sameOrigin(request);const owner=(await identity(true))!;
+const input=await reserveUpload(pathname,owner,clientPayload);
+return {allowedContentTypes:[input.type],maximumSizeInBytes:input.size,addRandomSuffix:false,allowOverwrite:false,validUntil:Date.now()+15*60*1000,tokenPayload:JSON.stringify({owner,key:pathname})};
+},
+-  onUploadCompleted:async({tokenPayload})=>{const {owner,key}=JSON.parse(tokenPayload||'{}');if(typeof owner==='string'&&typeof key==='string')await finishUpload(key,owner);}
++  // The authenticated /complete request verifies and processes bytes. The signed
++  // Blob callback only acknowledges transfer; it cannot publish unverified media.
++  onUploadCompleted:async()=>{}
+});
+return Response.json(response);
+}catch(error){return fail(error);}}
+diff --git a/app/layout.tsx b/app/layout.tsx
+index cc6084c..ac151cf 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -1,3 +1,5 @@
++import {MediaProvider} from '@/components/social/media-policy';
++import {publicMedia} from '@/lib/public-media';
+import {getLabels,getTranslator} from '@/lib/public-labels';
+import {LabelsProvider} from '@/components/social/labels';
+import type { Metadata } from 'next';
+@@ -12,5 +14,5 @@ export default async function RootLayout({children}:{children:React.ReactNode})
+const a=await publicAppearance();
+// Static executable code; only the validated theme enum appears in a data attribute.
+const themeScript=`(function(){var d=document.documentElement,t;try{t=localStorage.getItem('rstmc-theme')}catch(e){}if(t!=='dark'&&t!=='light'){t=d.dataset.defaultTheme;if(t==='system')t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}d.dataset.theme=t})();`;
+- return <html lang="en" suppressHydrationWarning data-default-theme={a.defaultTheme} data-theme={a.defaultTheme==='system'?undefined:a.defaultTheme}><head><style id="appearance-tokens" dangerouslySetInnerHTML={{__html:appearanceCss(a)}}/><script dangerouslySetInnerHTML={{__html:themeScript}}/></head><body className="antialiased"><LabelsProvider labels={await getLabels()}>{children}</LabelsProvider></body></html>;
++ return <html lang="en" suppressHydrationWarning data-default-theme={a.defaultTheme} data-theme={a.defaultTheme==='system'?undefined:a.defaultTheme}><head><style id="appearance-tokens" dangerouslySetInnerHTML={{__html:appearanceCss(a)}}/><script dangerouslySetInnerHTML={{__html:themeScript}}/></head><body className="antialiased"><LabelsProvider labels={await getLabels()}><MediaProvider config={await publicMedia()}>{children}</MediaProvider></LabelsProvider></body></html>;
+}
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 8797f39..758c04e 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -23,3 +23,4 @@
+.labels-editor{max-width:100%}.labels-rows{display:grid;gap:1rem}.label-row{min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--border);border-radius:12px}.label-row legend,.label-row code,.label-row p{overflow-wrap:anywhere;white-space:pre-wrap}.label-row label{display:grid;gap:.5rem}.label-row textarea{width:100%;min-height:72px;resize:vertical}.labels-toolbar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}.labels-toolbar input[type=file]{max-width:100%;min-width:0}.labels-toolbar label{display:grid;gap:.5rem}
+.label-row label,.label-row textarea{min-width:0;max-width:100%}.label-row legend{max-width:100%}.labels-editor .admin-card{min-width:0}
+.label-row label{grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
++.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}.admin-table td small{display:block}.media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index 1d431e9..bd7adb6 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -8,5 +8,5 @@ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: {
+export const dynamic = 'force-dynamic';
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+await requireAdminPage();
+-  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href={ADMIN_BASE_PATH + '/content'}>Content</Link><Link href={ADMIN_BASE_PATH + '/appearance'}>Appearance</Link><Link href={ADMIN_BASE_PATH+'/features'}>Features</Link><Link href={ADMIN_BASE_PATH+'/labels'}>Labels</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
++  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href={ADMIN_BASE_PATH + '/content'}>Content</Link><Link href={ADMIN_BASE_PATH + '/appearance'}>Appearance</Link><Link href={ADMIN_BASE_PATH+'/features'}>Features</Link><Link href={ADMIN_BASE_PATH+'/labels'}>Labels</Link><Link href={ADMIN_BASE_PATH+'/media'}>Media</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
+}
+diff --git a/app/rstmcadmin/media/page.tsx b/app/rstmcadmin/media/page.tsx
+new file mode 100644
+index 0000000..6d75d0d
+<a href="../../../../dev/null">---</a>
++++ b/app/rstmcadmin/media/page.tsx
+@@ -0,0 +1,9 @@
++import {requireAdminPage} from '@/lib/admin/guard';
++import {getPool} from '@/lib/postgres';
++import {readMediaConfig} from '@/lib/media-policy';
++import {MediaEditor,StorageInventory} from '@/components/admin/media';
++import {mediaReport} from '@/lib/admin/media';
++export default async function MediaPage({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
++ const actor=await requireAdminPage();const pool=await getPool();const report=await mediaReport(pool,await searchParams);
++ return <><p className="admin-eyebrow">Control room / Media</p><h1>Media &amp; storage</h1><p>Verified uploads, current limits and safe storage cleanup. Existing posts stay intact when limits change; new attachment requests are revalidated.</p><MediaEditor initial={await readMediaConfig(pool)}/><StorageInventory report={report} owner={actor.role==='owner'}/></>;
++}
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+index d3b29c8..bf9d36e 100644
+--- a/components/admin/content.tsx
++++ b/components/admin/content.tsx
+@@ -1,4 +1,5 @@
+'use client';
++import {useMediaPolicy} from '@/components/social/media-policy';
+import { useRef, useState } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+@@ -45,6 +46,7 @@ export function ContentTable({items,resource,trash}:{items:Record<string,unknown
+function safeMedia(value:string) {return /^\/api\/media\/[a-f0-9-]{36}$/.test(value)||/^\/media\/[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp|gif|mp4|webm)$/.test(value);}
+export function ContentEditor({item,resource}:{item:Record<string,unknown>;resource:ContentResource}) {
+const router=useRouter();const post=resource==='posts';
++  const mediaPolicy=useMediaPolicy();
+const [caption,setCaption]=useState(String(post?item.caption:item.body)),[location,setLocation]=useState(String(item.location||'')),[kind,setKind]=useState(String(item.kind||'post')),[category,setCategory]=useState(String(item.category||'For you'));
+const [media,setMedia]=useState<string[]>(post?JSON.parse(String(item.media)):[]),[tags,setTags]=useState(post?(JSON.parse(String(item.tagged_users)) as string[]).join(', '):''),[aspects,setAspects]=useState(String(item.aspects||'null'));
+const [expires,setExpires]=useState(item.expires_at?new Date(Number(item.expires_at)).toISOString().slice(0,16):'');
+@@ -75,7 +77,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
+{safeMedia(url)&&(item.media_type==='video'||kind==='reel'?<video src={url} controls preload="metadata" aria-label={'Preview media '+(index+1)} />:<Image unoptimized width={800} height={800} src={url} alt={'Content preview '+(index+1)} />)}
+<code>{url}</code><div className="admin-action-grid"><button type="button" className="admin-button" disabled={index===0} onClick={()=>{const next=[...media];[next[index-1],next[index]]=[next[index],next[index-1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index-1],values[index]]=[values[index],values[index-1]];return JSON.stringify(values);}}catch{}return current;});}}>Move up</button><button type="button" className="admin-button" disabled={index===media.length-1} onClick={()=>{const next=[...media];[next[index+1],next[index]]=[next[index],next[index+1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index+1],values[index]]=[values[index],values[index+1]];return JSON.stringify(values);}}catch{}return current;});}}>Move down</button><button type="button" className="admin-button" onClick={()=>{setMedia(media.filter((_,i)=>i!==index));setAspects('null');}}>Remove</button></div>
+</div>)}</fieldset>
+-      <label>Verified upload URL<input value={newMedia} onChange={event=>setNewMedia(event.target.value)} placeholder="/api/media/…" /></label><button type="button" className="admin-button" disabled={!newMedia||media.length>=6} onClick={()=>{setMedia([...media,newMedia.trim()]);setNewMedia('');setAspects('null');}}>Add media</button>
++      <label>Verified upload URL<input value={newMedia} onChange={event=>setNewMedia(event.target.value)} placeholder="/api/media/…" /></label><button type="button" className="admin-button" disabled={!newMedia||media.length>=mediaPolicy.maxMedia} onClick={()=>{setMedia([...media,newMedia.trim()]);setNewMedia('');setAspects('null');}}>Add media</button>
+<label>Aspect ratios (JSON array, or null to clear)<input value={aspects} onChange={event=>setAspects(event.target.value)} /></label><button type="button" className="admin-button" disabled={pending||!media.length} onClick={regenerate}>Regenerate aspects from media</button>
+</>}
+<label>Type content ID to confirm: <code>{String(item.id)}</code><input aria-label="Edit confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
+diff --git a/components/admin/media.tsx b/components/admin/media.tsx
+new file mode 100644
+index 0000000..ef7c5fa
+<a href="../../../../dev/null">---</a>
++++ b/components/admin/media.tsx
+@@ -0,0 +1,33 @@
++'use client';
++import {useState} from 'react';
++import {useRouter} from 'next/navigation';
++import Link from 'next/link';
++import {mediaTypes} from '@/lib/media-type';
++import type {MediaConfig} from '@/lib/media-config';
++import type {mediaReport} from '@/lib/admin/media';
++import {request} from '@/components/social/common';
++const formatBytes=(bytes:number)=>new Intl.NumberFormat('en').format(bytes)+' bytes';
++export function MediaEditor({initial}:{initial:MediaConfig}){
++ const [value,setValue]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState('');const router=useRouter();
++ const numbers=[['maxFileMb','File limit (MB)',1,100],['dailyQuotaMb','Rolling 24-hour quota per account (MB)',1,10000],['maxMedia','Maximum photos per post',1,20],['imageQuality','Image quality',1,100],['imageMaxDimension','Maximum image dimension (pixels)',320,4096],['videoMaxSeconds','Maximum video seconds (0 = unlimited)',0,3600]] as const;
++ return <details className="admin-card admin-drawer" open><summary>Upload controls</summary><form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/media',{action:'settings',value});setMessage('Media settings published and audited. Reload public tabs to update hints.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not save.');}finally{setPending(false);}}}>
++ <p>The Phase 5 Uploads flag and maintenance rules still apply. Limits use MiB (1,048,576 bytes). Active reservations hold quota for one hour; completed transfers count for 24 hours, even if quarantined or later deleted. Images are decoded, orientation-corrected and re-encoded on the server; the quality setting does not trust client preprocessing. GIF animation is preserved after bounded validation; oversized GIFs must be resized before upload. The older content-level reel cap also applies; the stricter nonzero cap wins.</p>
++ <label className="feature-switch"><input type="checkbox" checked={value.enabled} onChange={e=>setValue({...value,enabled:e.target.checked})}/>Enable uploads</label>
++ <div className="media-settings-grid">{numbers.map(([key,label,min,max])=><label key={key}>{label}<input type="number" min={min} max={max} step={1} required value={value[key]} onChange={e=>setValue({...value,[key]:Number(e.target.value)})}/></label>)}<label>Image output format<select value={value.imageFormat} onChange={e=>setValue({...value,imageFormat:e.target.value as MediaConfig['imageFormat']})}><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label></div>
++ <fieldset className="admin-confirm"><legend>Allowed types</legend>{mediaTypes.map(type=><label key={type} className="feature-switch"><input type="checkbox" checked={value.allowedTypes.includes(type)} onChange={e=>setValue({...value,allowedTypes:e.target.checked?[...value.allowedTypes,type]:value.allowedTypes.filter(t=>t!==type)})}/>{type}</label>)}</fieldset>
++ {message&&<p role="status">{message}</p>}<button className="admin-button admin-primary" disabled={pending}>{pending?'Saving…':'Publish media settings'}</button></form></details>;
++}
++export function StorageInventory({report,owner}:{report:Awaited<ReturnType<typeof mediaReport>>;owner:boolean}){
++ const [selected,setSelected]=useState(''),[action,setAction]=useState('quarantine'),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');const router=useRouter();
++ const url=(page:number)=>'/rstmcadmin/media?'+new URLSearchParams({...report.filter,page:String(page)}).toString();
++ const manage=(key:string,next:string)=>{setSelected(key);setAction(next);setConfirmation('');setReason('');setMessage('');};
++ return <section className="admin-card admin-confirm"><h2>Storage inventory</h2><p>Registered objects: {String(report.summary.assets)} · {formatBytes(Number(report.summary.bytes))} · retained originals: {formatBytes(Number(report.summary.retained_source_bytes))}. Quarantined: {String(report.summary.quarantined)} · Trash: {String(report.summary.trashed)}.</p><p>Active reservations: {String(report.pending.reservations)} · {formatBytes(Number(report.pending.reserved_bytes))} reserved, not confirmed storage. Totals include quarantine and trash. Bundled demo media and unrelated objects in a shared Blob store are excluded.</p>
++ <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button">Filter assets</button></form>
++ <p>Orphans have no references from any posts (including hidden, expired and trashed posts), avatars, account images or branding settings. Trash is restorable for 30 days. Permanent deletion requires an owner and a typed asset key. Quarantine blocks the application media URL immediately; already-known public Blob URLs and downloaded bytes cannot be recalled.</p>
++ <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
++ {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}>Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next</Link>}</nav>
++ <h3>Storage by account (25 accounts per page)</h3><div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Owner ID</th><th>Assets</th><th>Bytes</th></tr></thead><tbody>{report.owners.map(item=><tr key={item.owner_id||'unknown'}><td>{item.owner_id||'Unknown'}</td><td>{String(item.assets)}</td><td>{formatBytes(Number(item.bytes))}</td></tr>)}</tbody></table></div>
++ <h3>Expired reservations (25 per page)</h3><p>Reconcile checks for an abandoned object from a known app reservation, then registers it in quarantine for safe cleanup. Missing objects are not reported as deleted. Unknown objects from other applications are never swept.</p>{report.expired.map(item=><div key={item.key} className="media-reservation"><code>{item.key}</code><span>{formatBytes(Number(item.expected_size))}</span><button className="admin-button" onClick={()=>manage(item.key,'reconcile')}>Reconcile reservation</button></div>)}{(report.owners.length===25||report.expired.length===25)&&<Link className="admin-button" href={url(report.filter.page+1)}>Next accounts / reservations</Link>}
++ {selected&&<form className="admin-confirm media-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/media',{action,key:selected,confirmation,reason});setMessage('Media operation completed and audited.');setSelected('');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not change media.');}finally{setPending(false);}}}><h3>Confirm {action}</h3><p><code>{selected}</code></p><label>Reason<input maxLength={500} required={action==='quarantine'} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type asset key<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></label><button className="admin-button admin-primary" disabled={pending||confirmation!==selected}>{pending?'Working…':'Confirm media operation'}</button><button type="button" className="admin-button" disabled={pending} onClick={()=>setSelected('')}>Cancel</button></form>}{message&&<p role="status">{message}</p>}
++ </section>;
++}
+diff --git a/components/social/app.tsx b/components/social/app.tsx
+index f6acfbd..0724aba 100644
+--- a/components/social/app.tsx
++++ b/components/social/app.tsx
+@@ -1,4 +1,5 @@
+"use client";
++import {useMediaPolicy} from "./media-policy";
+import {useLabels} from "./labels";
+
+import {Feature,FeatureContext} from "./features";
+@@ -34,7 +35,7 @@ type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "n
+export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
+const t=useLabels();
+const [data, setData] = useState<SocialData>(initial || emptyData);
+-  const flags=data.features||ALL_FEATURES;
++  const mediaPolicy=useMediaPolicy();const resolvedFlags=data.features||ALL_FEATURES;const flags={...resolvedFlags,uploads:resolvedFlags.uploads&&mediaPolicy.enabled};
+const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,label:navigationLabel(t,target,item.label),enabled:item.enabled&&(!feature||flags[feature])};})};
+const [loadError, setLoadError] = useState(!initial);
+const [view, setView] = useState<View>("home");
+diff --git a/components/social/common.tsx b/components/social/common.tsx
+index 2994d33..25beebf 100644
+--- a/components/social/common.tsx
++++ b/components/social/common.tsx
+@@ -1,5 +1,6 @@
+"use client";
+import {useLabels} from "./labels";
++import {MIB,type MediaConfig} from "@/lib/media-config";
+import {defaultTranslator,type Translator} from "@/lib/admin/labels";
+
+import { useState, useEffect, type ReactNode } from "react";
+@@ -83,34 +84,23 @@ async function videoSize(file: File): Promise<number | null> {
+});
+}
+export async function upload(file: File, t: Translator = defaultTranslator): Promise<UploadResult> {
+-  let output = file; let aspect: number | null = null;
+-  if (file.type.startsWith("image/") && file.type !== "image/gif") {
+-    const bitmap = await createImageBitmap(file);
+-    aspect = bitmap.width / bitmap.height || null;
+-    const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+-    const canvas = document.createElement("canvas");
+-    canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+-    const context = canvas.getContext("2d");
+-    if (!context) throw new Error(t("common.your_browser_could_not_process_this_photo"));
+-    context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height);
+-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+-    bitmap.close();
+-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error(t("common.could_not_process_photo"))), "image/jpeg", .88));
+-    output = new File([blob], "photo.jpg", { type: "image/jpeg" });
+-  } else if (file.type.startsWith("image/")) aspect = await imageSize(file);
+-  else if (file.type.startsWith("video/")) aspect = await videoSize(file);
+-  if (output.size > 20 * 1024 * 1024) throw new Error(t("common.choose_a_file_smaller_than_20_mb"));
++  const config=await request<MediaConfig>("/api/social?upload-policy=1",undefined,t);
++  if(!config.enabled)throw new Error(t('media.disabled'));
++  if(!config.allowedTypes.includes(file.type))throw new Error(t('media.typeDisabled'));
++  if(file.size>config.maxFileMb*MIB)throw new Error(t('media.tooLarge',{max:config.maxFileMb}));
++  const output=file;
++  const aspect=file.type.startsWith('image/')?await imageSize(file):await videoSize(file);
+if (devMode) {
+const form = new FormData();
+form.append("key", crypto.randomUUID());
+form.append("file", output);
+-    const result = await request<{ url: string; type: string }>("/api/dev-upload", form, t);
+-    return { ...result, aspect };
++    const result = await request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t);
++    return { ...result, aspect:result.aspect??aspect };
+}
+const key = crypto.randomUUID();
+await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
+-  const completed = await request<{ url: string; type: string }>("/api/upload/complete", { key }, t);
+-  return { ...completed, aspect };
++  const completed = await request<{ url: string; type: string; aspect?:number|null }>("/api/upload/complete", { key }, t);
++  return { ...completed, aspect:completed.aspect??aspect };
+}
+
+/* --------------------------------- avatars --------------------------------- */
+diff --git a/components/social/create.tsx b/components/social/create.tsx
+index 6028f38..d471fee 100644
+--- a/components/social/create.tsx
++++ b/components/social/create.tsx
+@@ -1,4 +1,5 @@
+"use client";
++import {useMediaPolicy} from "./media-policy";
+import {useLabels} from "./labels";
+
+import {Feature} from "./features";
+@@ -19,6 +20,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+kind: "post" | "story" | "reel"; me: Person; people: Person[]; onClose: () => void; onCreated: () => Promise<void>;
+}) {
+const t=useLabels();
++  const mediaPolicy=useMediaPolicy();
+const [kind, setKind] = useState(initialKind);
+const [step, setStep] = useState<1 | 2 | 3>(1);
+const [files, setFiles] = useState<Draft[]>([]);
+@@ -32,14 +34,14 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+const [error, setError] = useState("");
+const input = useRef<HTMLInputElement>(null);
+
+-  const accept = kind === "reel" ? "video/mp4,video/webm" : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
++  const accept=mediaPolicy.allowedTypes.filter(type=>kind!=="reel"||type.startsWith("video/")).join(",");
+const isVideoDraft = (draft: Draft) => draft.type.startsWith("video/");
+
+const choose = async (selected: FileList | null) => {
+if (!selected?.length) return;
+setError("");
+const items = Array.from(selected);
+-    if (items.length + files.length > 6) { setError(t("create.choose_up_to_6_photos_or_one_video")); return; }
++    if (items.length + files.length > mediaPolicy.maxMedia) { setError(t("media.maxItems",{max:mediaPolicy.maxMedia})); return; }
+if ((items.some(f => f.type.startsWith("video/")) && (items.length + files.length > 1)) || files.some(isVideoDraft)) {
+setError(t("create.videos_must_be_shared_on_their_own")); return;
+}
+@@ -119,7 +121,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+<strong>{busy || t("create.your_next_moment_starts_here")}</strong>
+<span>{t("create.choose")}{kind === "reel" ? t("create.a_video") : t("create.photos_or_a_video")}{t("create.to_share")}</span>
+<span className="primary-button">{busy ? <Busy /> : t("create.select_from_your_device")}</span>
+-            <small>{t("create.drag_drop_works_too_jpg_png_webp_gif_mp4_or_webm_up_to_20_mb")}</small>
++            <small>{t("media.hint",{max:mediaPolicy.maxFileMb,quota:mediaPolicy.dailyQuotaMb,items:mediaPolicy.maxMedia,types:accept})}</small>
+</button>
+)}
+
+@@ -141,7 +143,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
+<span className="upload-position">{index + 1}</span>
+</div>
+))}
+-              {kind === "post" && files.length < 6 && !files.some(isVideoDraft) && (
++              {kind === "post" && files.length < mediaPolicy.maxMedia && !files.some(isVideoDraft) && (
+<button type="button" className="add-another" onClick={() => input.current?.click()} disabled={!!busy}><Plus />{t("create.add_photo")}</button>
+)}
+</div>
+diff --git a/components/social/media-policy.tsx b/components/social/media-policy.tsx
+new file mode 100644
+index 0000000..f72084b
+<a href="../../../../dev/null">---</a>
++++ b/components/social/media-policy.tsx
+@@ -0,0 +1,6 @@
++'use client';
++import {createContext,useContext} from 'react';
++import {DEFAULT_MEDIA,type MediaConfig} from '@/lib/media-config';
++const MediaContext=createContext(DEFAULT_MEDIA);
++export function MediaProvider({config,children}:{config:MediaConfig;children:React.ReactNode}){return <MediaContext value={config}>{children}</MediaContext>;}
++export const useMediaPolicy=()=>useContext(MediaContext);
+diff --git a/components/social/messages.tsx b/components/social/messages.tsx
+index 2cedae4..3da8be0 100644
+--- a/components/social/messages.tsx
++++ b/components/social/messages.tsx
+@@ -168,7 +168,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
+</span>
+{unread > 0
+? <i className="unread-badge" aria-label={unread + " unread"}>{unread}</i>
+-                : last && <time>{timeAgo(last.created_at, t)}</time>}
++                : last && <time suppressHydrationWarning>{timeAgo(last.created_at, t)}</time>}
+</button>
+);
+})}
+diff --git a/components/social/post-card.tsx b/components/social/post-card.tsx
+index 6b1a90e..ef6a7bc 100644
+--- a/components/social/post-card.tsx
++++ b/components/social/post-card.tsx
+@@ -180,7 +180,7 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
+<div className="post-user">
+<div>
+<button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
+-            <span className="post-time">{t("post_card.symbol_2")}{timeAgo(p.created_at, t)}</span>
++            <span className="post-time" suppressHydrationWarning>{t("post_card.symbol_2")}{timeAgo(p.created_at, t)}</span>
+</div>
+<span className="post-location">{p.location || p.author.name}</span>
+</div>
+@@ -205,7 +205,7 @@ export function CommentRow({ comment, canDelete, onDelete, onProfile }: { commen
+<Avatar person={{ avatar: comment.avatar, username: comment.username }} size={33} onClick={() => onProfile(comment.author_id)} />
+<div>
+<p><button className="username" onClick={() => onProfile(comment.author_id)}>{comment.username}</button> {comment.body}</p>
+-        <span>{timeAgo(comment.created_at, t)}</span>
++        <span suppressHydrationWarning>{timeAgo(comment.created_at, t)}</span>
+</div>
+{canDelete && (
+<IconButton label={t("post_card.delete_comment")} onClick={onDelete}>
+diff --git a/components/social/post-viewer.tsx b/components/social/post-viewer.tsx
+index 4ce8e29..444760d 100644
+--- a/components/social/post-viewer.tsx
++++ b/components/social/post-viewer.tsx
+@@ -88,7 +88,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+<button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button>
+{post.location && <span className="post-location">{post.location}</span>}
+</div>
+-              <span className="post-time">{timeAgo(post.created_at, t)}</span>
++              <span className="post-time" suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
+</div>
+<div className="post-viewer-header-actions">
+<PostMenu post={post} actions={actions} />
+@@ -107,7 +107,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+<button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button>
+{post.location && <span className="post-location">{post.location}</span>}
+</div>
+-                <span className="post-time">{timeAgo(post.created_at, t)}</span>
++                <span className="post-time" suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
+</div>
+<PostMenu post={post} actions={actions} />
+</header>
+@@ -117,7 +117,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+<p><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> {post.caption
+? <Caption text={post.caption} people={actions.people} onProfile={id => { onClose(); actions.openProfile(id); }} onTag={tag => { onClose(); actions.openTag(tag); }} />
+: <span className="muted">{post.location || t("post_viewer.shared_a_moment")}</span>}</p>
+-                <span>{timeAgo(post.created_at, t)}</span>
++                <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
+</div>
+<Feature name="comments">{comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
+{comments?.map(comment => (
+diff --git a/components/social/stories.tsx b/components/social/stories.tsx
+index 8dea25e..13c3b3d 100644
+--- a/components/social/stories.tsx
++++ b/components/social/stories.tsx
+@@ -120,7 +120,7 @@ function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClo
+<header>
+<Avatar person={post.author} size={36} />
+<button onClick={() => { onClose(); onProfile(post.author_id); }}>{post.author.username}</button>
+-              <span>{timeAgo(post.created_at, t)}</span>
++              <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
+<div className="story-tools">
+{isOwn && <IconButton label={t("stories.view_who_saw_this_story")} onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
+{canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? t("stories.close_reply") : t("stories.reply_to_this_story")} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}
+diff --git a/components/social/views.tsx b/components/social/views.tsx
+index e6d7da5..a39360d 100644
+--- a/components/social/views.tsx
++++ b/components/social/views.tsx
+@@ -517,7 +517,7 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
+</span>
+<span className="notification-text">
+<span><strong>{first.username}</strong>{others > 0 ? <>{t("views.and")}{others}{t("views.other")}{others > 1 ? t("common.pluralSuffix") : ""}</> : null} {label}{t("stories.symbol")}</span>
+-              <small>{timeAgo(group.created_at, t)}</small>
++              <small suppressHydrationWarning>{timeAgo(group.created_at, t)}</small>
+</span>
+{group.media
+? <img src={JSON.parse(group.media)[0]} alt="" loading="lazy" />
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+index 7cdc40e..0c41a95 100644
+--- a/lib/admin/config.ts
++++ b/lib/admin/config.ts
+@@ -11,6 +11,7 @@ export const SETTINGS_DEFAULTS = {
+'appearance.config': '',
+'features.config': '',
+'labels.config': '',
++  'media.config': '',
+'content.reelMaxSeconds': 0,
+'content.storyHours': 24,
+'content.reelsEnabled': true,
+diff --git a/lib/admin/content.ts b/lib/admin/content.ts
+index 4e28426..8c59ea8 100644
+--- a/lib/admin/content.ts
++++ b/lib/admin/content.ts
+@@ -1,3 +1,5 @@
++import {readMediaConfig,checkAssets,MEDIA_LOCK} from '../media-policy';
++import {MIB} from '../media-config';
+import type { PoolLike, QueryExecutor } from '../postgres';
+import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
+import { AdminError } from './validation';
+@@ -59,18 +61,19 @@ const CATEGORIES=['For you','Travel','Nature','Photography','Architecture','Life
+async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknown>,input:Record<string,unknown>) {
+const caption=text(input.caption??row.caption,2200),location=text(input.location??row.location,100),category=text(input.category??row.category,50),kind=text(input.kind??row.kind,10);
+if(!CATEGORIES.includes(category)||!['post','reel','story'].includes(kind))throw new AdminError('Invalid category or content kind.');
+-  const original=JSON.parse(String(row.media)) as string[];const media=input.media??original;
+-  if(!Array.isArray(media)||media.length<1||media.length>6||new Set(media).size!==media.length||media.some(url=>typeof url!=='string'||url.length>250))throw new AdminError('Choose 1–6 unique media items.');
++  const mediaPolicy=await readMediaConfig(db);const original=JSON.parse(String(row.media)) as string[];const media=input.media??original;
++  if(!Array.isArray(media)||media.length<1||media.length>Math.max(mediaPolicy.maxMedia,original.length)||new Set(media).size!==media.length||media.some(url=>typeof url!=='string'||url.length>250))throw new AdminError('Choose unique media items within the current limit.');
++  if(media.some(url=>!original.includes(url))&&media.length>mediaPolicy.maxMedia)throw new AdminError('Check the current media-per-post limit.');
+const types:string[]=[];
+for(const url of media) {
+if(original.includes(url)){types.push(row.media_type==='video'?'video/':'image/');continue;}
+if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('New media must come from verified uploads, not external URLs.');
+-    const {rows:[asset]}=await db.query('SELECT mime FROM assets WHERE key=$1 AND owner_id IN ($2,$3)',[url.slice(11),actorId,row.author_id]);
++    const [asset]=await checkAssets(db,[url],[actorId,String(row.author_id)],mediaPolicy);
+if(!asset||!['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'].includes(asset.mime))throw new AdminError('Use a verified upload owned by you or the author.');
+types.push(asset.mime);
+}
+const video=types.some(type=>type.startsWith('video/'));
+-  if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts up to six images.');
++  if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts only images.');
+const tags=input.tagged_users??JSON.parse(String(row.tagged_users));
+if(!Array.isArray(tags)||tags.length>10||new Set(tags).size!==tags.length||tags.some(id=>typeof id!=='string'||id.length>100))throw new AdminError('Tag up to 10 accounts.');
+if(tags.length&&(await db.query('SELECT id FROM profiles WHERE id=ANY($1::text[]) AND deleted_at IS NULL',[tags])).rows.length!==tags.length)throw new AdminError('A tagged profile is unavailable.');
+@@ -80,7 +83,7 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
+if(aspects!==null&&(!Array.isArray(aspects)||aspects.length!==media.length||aspects.some(r=>typeof r!=='number'||!Number.isFinite(r)||r<0.2||r>5)))throw new AdminError('Provide one valid aspect ratio (0.2–5) per item, or clear all.');
+if(Array.isArray(aspects)&&!aspects.length)aspects=null;
+const settings=await loadSettings(db);
+-  if(kind==='reel')await checkReelDuration(db,media,settings['content.reelMaxSeconds']);
++  if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
+const expires=input.expires_at===undefined?(kind==='story'&&row.kind!=='story'?Date.now()+settings['content.storyHours']*3600000:row.expires_at):input.expires_at;
+if(expires!==null&&(typeof expires!=='number'||!Number.isSafeInteger(expires)||expires<0||expires>8640000000000000))throw new AdminError('Invalid expiry.');
+return {caption,location,category,kind,media:JSON.stringify(media),media_options:JSON.stringify(options),aspects:aspects?JSON.stringify(aspects):null,tagged_users:JSON.stringify(tags),media_type:video?'video':'image',expires_at:expires};
+@@ -105,6 +108,8 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
+}
+return transaction(pool,async db=>{
+const actor=await authorizeAdmin(db,actorId,action==='purge');
++    if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++    if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
+// Always lock in ID order to avoid deadlocks between overlapping bulk selections.
+const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[ids]);
+if(rows.length!==ids.length)throw new AdminError('An item no longer exists. Nothing was changed.',404);
+diff --git a/lib/admin/core.ts b/lib/admin/core.ts
+index bac6588..9641c79 100644
+--- a/lib/admin/core.ts
++++ b/lib/admin/core.ts
+@@ -76,6 +76,13 @@ export async function saveSetting(pool: PoolLike, userId: string, key: string, i
+const actor = await authorizeAdmin(db, userId);
+// Includes the absent-row case, so concurrent first writes have correct before values.
+await db.query('SELECT pg_advisory_xact_lock(67291006)');
++    // Same ordering boundary as post/profile attachment and storage cleanup.
++    if(['appearance.config','brand.logoUrlLight','media.config','upload.maxFileMb','upload.dailyQuotaMb'].includes(key))await db.query('SELECT pg_advisory_xact_lock(67291008)');
++    if(key==='appearance.config'||key==='brand.logoUrlLight'){
++      const urls=String(value).match(/\/api\/media\/[a-f0-9-]{36}/g)||[];
++      for(const url of urls){const {rows:[asset]}=await db.query("SELECT key FROM assets WHERE key=$1 AND status='ready' AND verified=true",[url.slice(11)]);if(!asset)throw new AdminError('A branding asset is unavailable. Choose another image.');}
++    }
++
+const { rows: [row] } = await db.query('SELECT value FROM app_settings WHERE key=$1', [key]);
+const before = row ? JSON.parse(row.value) : SETTINGS_DEFAULTS[key as SettingKey];
+await db.query(`INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES($1,$2,$3,$4)
+diff --git a/lib/admin/label-defaults.ts b/lib/admin/label-defaults.ts
+index e60531d..f14da1d 100644
+--- a/lib/admin/label-defaults.ts
++++ b/lib/admin/label-defaults.ts
+@@ -590,5 +590,10 @@ export const LABEL_DEFAULTS = {
+"page.open_rstmc_to_sign_in": "Open RSTMC to sign in",
+"page.access_denied": "Access denied",
+"page.administrator_access_is_required_your_account_does_not_have_permi": "Administrator access is required. Your account does not have permission to view this page.",
+-  "page.return_to_rstmc": "Return to RSTMC"
++  "page.return_to_rstmc": "Return to RSTMC",
++  "media.disabled": "Uploads are currently disabled.",
++  "media.typeDisabled": "This media type is currently disabled.",
++  "media.tooLarge": "Choose a file smaller than {max} MB.",
++  "media.maxItems": "Choose up to {max} photos, or one video.",
++  "media.hint": "Drag & drop works too · {types} · Up to {max} MB per file · {quota} MB per day · {items} photos per post"
+} as const;
+diff --git a/lib/admin/media.ts b/lib/admin/media.ts
+new file mode 100644
+index 0000000..9ea7e26
+<a href="../../../../dev/null">---</a>
++++ b/lib/admin/media.ts
+@@ -0,0 +1,75 @@
++import type {PoolLike,QueryExecutor} from '../postgres';
++import {localDevDatabase} from '../postgres';
++import {transaction,authorizeAdmin,insertAudit} from './core';
++import {AdminError} from './validation';
++import {MEDIA_LOCK,readMediaConfig,checkUploadInput} from '../media-policy';
++import {localAssetPath} from '../media-storage';
++import {del} from '@vercel/blob';
++import {promises as fs} from 'node:fs';
++/** Include hidden, expired and trashed posts: restoration must not lose media. */
++export const referencedAsset=(alias='a')=>`(EXISTS(SELECT 1 FROM posts p WHERE p.media::jsonb ? ('/api/media/'||${alias}.key)) OR EXISTS(SELECT 1 FROM profiles p WHERE p.avatar='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM "user" u WHERE u.image='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM app_settings s WHERE s.key IN ('appearance.config','brand.logoUrlLight') AND strpos(s.value,'/api/media/'||${alias}.key)>0))`;
++export function mediaFilters(input:Record<string,unknown>){
++ const status=String(input.status||'all'),sort=String(input.sort||'newest'),owner=String(input.owner||''),page=Number(input.page||1);
++ if(!['all','ready','quarantined','trash','purging','orphans'].includes(status)||!['newest','largest'].includes(sort)||owner.length>100||!Number.isSafeInteger(page)||page<1||page>10000)throw new AdminError('Invalid media filters.');return {status,sort,owner,page};
++}
++export async function mediaReport(db:QueryExecutor,input:Record<string,unknown>={}){
++ const filter=mediaFilters(input),values:unknown[]=[];const where=['TRUE'];
++ if(filter.owner){values.push(filter.owner);where.push(`COALESCE(a.storage_owner,a.owner_id)=$${values.length}`);}
++ if(filter.status==='orphans')where.push(`NOT ${referencedAsset()}`);else if(filter.status!=='all'){values.push(filter.status);where.push(`a.status=$${values.length}`);}
++ const from='FROM assets a WHERE '+where.join(' AND ');
++ const {rows:[summary]}=await db.query(`SELECT COUNT(*) assets,COALESCE(SUM(size+source_retained_bytes),0) bytes,COALESCE(SUM(source_retained_bytes),0) retained_source_bytes,COUNT(*) FILTER(WHERE status='quarantined') quarantined,COUNT(*) FILTER(WHERE status='trash') trashed FROM assets`);
++ const {rows:[total]}=await db.query('SELECT COUNT(*) total '+from,values);
++ const {rows:items}=await db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset()} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET $${values.length+1}`,[...values,(filter.page-1)*50]);
++ const {rows:owners}=await db.query(`SELECT COALESCE(storage_owner,owner_id) owner_id,COUNT(*) assets,SUM(size+source_retained_bytes) bytes FROM assets GROUP BY COALESCE(storage_owner,owner_id) ORDER BY bytes DESC,owner_id LIMIT 25 OFFSET $1`,[(filter.page-1)*25]);
++ const {rows:expired}=await db.query(`SELECT key,owner_id,expected_size,mime,created_at FROM upload_claims WHERE completed=false AND created_at<$1 AND (processing_at IS NULL OR processing_at<$2) ORDER BY created_at,key LIMIT 25 OFFSET $3`,[Date.now()-3600000,Date.now()-300000,(filter.page-1)*25]);
++ const {rows:[pending]}=await db.query(`SELECT COUNT(*) reservations,COALESCE(SUM(expected_size),0) reserved_bytes FROM upload_claims WHERE completed=false AND (created_at>$1 OR processing_at>$2)`,[Date.now()-3600000,Date.now()-300000]);
++ return {filter,summary,total:Number(total.total),items,owners,expired,pending};
++}
++export async function changeMedia(pool:PoolLike,actorId:string,body:Record<string,unknown>){
++ const action=String(body.action),key=String(body.key||'');
++ if(!['quarantine','release','trash','restore','purge'].includes(action)||!/^[a-f0-9-]{36}$/.test(key))throw new AdminError('Choose a media operation and asset.');
++ if(body.confirmation!==key)throw new AdminError('Type the full asset key to confirm.');
++ const reason=typeof body.reason==='string'?body.reason.trim():'';if(reason.length>500||(action==='quarantine'&&!reason))throw new AdminError('A quarantine reason is required (up to 500 characters).');
++ return transaction(pool,async db=>{
++  const actor=await authorizeAdmin(db,actorId,action==='purge');await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++  const {rows:[asset]}=await db.query(`SELECT a.*,${referencedAsset()} referenced FROM assets a WHERE a.key=$1 FOR UPDATE`,[key]);if(!asset)throw new AdminError('Asset not found.',404);
++  let status=asset.status,deleted=asset.deleted_at,origin=asset.trash_origin;
++  if(action==='quarantine'){if(status!=='ready')throw new AdminError('Choose a ready asset.');status='quarantined';}
++  if(action==='release'){if(status!=='quarantined'||!asset.verified)throw new AdminError('Only previously verified media can be released. Failed uploads must be replaced.');const c=await readMediaConfig(db);checkUploadInput({...c,enabled:true},Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);status='ready';}
++  if(action==='trash'){if(!['ready','quarantined'].includes(status)||asset.referenced)throw new AdminError('Only unreferenced ready/quarantined assets can be trashed.');origin=status;status='trash';deleted=Date.now();}
++  if(action==='restore'){if(status!=='trash'||Date.now()-Number(deleted)>30*86400000)throw new AdminError('Restore is available for 30 days after trashing.',409);status=origin==='quarantined'?'quarantined':'ready';deleted=null;}
++  if(action==='purge'){if(!['trash','purging'].includes(status)||asset.referenced)throw new AdminError('Permanent deletion requires unreferenced trashed media.');status='purging';}
++  await db.query('UPDATE assets SET status=$1,deleted_at=$2,trash_origin=$3,reason=$4 WHERE key=$5',[status,deleted,origin,reason||asset.reason,key]);
++  await insertAudit(db,actor,{action:'media.'+action,targetType:'asset',targetId:key,before:{status:asset.status},after:{status},reason});
++  // External deletion happens after a durable, audited purging marker. A failed
++  // storage operation leaves a retryable row rather than pretending it succeeded.
++  return {key:String(asset.key),blob_url:String(asset.blob_url||''),source_blob_url:String(asset.source_blob_url||''),status};
++ });
++}
++export async function deleteStoredObject(key:string,url:string){
++ if(!url)return;
++ if(url==='local'||url.startsWith('local-')){if(!localDevDatabase())throw new AdminError('Local storage is unavailable.');await fs.rm(localAssetPath(key,url),{force:true});return;}
++ const parsed=new URL(url);if(parsed.protocol!=='https:'||!parsed.hostname.endsWith('.blob.vercel-storage.com')||parsed.username||parsed.password)throw new AdminError('Untrusted media host.');await del(url);
++}
++export async function purgeMedia(pool:PoolLike,actorId:string,body:Record<string,unknown>,remove=deleteStoredObject){
++ const asset=await changeMedia(pool,actorId,{...body,action:'purge'});
++ try{await remove(asset.key,asset.blob_url);if(asset.source_blob_url&&asset.source_blob_url!==asset.blob_url)await remove(asset.key,asset.source_blob_url);}catch{throw new AdminError('Storage deletion failed. The asset remains blocked; retry permanent deletion.',503);}
++ await transaction(pool,async db=>{const actor=await authorizeAdmin(db,actorId,true);await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);const {rows:[row]}=await db.query('SELECT status FROM assets WHERE key=$1 FOR UPDATE',[asset.key]);if(!row)return;if(row.status!=='purging')throw new AdminError('Asset state changed.',409);await db.query('DELETE FROM assets WHERE key=$1',[asset.key]);await insertAudit(db,actor,{action:'media.purged',targetType:'asset',targetId:asset.key,before:{status:'purging'},after:null});});
++}
++
++/** Recover abandoned *known application reservations*, not arbitrary objects in a shared Blob store. */
++export async function reconcileReservation(pool:PoolLike,actorId:string,body:Record<string,unknown>,inspect:(key:string)=>Promise<{url:string;size:number}>){
++ const key=String(body.key||'');if(!/^[a-f0-9-]{36}$/.test(key)||body.confirmation!==key)throw new AdminError('Type the full reservation key to confirm.');
++ await authorizeAdmin(pool,actorId);
++ const {rows:[claim]}=await pool.query('SELECT * FROM upload_claims WHERE key=$1 AND completed=false',[key]);
++ if(!claim||Number(claim.created_at)>Date.now()-3600000||Number(claim.processing_at||0)>Date.now()-300000)throw new AdminError('Only expired, idle reservations can be reconciled.');
++ let object:{url:string;size:number};try{object=await inspect(key);}catch{throw new AdminError('No readable stored object was found. Nothing was deleted or registered.',409);}
++ if(object.size<1||object.size>100*1024*1024)throw new AdminError('Object size exceeds the managed inspection limit.');
++ await transaction(pool,async db=>{
++  const actor=await authorizeAdmin(db,actorId);await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[claim.owner_id]);await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++  const {rows:[current]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!current||current.completed||Number(current.processing_at||0)>Date.now()-300000)throw new AdminError('Reservation changed. Please reload.',409);
++  await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,verified,reason) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',false,'Abandoned upload; not verified')`,[key,claim.owner_id,claim.mime,object.size,claim.created_at,object.url]);
++  await db.query('UPDATE upload_claims SET completed=true,completed_at=created_at,processing_at=NULL WHERE key=$1',[key]);
++  await insertAudit(db,actor,{action:'media.reconcile',targetType:'asset',targetId:key,after:{status:'quarantined',size:object.size}});
++ });
++}
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+index 48219fc..b98f420 100644
+--- a/lib/admin/validation.ts
++++ b/lib/admin/validation.ts
+@@ -1,3 +1,4 @@
++import {validateMedia} from '../media-config';
+import {validateLabels,MAX_LABEL_BYTES} from './labels';
+import { validateFeatures } from '../features';
+import { validateAppearance } from '../appearance';
+@@ -11,6 +12,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
+if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
+let valid = false;
+switch (key as SettingKey) {
++    case 'media.config': {
++      if(typeof value!=='string'||value.length>4096)throw new AdminError('Invalid media configuration.');
++      if(value==='')return '';
++      try{return JSON.stringify(validateMedia(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid media configuration.');}
++    }
+case 'labels.config': {
+if(typeof value!=='string'||new TextEncoder().encode(value).length>MAX_LABEL_BYTES)throw new AdminError('Invalid label configuration.');
+if(value==='')return '';
+diff --git a/lib/media-config.ts b/lib/media-config.ts
+new file mode 100644
+index 0000000..5ebcd87
+<a href="../../../../dev/null">---</a>
++++ b/lib/media-config.ts
+@@ -0,0 +1,16 @@
++import {mediaTypes} from './media-type';
++export const MIB=1024*1024;
++export type MediaConfig={enabled:boolean;maxFileMb:number;dailyQuotaMb:number;allowedTypes:string[];maxMedia:number;imageQuality:number;imageMaxDimension:number;imageFormat:'jpeg'|'png'|'webp';videoMaxSeconds:number};
++export const DEFAULT_MEDIA:MediaConfig={enabled:true,maxFileMb:20,dailyQuotaMb:250,allowedTypes:[...mediaTypes],maxMedia:6,imageQuality:88,imageMaxDimension:1800,imageFormat:'jpeg',videoMaxSeconds:0};
++export function validateMedia(value:unknown):MediaConfig {
++ if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid media configuration.');const c=value as MediaConfig;
++ const integer=(v:number,min:number,max:number)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
++ if(typeof c.enabled!=='boolean'||!integer(c.maxFileMb,1,100)||!integer(c.dailyQuotaMb,1,10000)||!integer(c.maxMedia,1,20)||!integer(c.imageQuality,1,100)||!integer(c.imageMaxDimension,320,4096)||!integer(c.videoMaxSeconds,0,3600))throw new Error('Check media limits: file 1–100 MB, daily quota 1–10000 MB, items 1–20, quality 1–100, dimension 320–4096, duration 0–3600 seconds.');
++ if(!Array.isArray(c.allowedTypes)||!c.allowedTypes.length||new Set(c.allowedTypes).size!==c.allowedTypes.length||c.allowedTypes.some(type=>!mediaTypes.includes(type))||!['jpeg','png','webp'].includes(c.imageFormat))throw new Error('Choose supported media types and an image output format.');
++ if(c.allowedTypes.some(type=>type.startsWith('image/')&&type!=='image/gif')&&!c.allowedTypes.includes('image/'+c.imageFormat))throw new Error('The image output type must also be allowed.');
++ return {enabled:c.enabled,maxFileMb:c.maxFileMb,dailyQuotaMb:c.dailyQuotaMb,allowedTypes:[...c.allowedTypes],maxMedia:c.maxMedia,imageQuality:c.imageQuality,imageMaxDimension:c.imageMaxDimension,imageFormat:c.imageFormat,videoMaxSeconds:c.videoMaxSeconds};
++}
++export function mediaConfig(settings:Record<string,unknown>):MediaConfig {
++ if(settings['media.config']){try{return validateMedia(JSON.parse(String(settings['media.config'])));}catch{return {...DEFAULT_MEDIA,enabled:false};}}
++ return {...DEFAULT_MEDIA,allowedTypes:[...DEFAULT_MEDIA.allowedTypes],maxFileMb:Number(settings['upload.maxFileMb']||20),dailyQuotaMb:Number(settings['upload.dailyQuotaMb']||250)};
++}
+diff --git a/lib/media-policy.ts b/lib/media-policy.ts
+new file mode 100644
+index 0000000..1ab37f0
+<a href="../../../../dev/null">---</a>
++++ b/lib/media-policy.ts
+@@ -0,0 +1,34 @@
++import type {QueryExecutor,PoolLike} from './postgres';
++import {loadSettings,transaction} from './admin/core';
++import {mediaConfig,MIB,type MediaConfig} from './media-config';
++import {AdminError} from './admin/validation';
++import {postgresQuery} from './sql';
++export const MEDIA_LOCK=67291008;
++export async function readMediaConfig(db:QueryExecutor){return mediaConfig(await loadSettings(db));}
++export function checkUploadInput(config:MediaConfig,size:number,mime:string){
++ if(!config.enabled)throw new AdminError('Uploads are currently disabled.',403);
++ if(!Number.isSafeInteger(size)||size<1||size>config.maxFileMb*MIB)throw new AdminError('The file exceeds the current upload size limit.');
++ if(!config.allowedTypes.includes(mime))throw new AdminError('This media type is currently disabled.');
++}
++export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[],config:MediaConfig){
++ if(!urls.length||urls.length>config.maxMedia||new Set(urls).size!==urls.length)throw new AdminError('Check the current media-per-post limit.');
++ const assets=[];
++ for(const url of urls){if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('Use registered media.');
++  const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1 AND owner_id=ANY($2::text[])',[url.slice(11),owners]);
++  if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('One of your uploads is unavailable. Please upload it again.');
++  checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);
++  if(asset.source_mime&&!config.allowedTypes.includes(asset.source_mime))throw new AdminError('This media type is currently disabled.');
++  if(asset.mime.startsWith('video/')&&config.videoMaxSeconds&&asset.duration!=null&&Number(asset.duration)>config.videoMaxSeconds)throw new AdminError('The video exceeds the current duration limit.');
++  assets.push(asset);
++ }
++ return assets;
++}
++/** Short attach transaction, shared with cleanup and branding writes. No network work here. */
++export async function commitMediaUse(pool:PoolLike,urls:string[],owners:string[],config:MediaConfig,statements:{query:string;values:unknown[]}[]){
++ return transaction(pool,async db=>{
++  await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++  const latest=await readMediaConfig(db);if(JSON.stringify(latest)!==JSON.stringify(config))throw new AdminError('Upload rules changed. Please try again.',409);
++  await checkAssets(db,urls,owners,latest);
++  for(const statement of statements)await db.query(postgresQuery(statement.query),statement.values);
++ });
++}
+diff --git a/lib/media-processing.ts b/lib/media-processing.ts
+new file mode 100644
+index 0000000..963d818
+<a href="../../../../dev/null">---</a>
++++ b/lib/media-processing.ts
+@@ -0,0 +1,34 @@
++import sharp from 'sharp';
++import {detectMediaType} from './media-type';
++import {AdminError} from './admin/validation';
++import {checkUploadInput} from './media-policy';
++import {MIB,type MediaConfig} from './media-config';
++import {mediaDuration} from './reel-duration';
++export type ProcessedMedia={bytes:Buffer;mime:string;width:number|null;height:number|null;duration:number|null};
++export async function readBounded(body:ReadableStream<Uint8Array>,max:number){
++ const reader=body.getReader();const chunks:Uint8Array[]=[];let size=0;
++ try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>max)throw new AdminError('The file exceeds the current upload size limit.',413);chunks.push(part.value);}}finally{await reader.cancel();}
++ return Buffer.concat(chunks);
++}
++export async function processMedia(bytes:Buffer,mime:string,config:MediaConfig):Promise<ProcessedMedia>{
++ checkUploadInput(config,bytes.length,mime);
++ if(detectMediaType(bytes.subarray(0,16))!==mime)throw new AdminError('The file contents do not match its photo or video type.');
++ if(mime.startsWith('video/')){
++  // Zero disables the duration cap, not server verification. The browser's
++  // duration is never trusted, and completed uploads keep verified metadata.
++  const duration=await mediaDuration(bytes);
++  if(config.videoMaxSeconds&&duration>config.videoMaxSeconds)throw new AdminError('The video exceeds the current duration limit.');
++  return {bytes,mime,width:null,height:null,duration};
++ }
++ try{
++  const image=sharp(bytes,{limitInputPixels:40_000_000,failOn:'error'}).timeout({seconds:20});const meta=await image.metadata();
++  if(!meta.width||!meta.height||(meta.pages||1)>200||meta.width*meta.height*(meta.pages||1)>80_000_000)throw new Error();
++  // Animated GIFs remain animated (the previous client also preserved them).
++  // Decode to verify integrity, but do not silently flatten an animation.
++  if(mime==='image/gif'){const output=await sharp(bytes,{animated:true,limitInputPixels:80_000_000,failOn:'error'}).timeout({seconds:20}).rotate().resize({width:config.imageMaxDimension,height:config.imageMaxDimension,fit:'inside',withoutEnlargement:true}).gif({colours:Math.max(2,Math.round(config.imageQuality*2.55)),effort:3}).toBuffer({resolveWithObject:true});if(output.data.length>config.maxFileMb*MIB)throw new AdminError('The processed image exceeds the current upload size limit.');return {bytes:output.data,mime,width:output.info.width,height:output.info.height,duration:null};}
++  const resized=image.rotate().resize({width:config.imageMaxDimension,height:config.imageMaxDimension,fit:'inside',withoutEnlargement:true});
++  const output=await (config.imageFormat==='jpeg'?resized.flatten({background:'#fff'}).jpeg({quality:config.imageQuality}):config.imageFormat==='png'?resized.png({quality:config.imageQuality}):resized.webp({quality:config.imageQuality})).toBuffer({resolveWithObject:true});
++  if(output.data.length>config.maxFileMb*MIB)throw new AdminError('The processed image exceeds the current upload size limit.');
++  return {bytes:output.data,mime:'image/'+config.imageFormat,width:output.info.width,height:output.info.height,duration:null};
++ }catch(error){if(error instanceof AdminError)throw error;throw new AdminError('This image could not be safely decoded.');}
++}
+diff --git a/lib/media-storage.ts b/lib/media-storage.ts
+new file mode 100644
+index 0000000..353193a
+<a href="../../../../dev/null">---</a>
++++ b/lib/media-storage.ts
+@@ -0,0 +1,9 @@
++import {AdminError} from './admin/validation';
++const uuid='[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
++export function localAssetPath(key:string,url:string){
++ if(!new RegExp('^'+uuid+'$').test(key))throw new AdminError('Invalid media key.');
++ if(url==='local')return '.local/uploads/'+key;
++ if(url==='local-source:'+key)return '.local/upload-staging/'+key;
++ if(new RegExp('^local-processed:'+key+'-[0-9]{10,16}$').test(url))return '.local/uploads/'+url.slice(16);
++ throw new AdminError('Invalid local media location.');
++}
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index ad0ce7b..8348ac2 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -121,3 +121,29 @@ export const adminContentUpgradeStatements: string[] = [
+'CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(deleted_at) WHERE deleted_at IS NOT NULL',
+'CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC,id)',
+];
++
++// Version 8: media inspection, reservation leases and restorable storage inventory.
++export const mediaUpgradeStatements = [
++ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ready' CHECK(status IN ('ready','quarantined','trash','purging'))",
++ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT ''",
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS deleted_at bigint',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS width integer',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS height integer',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS duration double precision',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_size integer',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_mime text',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_blob_url text',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_retained_bytes integer NOT NULL DEFAULT 0',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS verified boolean NOT NULL DEFAULT true',
++ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS storage_owner text',
++ 'UPDATE assets SET storage_owner=owner_id WHERE storage_owner IS NULL',
++ 'ALTER TABLE assets ALTER COLUMN owner_id DROP NOT NULL',
++ 'ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_owner_id_fkey',
++ 'ALTER TABLE assets ADD CONSTRAINT assets_owner_id_fkey FOREIGN KEY(owner_id) REFERENCES profiles(id) ON DELETE SET NULL',
++ 'ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS processing_at bigint',
++ 'ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS completed_at bigint',
++ 'UPDATE upload_claims c SET completed=true,completed_at=c.created_at FROM assets a WHERE a.key=c.key AND c.completed=false',
++ 'CREATE INDEX IF NOT EXISTS idx_assets_storage_status ON assets(status,created_at DESC,key)',
++ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS trash_origin text NOT NULL DEFAULT 'ready'",
++ 'CREATE INDEX IF NOT EXISTS idx_upload_claims_quota ON upload_claims(owner_id,completed,created_at)',
++];
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index 10f5142..9655143 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -2,7 +2,7 @@ import path from 'node:path';
+import { Pool, types, type QueryResultRow } from 'pg';
+import { serializedPool } from './serialized-pool';
+import { postgresQuery } from './sql';
+-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements } from './postgres-schema';
++import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements } from './postgres-schema';
+
+types.setTypeParser(20, value => Number(value));
+types.setTypeParser(1700, value => Number(value));
+@@ -16,7 +16,7 @@ export interface PoolLike extends QueryExecutor {
+connect(): Promise<QueryExecutor & { release(): void }>;
+}
+
+-const migrations = [
++export const DATABASE_MIGRATIONS = [
+{ version: 1, statements: schemaStatements },
+{ version: 2, statements: socialUpgradeStatements },
+{ version: 3, statements: aspectUpgradeStatements },
+@@ -24,6 +24,7 @@ const migrations = [
+{ version: 5, statements: adminUpgradeStatements },
+{ version: 6, statements: adminUsersUpgradeStatements },
+{ version: 7, statements: adminContentUpgradeStatements },
++  { version: 8, statements: mediaUpgradeStatements },
+];
+
+let pool: Pool | undefined;
+@@ -118,7 +119,7 @@ export async function ensureSchema() {
+try {
+await client.query('BEGIN');
+await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+-        for (const migration of migrations) {
++        for (const migration of DATABASE_MIGRATIONS) {
+for (const statement of migration.statements) await client.query(statement);
+await client.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
+}
+@@ -132,11 +133,11 @@ export async function ensureSchema() {
+await client.query('BEGIN');
+await client.query('SELECT pg_advisory_xact_lock(67291004)');
+await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements], [7, adminContentUpgradeStatements]] as const) {
+-        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
++      for (const migration of DATABASE_MIGRATIONS) {
++        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[migration.version]);
+if (!applied.rowCount) {
+-          for (const statement of statements) await client.query(statement);
+-          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[version]);
++          for (const statement of migration.statements) await client.query(statement);
++          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[migration.version]);
+}
+}
+await client.query('COMMIT');
+diff --git a/lib/public-media.ts b/lib/public-media.ts
+new file mode 100644
+index 0000000..97b9957
+<a href="../../../../dev/null">---</a>
++++ b/lib/public-media.ts
+@@ -0,0 +1,5 @@
++import 'server-only';
++import {readSettings} from './admin/settings';
++import {mediaConfig,DEFAULT_MEDIA} from './media-config';
++import {missingConfiguration} from './config';
++export async function publicMedia(){if(missingConfiguration().length)return DEFAULT_MEDIA;try{return mediaConfig(await readSettings());}catch{return {...DEFAULT_MEDIA,enabled:false};}}
+diff --git a/lib/reel-duration.ts b/lib/reel-duration.ts
+index e2f990c..bdd8766 100644
+--- a/lib/reel-duration.ts
++++ b/lib/reel-duration.ts
+@@ -1,3 +1,4 @@
++import {localAssetPath} from './media-storage';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { parseBuffer } from 'music-metadata';
+@@ -5,7 +6,7 @@ import { localDevDatabase, type QueryExecutor } from './postgres';
+import { detectMediaType } from './media-type';
+import { AdminError } from './admin/validation';
+
+-const MAX_BYTES = 20 * 1024 * 1024; // Current upload ceiling; Phase 7 owns upload limits.
++
+export async function mediaDuration(bytes: Uint8Array) {
+const mime = detectMediaType(bytes.subarray(0,16));
+if (!['video/mp4','video/webm'].includes(mime)) throw new AdminError('A verified MP4 or WebM video is required.');
+@@ -16,13 +17,13 @@ export async function mediaDuration(bytes: Uint8Array) {
+return duration;
+} catch { throw new AdminError('Could not verify video duration. Choose a video with readable duration metadata.'); }
+}
+-export async function checkReelDuration(db: QueryExecutor, urls: string[], limit: number) {
++export async function checkReelDuration(db: QueryExecutor, urls: string[], limit: number, maxBytes = 20 * 1024 * 1024) {
+if (!limit) return; // 0 preserves the original unlimited-duration behavior.
+if (urls.length !== 1) throw new AdminError('A reel requires one video.');
+const url = urls[0]; let bytes: Uint8Array;
+async function readFile(file: string) {
+const stat = await fs.stat(file);
+-    if (stat.size > MAX_BYTES) throw new AdminError('Video exceeds the current 20 MB upload limit.');
++    if (stat.size > maxBytes) throw new AdminError('Video exceeds the current upload limit.');
+return fs.readFile(file);
+}
+try {
+@@ -32,15 +33,15 @@ export async function checkReelDuration(db: QueryExecutor, urls: string[], limit
+if (!/^\/api\/media\/[a-f0-9-]{36}$/.test(url)) throw new AdminError('Choose a registered video.');
+const key = url.slice('/api/media/'.length);
+const { rows: [asset] } = await db.query('SELECT blob_url,size FROM assets WHERE key=$1', [key]);
+-      if (!asset || Number(asset.size) > MAX_BYTES) throw new AdminError('Video asset is unavailable or too large.');
+-      if (localDevDatabase()) bytes = await readFile(path.join(process.cwd(),'.local/uploads',key));
++      if (!asset || Number(asset.size) > maxBytes) throw new AdminError('Video asset is unavailable or too large.');
++      if (localDevDatabase()) bytes = await readFile(path.join(process.cwd(),localAssetPath(key,asset.blob_url)));
+else {
+const blob = new URL(asset.blob_url);
+if (blob.protocol !== 'https:' || !blob.hostname.endsWith('.blob.vercel-storage.com') || blob.username || blob.password) throw new AdminError('Untrusted media host.');
+const response = await fetch(blob, { redirect:'error', signal:AbortSignal.timeout(10000) });
+if (!response.ok || !response.body) throw new Error();
+const reader=response.body.getReader(); const chunks: Uint8Array[]=[]; let size=0;
+-        try { while(true) { const part=await reader.read(); if(part.done)break; size+=part.value.length; if(size>MAX_BYTES)throw new AdminError('Video exceeds the current upload limit.'); chunks.push(part.value); } }
++        try { while(true) { const part=await reader.read(); if(part.done)break; size+=part.value.length; if(size>maxBytes)throw new AdminError('Video exceeds the current upload limit.'); chunks.push(part.value); } }
+finally { await reader.cancel(); }
+bytes=Buffer.concat(chunks);
+}
+diff --git a/lib/server.ts b/lib/server.ts
+index 21d4d22..c7d3ff5 100644
+--- a/lib/server.ts
++++ b/lib/server.ts
+@@ -1,3 +1,4 @@
++import {AdminError} from './admin/validation';
+import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
+import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
+import {displayCounterColumns} from './counters';
+@@ -9,7 +10,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
+
+export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
+export function db(){return database();}
+-export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
++export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError||error instanceof AdminError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
+export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
+
+// Origins the deployment explicitly trusts (custom domains, preview domains).
+diff --git a/lib/uploads.ts b/lib/uploads.ts
+index 2c8c051..a1a1dce 100644
+--- a/lib/uploads.ts
++++ b/lib/uploads.ts
+@@ -1,49 +1,101 @@
++import {localAssetPath} from './media-storage';
+import {requireUpload} from './feature-policy';
+-import {head,del} from '@vercel/blob';
+-import {AppError,db} from './server';
+-import {getPool} from './postgres';
+-import {detectMediaType,mediaTypes} from './media-type';
+-const keyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+-export async function reserveUpload(key:string,owner:string,payload:string|null){
+- await requireUpload(owner);
+- if(!keyPattern.test(key))throw new AppError('Invalid upload name.');
+- let input:{size:number;type:string};try{input=JSON.parse(payload||'');}catch{throw new AppError('Invalid upload.');}
+- if(!Number.isSafeInteger(input.size)||input.size<1||input.size>20*1024*1024||!mediaTypes.includes(input.type))throw new AppError('Choose a supported photo or video smaller than 20 MB.');
+- const client=await (await getPool()).connect();
+- try{
+-  await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
+-  // Abandoned uploads are dropped before accounting so they can never count
+-  // against the daily quota as if they had finished.
+-  await client.query('DELETE FROM upload_claims WHERE owner_id=$1 AND completed=false AND created_at<$2',[owner,Date.now()-3600000]);
+-  const existing=await client.query('SELECT owner_id,expected_size,mime,completed FROM upload_claims WHERE key=$1',[key]);
+-  if(existing.rows.length){const row=existing.rows[0];if(row.owner_id!==owner||row.expected_size!==input.size||row.mime!==input.type||row.completed)throw new AppError('Please start a new upload.');}
+-  else{
+-   // Only completed uploads (recorded assets) count as usage.
+-   const quota=await client.query('SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND completed=true AND created_at>$2',[owner,Date.now()-86400000]);
+-   if(Number(quota.rows[0].total)+input.size>250*1024*1024)throw new AppError('You have reached today’s upload limit. Try again tomorrow.',429);
+-   await client.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,$2,$3,$4,$5)',[key,owner,input.size,input.type,Date.now()]);
+-  }
+-  await client.query('COMMIT');return input;
+- }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
++import {head,del,put} from '@vercel/blob';
++import {getPool,type PoolLike,localDevDatabase} from './postgres';
++import {transaction} from './admin/core';
++import {AdminError} from './admin/validation';
++import {checkUploadInput,readMediaConfig,MEDIA_LOCK} from './media-policy';
++import {MIB} from './media-config';
++import {processMedia,readBounded,type ProcessedMedia} from './media-processing';
++import {promises as fs} from 'node:fs';
++export const uploadKeyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
++const HOUR=3600000,LEASE=5*60000;
++export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload:string|null){
++ if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload name.');
++ let input:{size:number;type:string};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
++ return transaction(pool,async db=>{
++  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
++  // Serialize quota reservations with settings changes and media attach/quarantine.
++  await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++  const config=await readMediaConfig(db);checkUploadInput(config,input.size,input.type);
++  const now=Date.now();
++  const {rows:[existing]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);
++  if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
++  // Active reservations prevent parallel requests from oversubscribing quota.
++  // Completed transfers are charged at completion, including quarantined bytes.
++  const {rows:[usage]}=await db.query(`SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND key<>$2 AND ((completed=true AND COALESCE(completed_at,created_at)>$3) OR (completed=false AND (created_at>$4 OR processing_at>$5)))`,[owner,key,now-86400000,now-HOUR,now-LEASE]);
++  if(Number(usage.total)+input.size>config.dailyQuotaMb*MIB)throw new AdminError('You have reached today’s upload limit. Try again tomorrow.',429);
++  if(!existing)await db.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,$2,$3,$4,$5)',[key,owner,input.size,input.type,now]);
++  return input;
++ });
++}
++export async function reserveUpload(key:string,owner:string,payload:string|null){await requireUpload(owner);return reserveClaim(await getPool(),key,owner,payload);}
++export interface UploadStore {
++ inspect(key:string):Promise<{url:string;size:number}>;
++ read(url:string,max:number):Promise<Buffer>;
++ write(key:string,media:ProcessedMedia,lease:number):Promise<string>;
++ remove(url:string):Promise<void>;
+}
+-export async function finishUpload(key:string,owner:string){
+- await requireUpload(owner);
+- if(!keyPattern.test(key))throw new AppError('Invalid upload.');
+- const claim=await db().prepare('SELECT * FROM upload_claims WHERE key=? AND owner_id=?').bind(key,owner).first<{expected_size:number;mime:string;created_at:number;completed:boolean}>();
+- if(!claim)throw new AppError('Upload not found.',404);
+- if(claim.completed)return {url:'/api/media/'+key,type:claim.mime};
+- if(claim.created_at<Date.now()-3600000)throw new AppError('This upload has expired. Start again.');
+- const blob=await head(key);
+- if(blob.pathname!==key||blob.size!==claim.expected_size){await del(key);throw new AppError('The upload size did not match. Try again.');}
+- // URL comes exclusively from the Blob SDK for this store, never from the client.
+- const response=await fetch(blob.url,{headers:{Range:'bytes=0-15'},redirect:'error',signal:AbortSignal.timeout(10000)});
+- if(!response.ok||!response.body)throw new AppError('Your upload is not ready. Please try again.',503);
+- const reader=response.body.getReader();const prefix=new Uint8Array(16);let count=0;
+- try{while(count<16){const part=await reader.read();if(part.done)break;const size=Math.min(16-count,part.value.length);prefix.set(part.value.subarray(0,size),count);count+=size;}}finally{await reader.cancel();}
+- if(detectMediaType(prefix.subarray(0,count))!==claim.mime){await del(key);throw new AppError('The file contents do not match its photo or video type.');}
+- await db().batch([
+-  db().prepare('INSERT OR IGNORE INTO assets(key,owner_id,mime,size,created_at,blob_url) VALUES(?,?,?,?,?,?)').bind(key,owner,claim.mime,blob.size,Date.now(),blob.url),
+-  db().prepare('UPDATE upload_claims SET completed=true WHERE key=? AND owner_id=?').bind(key,owner)
+- ]);
+- return {url:'/api/media/'+key,type:claim.mime};
++export const blobUploadStore:UploadStore={
++ async inspect(key){const blob=await head(key);if(blob.pathname!==key)throw new AdminError('Invalid upload.');return {url:blob.url,size:blob.size};},
++ async read(url,max){const parsed=new URL(url);if(parsed.protocol!=='https:'||!parsed.hostname.endsWith('.blob.vercel-storage.com')||parsed.username||parsed.password)throw new AdminError('Untrusted media host.');const res=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(30000)});if(!res.ok||!res.body)throw new AdminError('Your upload is not ready. Please try again.',503);return readBounded(res.body,max);},
++ async write(key,media,lease){return (await put('processed/'+key+'-'+lease,media.bytes,{access:'public',contentType:media.mime,addRandomSuffix:false,allowOverwrite:false,abortSignal:AbortSignal.timeout(60000)})).url;},
++ async remove(url){await del(url);},
++};
++export const localUploadStore:UploadStore={
++ async inspect(key){const stat=await fs.stat('.local/upload-staging/'+key);return {url:'local-source:'+key,size:stat.size};},
++ async read(url,max){const key=url.replace('local-source:','');if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload.');const path='.local/upload-staging/'+key;if((await fs.stat(path)).size>max)throw new AdminError('The file exceeds the current upload size limit.');return fs.readFile(path);},
++ async write(key,media,lease){const url='local-processed:'+key+'-'+lease;await fs.mkdir('.local/uploads',{recursive:true});await fs.writeFile(localAssetPath(key,url),media.bytes,{flag:'wx'});return url;},
++ async remove(url){if(!url.startsWith('local-source:')||!uploadKeyPattern.test(url.slice(13)))throw new AdminError('Invalid upload.');await fs.rm('.local/upload-staging/'+url.slice(13),{force:true});},
++};
++/** Processing is leased, bounded and outside database transactions. */
++export async function finishWithStore(pool:PoolLike,key:string,owner:string,store:UploadStore,access:()=>Promise<void>=async()=>{}){
++ if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload.');await access();
++ const lease=Date.now();
++ const start=await transaction(pool,async db=>{
++  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
++  const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 AND owner_id=$2 FOR UPDATE',[key,owner]);if(!claim)throw new AdminError('Upload not found.',404);
++  const config=await readMediaConfig(db);checkUploadInput(config,Number(claim.expected_size),claim.mime);
++  if(claim.completed){const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1',[key]);if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('This upload is quarantined or unavailable.',409);checkUploadInput(config,Number(asset.size),asset.mime);return {claim,config,asset};}
++  if(Number(claim.created_at)<lease-HOUR)throw new AdminError('This upload has expired. Start again.');
++  if(claim.processing_at&&Number(claim.processing_at)>lease-LEASE)throw new AdminError('Upload processing is already in progress. Please retry.',409);
++  await db.query('UPDATE upload_claims SET processing_at=$1 WHERE key=$2',[lease,key]);return {claim,config,asset:null};
++ });
++ const result=(asset:Record<string,unknown>)=>({url:'/api/media/'+key,type:String(asset.mime),aspect:asset.width&&asset.height?Number(asset.width)/Number(asset.height):null});
++ if(start.asset)return result(start.asset);
++ let source:{url:string;size:number}|undefined;let produced:{url:string;size:number}|undefined;
++ try{
++  source=await store.inspect(key);
++  if(source.size!==Number(start.claim.expected_size))throw new AdminError('The upload size did not match. Try again.');
++  const bytes=await store.read(source.url,start.config.maxFileMb*MIB);
++  if(bytes.length!==source.size)throw new AdminError('The upload size did not match. Try again.');
++  const media=await processMedia(bytes,start.claim.mime,start.config);
++  const output=store===blobUploadStore&&(media.mime.startsWith('video/'))?source.url:await store.write(key,media,lease);
++  if(output!==source.url)produced={url:output,size:media.bytes.length};
++  await access();
++  await transaction(pool,async db=>{
++   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
++   await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
++   const current=await readMediaConfig(db);if(JSON.stringify(current)!==JSON.stringify(start.config))throw new AdminError('Upload rules changed. Please start a new upload.',409);
++   const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)throw new AdminError('Upload processing expired. Please retry.',409);
++   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0]);
++   await db.query('UPDATE upload_claims SET completed=true,completed_at=$1,processing_at=NULL WHERE key=$2',[Date.now(),key]);
++  });
++  if(source.url!==output){try{await store.remove(source.url);await pool.query('UPDATE assets SET source_blob_url=NULL,source_retained_bytes=0 WHERE key=$1',[key]);}catch{/* Retained source bytes remain in the inventory until cleanup. */}}
++  return result({mime:media.mime,width:media.width,height:media.height});
++ }catch(error){
++  // Invalid completed transfers enter quarantine, never the public media path.
++  // A temporary transfer/network failure remains retryable instead of pretending
++  // there is a verified asset. Clean failed derivatives, and retain them in the
++  // quarantine inventory if storage deletion itself fails.
++  let derivativeRetained=false;
++  if(produced){try{await store.remove(produced.url);produced=undefined;}catch{derivativeRetained=true;}}
++  await transaction(pool,async db=>{
++   const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)return;
++   const invalidTransfer=error instanceof AdminError&&error.status!==503;
++   if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
++   await db.query('UPDATE upload_claims SET processing_at=NULL WHERE key=$1',[key]);
++  });throw error;
++ }
+}
++export async function finishUpload(key:string,owner:string){return finishWithStore(await getPool(),key,owner,localDevDatabase()?localUploadStore:blobUploadStore,()=>requireUpload(owner));}
+diff --git a/package-lock.json b/package-lock.json
+index 106101e..2ca053a 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -32,6 +32,7 @@
+"react-hook-form": "^7.85.0",
+"react-resizable-panels": "^4.12.2",
+"recharts": "^3.8.0",
++        "sharp": "^0.34.5",
+"sonner": "^2.0.8",
+"tailwind-merge": "3.6.0",
+"vaul": "^1.1.2",
+@@ -607,7 +608,6 @@
+"version": "1.11.3",
+"resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
+"integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
+-      "dev": true,
+"license": "MIT",
+"optional": true,
+"dependencies": {
+@@ -1889,7 +1889,6 @@
+"version": "1.1.0",
+"resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
+"integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
+-      "devOptional": true,
+"license": "MIT",
+"engines": {
+"node": ">=18"
+@@ -1902,7 +1901,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -1925,7 +1923,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -1948,7 +1945,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -1965,7 +1961,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -1982,7 +1977,6 @@
+"cpu": [
+"arm"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -1999,7 +1993,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2016,7 +2009,6 @@
+"cpu": [
+"ppc64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2033,7 +2025,6 @@
+"cpu": [
+"riscv64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2050,7 +2041,6 @@
+"cpu": [
+"s390x"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2067,7 +2057,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2084,7 +2073,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2101,7 +2089,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2118,7 +2105,6 @@
+"cpu": [
+"arm"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2141,7 +2127,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2164,7 +2149,6 @@
+"cpu": [
+"ppc64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2187,7 +2171,6 @@
+"cpu": [
+"riscv64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2210,7 +2193,6 @@
+"cpu": [
+"s390x"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2233,7 +2215,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2256,7 +2237,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2279,7 +2259,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "Apache-2.0",
+"optional": true,
+"os": [
+@@ -2302,7 +2281,6 @@
+"cpu": [
+"wasm32"
+],
+-      "dev": true,
+"license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+"optional": true,
+"dependencies": {
+@@ -2322,7 +2300,6 @@
+"cpu": [
+"arm64"
+],
+-      "dev": true,
+"license": "Apache-2.0 AND LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2342,7 +2319,6 @@
+"cpu": [
+"ia32"
+],
+-      "dev": true,
+"license": "Apache-2.0 AND LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -2362,7 +2338,6 @@
+"cpu": [
+"x64"
+],
+-      "dev": true,
+"license": "Apache-2.0 AND LGPL-3.0-or-later",
+"optional": true,
+"os": [
+@@ -7939,7 +7914,6 @@
+"version": "2.1.2",
+"resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+"integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
+-      "devOptional": true,
+"license": "Apache-2.0",
+"engines": {
+"node": ">=8"
+@@ -12751,7 +12725,6 @@
+"version": "0.34.5",
+"resolved": "https://registry.npmjs.org/sharp/-/sharp-0.34.5.tgz",
+"integrity": "sha512-Ou9I5Ft9WNcCbXrU9cMgPBcCK8LiwLqcbywW3t4oDV37n1pzpuNLsYiAV8eODnjbtQlSDwZ2cUEeQz4E54Hltg==",
+-      "devOptional": true,
+"hasInstallScript": true,
+"license": "Apache-2.0",
+"dependencies": {
+@@ -12796,7 +12769,6 @@
+"version": "7.8.0",
+"resolved": "https://registry.npmjs.org/semver/-/semver-7.8.0.tgz",
+"integrity": "sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==",
+-      "devOptional": true,
+"license": "ISC",
+"bin": {
+"semver": "bin/semver.js"
+diff --git a/package.json b/package.json
+index 324ed1c..c74fa8c 100644
+--- a/package.json
++++ b/package.json
+@@ -39,6 +39,7 @@
+"react-hook-form": "^7.85.0",
+"react-resizable-panels": "^4.12.2",
+"recharts": "^3.8.0",
++    "sharp": "^0.34.5",
+"sonner": "^2.0.8",
+"tailwind-merge": "3.6.0",
+"vaul": "^1.1.2",
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 7ac57d8..9d581b6 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -375,4 +375,37 @@ Implemented locally after the complete Phase 5 baseline, preserved as `1d29aad`.
+4. Export JSON for backup. Import a flat key/value JSON object to stage a replacement draft; omitted keys fall back to defaults after publishing. Use per-key reset or type **RESET** for reset-all, then publish.
+5. Reload public tabs to see changes. The root `FunctionGram-Phase-6-Labels.patch` is an identical downloadable copy; apply only one patch copy.
+
+-**Next phase:** Phase 7 is not authorized; awaiting the user's request.
++## Phase 7 — Media & upload pipeline controls
++
++Implemented locally on top of the preserved complete Phase 1–6 baseline (`bd494a0`). Phase 7 is limited to upload policy, media verification/processing, storage operations, migration 8, compatibility wiring and tests. It does not revise admin roles, maintenance/feature controls, appearance or label keys. No remote push/PR and no Phase 8 work.
++
++### Delivered
++
++- **`/rstmcadmin/media` and `/api/admin/media`**: search/filter/paginate inventory by status, owner and largest/newest; registered-object and per-account aggregate bytes; a quarantine queue; expired upload reservation review/reconciliation; server-checked settings; audited quarantine/release, restorable trash and owner-only permanent purge. Maximum list page 50 assets / 25 accounts or expired reservations; SQL aggregates and reference checks avoid loading the whole asset table into the page.
++- Settings are stored in the dedicated `media.config` app-setting and start at **enabled, 20 MiB/file, 250 MiB per rolling 24 hours, six images per post, current JPEG/WebP/PNG/GIF + MP4/WebM types, quality 88, 1800px longest edge, JPEG output and no video cap**. Each value and type list is range/allow-list validated. Existing Phase 1 `upload.maxFileMb` and `upload.dailyQuotaMb` still initialize these defaults if no Phase 7 configuration has been saved. Changing the UI updates the cohesive config atomically; it does not silently edit old settings or erase the Phase 5 Uploads flag.
++- Client hints and file chooser/post-editor limits consume a server-resolved `MediaProvider` snapshot; the client fetches the current authenticated upload policy before transfer. Server-side validation is authoritative. Every reserve, completion, attachment and public read rechecks active rules, media type, size and state; cached or already-uploaded media do not bypass newly lowered rules. The existing feature gate and maintenance policy remain independently enforced.
++- Quota reservations serialize by account and share an advisory lock with settings changes and media attach/cleanup. In-flight reservations are held for up to one hour; expired processing leases stop reserving after five minutes. Actual original transfer bytes count against a rolling 24-hour quota after completion, including rejected/quarantined transfers and assets later trashed. Simultaneous uploads cannot race over the limit.
++- Upload completion uses an explicit store adapter: local PGlite preview files or Vercel Blob. The server bounds the streamed source to the configured limit, checks the actual byte signature (not the claimed browser MIME), safely decodes images with sharp, strips metadata, corrects orientation, resizes and encodes the configured JPEG/PNG/WebP output. Animated GIFs stay animated and are bounded/resized. Videos retain their original MP4/WebM bytes, but duration is parsed server-side and stored; an optional Phase 7 video cap composes with the existing Phase 5/earlier reel cap using the stricter non-zero limit. Unreadable or malformed media is inaccessible and quarantined, not treated as verified. Server upload/complete/social processing routes allow up to 60 seconds; media reads are dynamic, no-store and retain byte-range video seeking.
++- Profile, post and moderation attachment paths share the same settings/state checks and media lock as quarantine/trash/purge. Deleting a profile preserves storage inventory with `storage_owner` even when the FK owner is set null. Trash lasts 30 days and is restorable; irreversible deletion requires the owner role, the complete typed key and a prior trash action. Audits commit with state changes. Blob deletion is outside DB transactions behind a durable `purging` marker and can be retried. Account emails, signed URLs and storage credentials are not returned.
++- The orphan filter means **registered application assets with no reference** from any post (including hidden, expired and trashed posts), profile avatar, Better Auth image or branding setting. Deletion is staged through trash. Totals/per-user/biggest assets count records managed by this app, including quarantined/trash and still-retained source copies; they exclude bundled demo files and arbitrary objects in a potentially shared Blob store. This deliberate namespace/ownership boundary avoids deleting another app's objects. Expired reservations can be reconciled only by confirming the exact key; an available object is entered into quarantine, never auto-published. An absent object is not misreported as deleted.
++- Additive **database migration 8** records media status, quarantine details, dimensions/duration, retained-source size, processing lease and storage ownership. Existing asset rows remain ready/verified and upload claims with existing assets are backfilled as completed so recent uploads still count against quota. The shared migration registry now drives both PGlite and managed Postgres, preserving one migration ordering and `functiongram_migrations` record in both. Migration 8 is repeat-applied in PGlite tests; the optional managed-Postgres verification remains skipped without a supplied isolated database.
++- Added a narrowly scoped hydration suppression on dynamic relative-time text where the server and browser clock may cross a minute boundary; this fixed a React hydration warning exposed while exercising changing upload timestamps. It does not change Phase 6 label resolution/defaults.
++
++### Verification
++
++- `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test:vercel`, and `git diff --check` pass. Lint: 0 errors, 7 pre-existing image warnings. Automated suite: **82 tests, 79 passed, 0 failed, 3 optional managed-PostgreSQL tests skipped**.
++- `tests/media.test.ts` covers repeatable migration/registry, legacy settings and preservation, quota race/expiry, a 40 MiB stream at a 50 MiB limit, oversize and cached-file rejections, image metadata removal/resizing, animated GIF processing, measured video duration, streamed-body caps, quarantine/idempotency, exact storage aggregates and orphan references, role/typed-delete/restore/audit rollback, account deletion inventory and safe reconciliation paths.
++- `scripts/media-check.mts` passed on an isolated live development preview: anonymous/member/admin/owner guards, CSRF, malformed settings, a real 40 MiB multipart upload at 50 MiB, above-limit and quota denial, rejection of a formerly cached asset after lowering the cap, range reads, configured server image output, video limit, Phase 5 feature flag, protected references, quarantine/release, trash/restore and owner-only physical purge. Settings were restored afterward.
++- `scripts/media-browser.mjs` passed at **320/390/430/768/1024px in light and dark** (10 combinations): real settings publish, media inventory/create responsiveness, 44px controls, live label/config hints, full image compose upload, audited typed quarantine, and no horizontal overflow. The same viewport/theme sweep passed for labels, feature, appearance and content; Phase 2 admin browser regressions passed. The isolated browser found and now verifies the fix for minute-boundary relative-time hydration warnings.
++- Media upload checks ran against the real app/API with isolated local PGlite and the local preview file store; **they do not have Vercel Blob credentials and therefore do not claim a live remote Blob transfer was tested**. The production client-upload token handler and Blob store adapter are compiled and use the configured server-side size/type plus verified `head`/bounded fetch/`put`/`del` flow. Verify one real 40 MiB upload on the target Vercel preview after adding its normal Blob token before production rollout.
++- No real account, production database, object, provider credential, email or deployment setting was changed. Scratch server/DB/browser fixtures and logs remain outside the application patch.
++
++### Apply and operate
++
++1. Apply `patches/phase-07-media.patch` **after Phase 6**. It is incremental against the complete Phases 1–6 source, adds migration version 8 and does not recreate earlier migrations. Run `git apply --check` first; then install dependencies and run typecheck, lint, tests and build.
++2. Sign in to the existing admin and open **Media** at `/rstmcadmin/media`. Publish limits under Upload controls; the Phase 5 Uploads feature switch remains an independent gate.
++3. Filter assets to **Orphans** to find registered media with no live application reference. Quarantine blocks the app media route; use reason + full-key confirmation. Trash only unreferenced items first; restore within 30 days. Only the owner can permanently delete trashed media, with another exact-key confirmation. Storage-provider CDN/browser copies may remain accessible from already-known raw public URLs until the provider/CDN evicts them.
++4. Reconciliation is manual and exact-key-confirmed; it registers a known stale reservation into quarantine. Do not blanket-delete arbitrary objects in a shared Blob store. Keep the Vercel Blob token configured in the environment, never in app settings.
++5. Verify both a 40 MiB video upload with a 50 MiB cap and an upload above the configured cap on the Vercel preview. If doing a production release, additionally verify deployment-plan function time limits for the selected 60-second media routes.
++
++**Next phase:** Phase 8 is not authorized; awaiting the user's request.
+diff --git a/scripts/admin-check.mts b/scripts/admin-check.mts
+index 2f5896c..d7e1827 100644
+--- a/scripts/admin-check.mts
++++ b/scripts/admin-check.mts
+@@ -12,8 +12,8 @@ import { PGlite } from '@electric-sql/pglite';
+import * as schema from '../lib/postgres-schema';
+import { ADMIN_BASE_PATH } from '../lib/admin/config';
+
+-const directory = path.resolve('.local/admin-check-db');
+-const fixturePath = path.resolve('.local/admin-check.json');
++const directory = path.resolve(process.env.ADMIN_CHECK_DB||'.local/admin-check-db');
++const fixturePath = path.resolve(process.env.ADMIN_CHECK_FIXTURE||'.local/admin-check.json');
+const secret = 'phase-one-local-test-secret-not-for-deployment-2026';
+const origin = process.env.ADMIN_TEST_ORIGIN || 'http://localhost:3000';
+if (process.argv[2] === 'seed') {
+@@ -21,7 +21,7 @@ if (process.argv[2] === 'seed') {
+const db = new PGlite(directory);
+const cookies: Record<string, string> = {};
+try {
+-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await db.exec(sql);
++    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
+for (const [id, role, verified, banned] of [
+['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
+['banned', 'admin', true, true], ['unverified', 'admin', false, false],
+diff --git a/scripts/media-browser.mjs b/scripts/media-browser.mjs
+new file mode 100644
+index 0000000..51b1bcd
+<a href="../../../../dev/null">---</a>
++++ b/scripts/media-browser.mjs
+@@ -0,0 +1,28 @@
++// Optional browser QA. Fixtures and tooling follow scripts/admin-browser.mjs.
++import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';
++const require=createRequire(path.resolve('.local/browser-tools/package.json'));const{chromium:playwright}=require('playwright-core');const{default:chromium}=await import(require.resolve('@sparticuz/chromium'));
++const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';const cookies=JSON.parse(fs.readFileSync(process.env.ADMIN_TEST_FIXTURE||'.local/admin-check.json','utf8'));
++const browser=await playwright.launch({executablePath:await chromium.executablePath(),args:chromium.args.filter(a=>a!=='--single-process'),headless:true});
++const admin=await browser.newContext();const[key,...value]=cookies.admin.split('=');await admin.addCookies([{name:key,value:value.join('='),domain:new URL(origin).hostname,path:'/'}]);
++const original=await admin.request.get(origin+'/api/admin/media').then(r=>r.json());
++const save=async value=>{const r=await admin.request.post(origin+'/api/admin/media',{headers:{origin},data:{action:'settings',value}});assert.equal(r.status(),200,await r.text());};
++const labels=await admin.request.get(origin+'/api/admin/labels').then(r=>r.json());
++try{
++ const editor=await admin.newPage();await editor.bringToFront();await editor.goto(origin+'/rstmcadmin/media');await editor.waitForLoadState('networkidle');await editor.getByLabel('File limit (MB)',{exact:true}).fill('50');await editor.getByLabel('Maximum photos per post',{exact:true}).fill('8');await editor.getByRole('button',{name:'Publish media settings',exact:true}).click();await editor.getByRole('status').filter({hasText:'published and audited'}).waitFor();
++ for(const width of [320,390,430,768,1024])for(const theme of ['light','dark']){
++  const page=await admin.newPage();await page.bringToFront();await page.setViewportSize({width,height:900});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/rstmcadmin/media');await page.waitForLoadState('networkidle');await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`media admin overflow ${width} ${theme}`);
++  for(const el of await page.locator('main button,main input:not([type=checkbox]),main select').all()){const box=await el.boundingBox();if(box)assert.ok(box.height>=44,'44px controls');}
++  await page.goto(origin+'/#/create');await page.waitForLoadState('networkidle');await page.waitForFunction(()=>Boolean(history.state?.__NA));await page.getByRole('heading',{name:'Share a moment',exact:true}).waitFor();await page.getByRole('button',{name:'Create',exact:true}).last().click();await page.getByText(/Up to 50 MB per file/).waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`create overflow ${width} ${theme}`);assert.deepEqual(errors,[]);await page.close();console.log(`Media viewport/theme passed: ${width} ${theme}`);
++ }
++ // A new hint key is editable through Phase 6 without changing old label contracts.
++ const r=await admin.request.post(origin+'/api/admin/labels',{headers:{origin},data:{value:{...labels,'media.hint':'Upload rules: {max} MB, {quota} MB daily, {items} items, {types}'}}});assert.equal(r.status(),200);
++ const page=await admin.newPage();await page.bringToFront();await page.goto(origin+'/#/create');await page.waitForLoadState('networkidle');await page.waitForFunction(()=>Boolean(history.state?.__NA));await page.getByRole('button',{name:'Create',exact:true}).last().click();await page.getByText(/Upload rules: 50 MB/).waitFor();
++ // Actual upload in the compose flow uses server output, not browser-only transformations.
++ await page.locator('input[type=file]').first().setInputFiles('public/media/avatar-1.jpg');await page.getByRole('button',{name:'Next',exact:true}).waitFor();await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByRole('button',{name:'Share post',exact:true}).waitFor();
++ await page.close();
++ // Review action requires the complete key and a reason; inventory refresh follows the mutation.
++ await editor.goto(origin+'/rstmcadmin/media?status=orphans');await editor.waitForLoadState('networkidle');const button=editor.getByRole('button',{name:'Quarantine',exact:true}).first();if(await button.count()){
++  const row=button.locator('xpath=ancestor::tr');const key=await row.locator('code').innerText();await button.click();assert.equal(await editor.getByRole('button',{name:'Confirm media operation',exact:true}).isEnabled(),false);await editor.getByLabel('Reason',{exact:true}).fill('Browser QA');await editor.getByLabel('Type asset key',{exact:true}).fill(key);await editor.getByRole('button',{name:'Confirm media operation',exact:true}).click();await editor.getByRole('status').filter({hasText:'completed and audited'}).waitFor();const release=await admin.request.post(origin+'/api/admin/media',{headers:{origin},data:{action:'release',key,confirmation:key}});assert.equal(release.status(),200);
++ }
++ console.log('Media browser QA passed: real settings save, responsive inventory/create flow, live limits, label compatibility, actual image upload and typed quarantine action.');
++}finally{await save(original.config);await admin.request.post(origin+'/api/admin/labels',{headers:{origin},data:{value:labels}});await browser.close();}
+diff --git a/scripts/media-check.mts b/scripts/media-check.mts
+new file mode 100644
+index 0000000..075ec0d
+<a href="../../../../dev/null">---</a>
++++ b/scripts/media-check.mts
+@@ -0,0 +1,36 @@
++/** HTTP QA only against isolated scripts/admin-check.mts fixtures. No real Blob/email services. */
++import assert from 'node:assert/strict';
++import {readFile} from 'node:fs/promises';
++import sharp from 'sharp';
++import {validateMedia,MIB} from '../lib/media-config';
++const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';
++const cookies=JSON.parse(await readFile(process.env.ADMIN_TEST_FIXTURE||'.local/admin-check.json','utf8')) as Record<string,string>;
++if(process.env.ADMIN_TEST_SECURE_COOKIES==='1')for(const id of Object.keys(cookies))cookies[id]='__Secure-'+cookies[id];
++const headers=(who='admin')=>({cookie:cookies[who]||'',origin});
++const get=(url:string,who='admin')=>fetch(origin+url,{headers:headers(who)});
++const post=(url:string,value:unknown,who='admin',from=origin)=>fetch(origin+url,{method:'POST',headers:{...headers(who),origin:from,'content-type':'application/json'},body:JSON.stringify(value)});
++await get('/api/social','regular');
++for(const [who,status] of [['guest',401],['regular',403],['unverified',401],['banned',403],['expired',401],['revoked',401],['admin',200]] as const)for(const path of ['/rstmcadmin/media','/api/admin/media'])assert.equal((await get(path,who)).status,status,who+' '+path);
++const initial=await get('/api/admin/media').then(r=>r.json()) as {config:unknown};const original=validateMedia(initial.config);
++const save=(value:unknown)=>post('/api/admin/media',{action:'settings',value});
++const upload=async(bytes:Buffer,type:string)=>{const form=new FormData();form.set('key',crypto.randomUUID());form.set('file',new Blob([new Uint8Array(bytes)],{type}),'fixture');return fetch(origin+'/api/dev-upload',{method:'POST',headers:headers('regular'),body:form});};
++const action=(key:string,action:string,who='admin')=>post('/api/admin/media',{action,key,confirmation:key,reason:'HTTP QA'},who);
++try{
++ assert.equal((await post('/api/admin/media',{action:'settings',value:original},'admin','https://foreign.test')).status,403);
++ assert.equal((await save({...original,maxFileMb:101})).status,400);
++ assert.equal((await post('/api/admin/media',{action:'settings',value:original},'regular')).status,403);
++ let config={...original,maxFileMb:50,dailyQuotaMb:250,enabled:true,imageFormat:'webp' as const,imageMaxDimension:640,videoMaxSeconds:0};assert.equal((await save(config)).status,200);
++ // A real multipart 40 MiB request passes through the live route, not just a unit validator.
++ const video=Buffer.alloc(40*MIB);(await readFile('public/media/flowers.mp4')).copy(video);const accepted=await upload(video,'video/mp4');assert.equal(accepted.status,200,await accepted.clone().text());const media=await accepted.json() as {url:string;type:string};const key=media.url.slice(11);
++ const served=await fetch(origin+media.url,{headers:{range:'bytes=0-15'}});assert.equal(served.status,206);assert.equal((await served.arrayBuffer()).byteLength,16);assert.equal(served.headers.get('cache-control'),'private, no-store');
++ assert.equal((await upload(Buffer.alloc(50*MIB+1),'video/mp4')).status,400);
++ config={...config,maxFileMb:20};await save(config);assert.equal((await post('/api/social',{action:'create_post',kind:'post',media:[media.url]},'regular')).status,400,'cached large asset must be denied');
++ config={...config,maxFileMb:50};await save(config);const created=await post('/api/social',{action:'create_post',kind:'post',media:[media.url],caption:'Phase 7 isolated QA'},'regular');assert.equal(created.status,200,await created.clone().text());assert.equal((await action(key,'trash')).status,400,'referenced asset protected');
++ assert.equal((await action(key,'quarantine')).status,200);assert.equal((await get(media.url,'regular')).status,404);assert.equal((await action(key,'release')).status,200);
++ const image=await sharp({create:{width:2000,height:1000,channels:3,background:'#ff0000'}}).jpeg().toBuffer();const resized=await upload(image,'image/jpeg');assert.equal(resized.status,200,await resized.clone().text());const photo=await resized.json() as {url:string;type:string;aspect:number};assert.equal(photo.type,'image/webp');assert.equal(photo.aspect,2);const response=await get(photo.url);const encoded=await response.arrayBuffer();const info=await sharp(Buffer.from(encoded as ArrayBuffer)).metadata();assert.equal(info.width,640);assert.equal(info.format,'webp');
++ const photoKey=photo.url.slice(11);assert.equal((await action(photoKey,'trash')).status,200);assert.equal((await get(photo.url)).status,404);assert.equal((await action(photoKey,'restore')).status,200);assert.equal((await action(photoKey,'trash')).status,200);assert.equal((await action(photoKey,'purge')).status,403);assert.equal((await action(photoKey,'purge','owner')).status,200);assert.equal((await get(photo.url)).status,404);
++ config={...config,videoMaxSeconds:1};await save(config);assert.equal((await upload(await readFile('public/media/flowers.mp4'),'video/mp4')).status,400);
++ config={...config,dailyQuotaMb:1,videoMaxSeconds:0};await save(config);assert.equal((await upload(image,'image/jpeg')).status,429,'original 40 MiB transfer still consumes quota');
++ config={...config,enabled:false};await save(config);assert.equal((await upload(image,'image/jpeg')).status,403);
++ console.log('Media HTTP QA passed: guards, CSRF, actual 40 MiB upload at 50 MiB, over-limit denial, cached reuse denial, byte range serving, image re-encode, duration/quota/disable controls, reference protection, quarantine, restore and owner-only physical purge.');
++}finally{assert.equal((await save(original)).status,200);}
+diff --git a/tests/admin-content.test.ts b/tests/admin-content.test.ts
+index 890c53e..fffafa3 100644
+--- a/tests/admin-content.test.ts
++++ b/tests/admin-content.test.ts
+@@ -11,7 +11,7 @@ import {saveSetting} from '../lib/admin/core';
+
+async function fixture() {
+const db=new PGlite();
+- const all=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements];
++ const all=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements];
+for(const sql of all)await db.exec(sql);
+for(const sql of schema.adminContentUpgradeStatements)await db.exec(sql);
+const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
+@@ -120,7 +120,7 @@ test('managed PostgreSQL migration 7 preserves content and serializes overlappin
+await pool.query(`INSERT INTO profiles(id,username,name,created_at) VALUES('admin','admin','Admin',1)`);
+await pool.query(`INSERT INTO posts(id,author_id,media,caption,created_at) VALUES('p1','admin','[]','Preserved',1),('p2','admin','[]','Preserved',2)`);
+await pool.query(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','admin','Preserved comment',1)`);
+-  for(let i=0;i<2;i++)for(const sql of schema.adminContentUpgradeStatements)await pool.query(sql);
++  for(let i=0;i<2;i++)for(const sql of [...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements])await pool.query(sql);
+assert.equal((await contentDetail(pool,'posts','p1')).caption,'Preserved');assert.equal((await contentDetail(pool,'comments','c1')).body,'Preserved comment');
+await Promise.all([['p1','p2'],['p2','p1']].map(ids=>moderateContent(pool,'admin',{resource:'posts',operation:'hide',ids,reason:'overlapping bulk',confirmation:'CONFIRM 2'})));
+assert.equal((await listContent(pool,contentFilters({status:'hidden'}))).total,2);
+diff --git a/tests/admin.test.ts b/tests/admin.test.ts
+index f9fe26a..c4fd4b1 100644
+--- a/tests/admin.test.ts
++++ b/tests/admin.test.ts
+@@ -7,7 +7,7 @@ import { getAuthTables } from 'better-auth/db';
+import { admin, twoFactor } from 'better-auth/plugins';
+import * as schema from '../lib/postgres-schema';
+import { serializedPool } from '../lib/serialized-pool';
+-import type { PoolLike } from '../lib/postgres';
++import {DATABASE_MIGRATIONS,type PoolLike} from '../lib/postgres';
+import { authorizeAdmin, bootstrapAdmin, insertAudit, loadSettings, saveSetting, transaction } from '../lib/admin/core';
+import { SETTINGS_DEFAULTS } from '../lib/admin/config';
+import { validateSetting } from '../lib/admin/validation';
+@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
+const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
+async function fixture() {
+const db = new PGlite();
+-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await db.exec(sql);
++  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
+const pool = serializedPool({ async query(sql, values) {
+const result = await db.query(sql, values);
+return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
+@@ -31,7 +31,7 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
+try {
+for (const sql of old) await db.exec(sql);
+await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
+-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await db.exec(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
+const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
+assert.deepEqual(existing, { role: 'user', banned: false });
+const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
+@@ -40,13 +40,8 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
+const columns = new Set(rows.map(row => row.column_name));
+for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
+}
+-    const source = readFileSync('lib/postgres.ts', 'utf8');
+-    assert.match(source, /version: 5, statements: adminUpgradeStatements/);
+-    assert.match(source, /\[5, adminUpgradeStatements\]/);
+-    assert.match(source, /version: 6, statements: adminUsersUpgradeStatements/);
+-    assert.match(source, /version: 7, statements: adminContentUpgradeStatements/);
+-    assert.match(source, /\[7, adminContentUpgradeStatements\]/);
+-    assert.match(source, /\[6, adminUsersUpgradeStatements\]/);
++    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8]);
++    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+} finally { await db.close(); }
+});
+
+@@ -181,7 +176,7 @@ test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 7'
+await client.query('CREATE SCHEMA admin_phase_one_test');
+await client.query('SET LOCAL search_path TO admin_phase_one_test');
+for (const sql of old) await client.query(sql);
+-    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await client.query(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await client.query(sql);
+assert.equal(Number((await client.query('SELECT COUNT(*) FROM app_settings')).rows[0].count), 0);
+} finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
+});
+@@ -190,7 +185,7 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
+const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
+try {
+await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
+-    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await pool.query(sql);
++    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await pool.query(sql);
+await user(pool, 'first', 'user');
+await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
+assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);
+diff --git a/tests/appearance.test.ts b/tests/appearance.test.ts
+index 7648a7b..d89804e 100644
+--- a/tests/appearance.test.ts
++++ b/tests/appearance.test.ts
+@@ -42,7 +42,7 @@ test('appearance body has an explicit bounded size without raising the existing
+});
+test('appearance save authorizes, verifies image ownership, audits atomically, and retains approved branding across admins',async()=>{
+const db=new PGlite();try{
+- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements])await db.exec(sql);
++ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements])await db.exec(sql);
+const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return{rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
+for(const [id,role]of [['admin','admin'],['other','admin'],['user','user']]){await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified")VALUES($1,$1,$2,$3,true)',[id,id+'@test.example',role]);await pool.query('INSERT INTO profiles(id,username,name,created_at)VALUES($1,$1,$1,1)',[id]);}
+await assert.rejects(saveAppearance(pool,'user',copy()),{status:403});
+diff --git a/tests/media.test.ts b/tests/media.test.ts
+new file mode 100644
+index 0000000..6e7c020
+<a href="../../../../dev/null">---</a>
++++ b/tests/media.test.ts
+@@ -0,0 +1,91 @@
++import assert from 'node:assert/strict';
++import {test,before,after} from 'node:test';
++import {readFileSync} from 'node:fs';
++import {PGlite} from '@electric-sql/pglite';
++import sharp from 'sharp';
++import * as schema from '../lib/postgres-schema';
++import {DATABASE_MIGRATIONS} from '../lib/postgres';
++import {serializedPool} from '../lib/serialized-pool';
++import {DEFAULT_MEDIA,validateMedia,mediaConfig,MIB} from '../lib/media-config';
++import {saveSetting} from '../lib/admin/core';
++import {reserveClaim,finishWithStore,type UploadStore} from '../lib/uploads';
++import {processMedia,readBounded} from '../lib/media-processing';
++import {checkAssets,commitMediaUse} from '../lib/media-policy';
++import {changeMedia,purgeMedia,mediaReport,reconcileReservation,mediaFilters} from '../lib/admin/media';
++import {localAssetPath} from '../lib/media-storage';
++const db=new PGlite();const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
++const legacyKey=crypto.randomUUID();
++async function user(id:string,role='user'){await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified") VALUES($1,$1,$2,$3,true)',[id,id+'@example.test',role]);await pool.query("INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,'','',0,1)",[id]);}
++async function config(patch:Partial<typeof DEFAULT_MEDIA>={}){const value={...DEFAULT_MEDIA,...patch};await saveSetting(pool,'admin','media.config',JSON.stringify(value));return value;}
++async function asset(owner='member',extra:{size?:number;source?:number;status?:string}={}){const key=crypto.randomUUID();await pool.query("INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,source_retained_bytes,status) VALUES($1,$2,$2,'image/jpeg',$3,$4,'local',$5,$6)",[key,owner,extra.size??100,Date.now(),extra.source??0,extra.status??'ready']);return key;}
++const operation=(key:string,action:string)=>({key,action,confirmation:key,reason:'Test quarantine'});
++let photo:Buffer;
++before(async()=>{
++ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements])await db.exec(sql);
++ await user('admin','admin');await user('owner','owner');await user('member');
++ await db.query("INSERT INTO assets(key,owner_id,mime,size,created_at,blob_url) VALUES($1,'member','image/jpeg',100,1,'local')",[legacyKey]);
++ await db.query("INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,'member',100,'image/jpeg',1)",[legacyKey]);
++ for(let pass=0;pass<2;pass++)for(const sql of schema.mediaUpgradeStatements)await db.exec(sql);
++ photo=await sharp({create:{width:2400,height:1200,channels:3,background:'#fc1234'}}).jpeg().toBuffer();
++});
++after(async()=>{await db.close();});
++test('migration 8 is additive, repeatable and present in both runtime registries',async()=>{
++ const row=(await pool.query('SELECT * FROM assets WHERE key=$1',[legacyKey])).rows[0];assert.equal(row.size,100);assert.equal(row.status,'ready');assert.equal(row.storage_owner,'member');assert.equal(row.verified,true);const claim=(await pool.query('SELECT completed,completed_at FROM upload_claims WHERE key=$1',[legacyKey])).rows[0];assert.equal(claim.completed,true);assert.equal(claim.completed_at,1);
++ const migration=DATABASE_MIGRATIONS.find(row=>row.version===8);assert.ok(migration);assert.equal(migration.statements,schema.mediaUpgradeStatements);
++ const target=new PGlite();try{await target.query('CREATE TABLE functiongram_migrations(version integer PRIMARY KEY,applied_at timestamptz DEFAULT now())');for(let pass=0;pass<2;pass++)for(const item of DATABASE_MIGRATIONS){for(const sql of item.statements)await target.exec(sql);await target.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING',[item.version]);}const rows=await target.query('SELECT version FROM functiongram_migrations ORDER BY version');assert.deepEqual((rows.rows as {version:number}[]).map(row=>row.version),DATABASE_MIGRATIONS.map(row=>row.version));}finally{await target.close();}
++});
++test('media settings are strict and inherit Phase 1 limits until a new config is explicitly published',()=>{
++ assert.equal(mediaConfig({'upload.maxFileMb':50,'upload.dailyQuotaMb':100}).maxFileMb,50);
++ for(const patch of [{maxFileMb:101},{dailyQuotaMb:0},{maxMedia:21},{imageQuality:0},{imageMaxDimension:9000},{videoMaxSeconds:-1},{allowedTypes:['image/svg+xml']},{allowedTypes:['image/png'],imageFormat:'jpeg'}])assert.throws(()=>validateMedia({...DEFAULT_MEDIA,...patch}));
++ assert.equal(mediaConfig({'media.config':'broken'}).enabled,false);
++});
++test('parallel reservations enforce quota with expiring holds; settings use current values',async()=>{
++ await user('quota');await config({dailyQuotaMb:1});
++ const keys=[crypto.randomUUID(),crypto.randomUUID()];const attempts=await Promise.allSettled(keys.map(key=>reserveClaim(pool,key,'quota',JSON.stringify({size:600000,type:'image/jpeg'}))));assert.equal(attempts.filter(r=>r.status==='fulfilled').length,1);
++ await pool.query('UPDATE upload_claims SET created_at=$1 WHERE owner_id=$2',[Date.now()-7200000,'quota']);await reserveClaim(pool,crypto.randomUUID(),'quota',JSON.stringify({size:600000,type:'image/jpeg'}));
++ await config({enabled:false});await assert.rejects(reserveClaim(pool,crypto.randomUUID(),'quota',JSON.stringify({size:100,type:'image/jpeg'})),{status:403});await config();
++});
++test('server accepts a real 40 MiB transfer at 50 MiB, rejects above the limit and rechecks cached large assets',async()=>{
++ await user('large');const c=await config({maxFileMb:50});const key=crypto.randomUUID();const bytes=Buffer.alloc(40*MIB);readFileSync('public/media/flowers.mp4').copy(bytes);
++ let stored:Buffer|undefined;const store:UploadStore={async inspect(){return {url:'source',size:bytes.length};},async read(){return bytes;},async write(_key,media){stored=media.bytes;return 'stored';},async remove(){}};
++ await reserveClaim(pool,key,'large',JSON.stringify({size:bytes.length,type:'video/mp4'}));const done=await finishWithStore(pool,key,'large',store);assert.equal(done.type,'video/mp4');assert.equal(stored?.length,40*MIB);
++ await assert.rejects(reserveClaim(pool,crypto.randomUUID(),'large',JSON.stringify({size:50*MIB+1,type:'video/mp4'})),{status:400});
++ assert.equal((await checkAssets(pool,[done.url],['large'],c)).length,1);const smaller=await config({maxFileMb:20});await assert.rejects(checkAssets(pool,[done.url],['large'],smaller),{status:400});await config();
++});
++test('server image transform controls dimensions, MIME, encoding quality and strips metadata',async()=>{
++ const c={...DEFAULT_MEDIA,imageFormat:'webp' as const,imageMaxDimension:640,imageQuality:70};const output=await processMedia(photo,'image/jpeg',c);assert.equal(output.mime,'image/webp');assert.equal(output.width,640);assert.equal(output.height,320);assert.ok(output.bytes.length<photo.length);assert.equal((await sharp(output.bytes).metadata()).exif,undefined);
++ await assert.rejects(processMedia(Buffer.from([255,216,255,0,0]),'image/jpeg',c));const gif=await sharp({create:{width:1600,height:800,channels:3,background:'#00ff00'}}).gif().toBuffer();const animated=await processMedia(gif,'image/gif',{...DEFAULT_MEDIA,imageMaxDimension:400});assert.equal(animated.mime,'image/gif');assert.equal(animated.width,400);assert.equal((await sharp(animated.bytes,{animated:true}).metadata()).format,'gif');
++ const video=readFileSync('public/media/flowers.mp4');await assert.rejects(processMedia(video,'video/mp4',{...DEFAULT_MEDIA,videoMaxSeconds:1}));assert.ok((await processMedia(video,'video/mp4',{...DEFAULT_MEDIA,videoMaxSeconds:60})).duration!>1);
++ let cancelled=false;const stream=new ReadableStream<Uint8Array>({pull(controller){controller.enqueue(new Uint8Array(100));},cancel(){cancelled=true;}});await assert.rejects(readBounded(stream,50),{status:413});assert.ok(cancelled);
++});
++test('failed decoding quarantines bytes, while successful completion is idempotent and charges original bytes',async()=>{
++ await user('processing');await config();let data=photo;let removed=0;const store:UploadStore={async inspect(){return {url:'source',size:data.length};},async read(){return data;},async write(){return 'output';},async remove(){removed++;}};
++ const key=crypto.randomUUID();await reserveClaim(pool,key,'processing',JSON.stringify({size:photo.length,type:'image/jpeg'}));const first=await finishWithStore(pool,key,'processing',store);assert.equal(first.aspect,2);assert.equal(removed,1);assert.deepEqual(await finishWithStore(pool,key,'processing',store),first);
++ const row=(await pool.query('SELECT * FROM assets WHERE key=$1',[key])).rows[0];assert.equal(row.source_size,photo.length);assert.equal(row.source_retained_bytes,0);assert.equal((await pool.query('SELECT expected_size FROM upload_claims WHERE key=$1',[key])).rows[0].expected_size,photo.length);
++ data=Buffer.from([255,216,255,0,1,2,3]);const bad=crypto.randomUUID();await reserveClaim(pool,bad,'processing',JSON.stringify({size:data.length,type:'image/jpeg'}));await assert.rejects(finishWithStore(pool,bad,'processing',store));const blocked=(await pool.query('SELECT status,verified FROM assets WHERE key=$1',[bad])).rows[0];assert.equal(blocked.status,'quarantined');assert.equal(blocked.verified,false);await assert.rejects(changeMedia(pool,'admin',operation(bad,'release')));assert.equal(removed,1,'quarantined source remains inventoried');
++});
++test('orphans exclude posts, trashed posts, avatars and branding; totals match a manual sum',async()=>{
++ await config();const orphan=await asset('member',{size:40,source:60}),post=await asset(),avatar=await asset(),brand=await asset();
++ await pool.query("INSERT INTO posts(id,author_id,media,created_at,deleted_at) VALUES('protected-media','member',$1,1,1)",[JSON.stringify(['/api/media/'+post])]);await pool.query('UPDATE profiles SET avatar=$1 WHERE id=$2',['/api/media/'+avatar,'member']);
++ await saveSetting(pool,'admin','brand.logoUrlLight','/api/media/'+brand);
++ const report=await mediaReport(pool,{status:'orphans'});const keys=report.items.map(row=>row.key);assert.ok(keys.includes(orphan));for(const key of [post,avatar,brand]){assert.ok(!keys.includes(key));await assert.rejects(changeMedia(pool,'admin',operation(key,'trash')));}
++ const manual=(await pool.query('SELECT SUM(size+source_retained_bytes) bytes,COUNT(*) total FROM assets')).rows[0];assert.equal(Number(report.summary.bytes),Number(manual.bytes));assert.equal(Number(report.summary.assets),Number(manual.total));
++ assert.throws(()=>mediaFilters({sort:'size;DROP TABLE assets'}));assert.throws(()=>mediaFilters({page:10001}));
++});
++test('quarantine and attach share state; admin cannot purge; owner purges with retry-safe markers',async()=>{
++ const c=await config();const key=await asset();await changeMedia(pool,'admin',operation(key,'quarantine'));await assert.rejects(checkAssets(pool,['/api/media/'+key],['member'],c));await changeMedia(pool,'admin',operation(key,'release'));
++ await changeMedia(pool,'admin',operation(key,'trash'));await assert.rejects(purgeMedia(pool,'admin',operation(key,'purge'),async()=>{}),{status:403});await changeMedia(pool,'admin',operation(key,'restore'));
++ await changeMedia(pool,'admin',operation(key,'quarantine'));await changeMedia(pool,'admin',operation(key,'trash'));await changeMedia(pool,'admin',operation(key,'restore'));assert.equal((await pool.query('SELECT status FROM assets WHERE key=$1',[key])).rows[0].status,'quarantined');
++ await changeMedia(pool,'admin',operation(key,'trash'));await assert.rejects(purgeMedia(pool,'owner',operation(key,'purge'),async()=>{throw new Error('storage offline');}),{status:503});assert.equal((await pool.query('SELECT status FROM assets WHERE key=$1',[key])).rows[0].status,'purging');
++ await assert.rejects(commitMediaUse(pool,['/api/media/'+key],['member'],c,[]));await purgeMedia(pool,'owner',operation(key,'purge'),async()=>{});assert.equal((await pool.query('SELECT * FROM assets WHERE key=$1',[key])).rows.length,0);
++});
++test('media state and audit changes roll back together; deleted accounts retain inventory for cleanup',async()=>{
++ const key=await asset();await db.exec(`CREATE FUNCTION reject_media_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action LIKE 'media.%' THEN RAISE EXCEPTION 'synthetic failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_media_audit BEFORE INSERT ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_media_audit()`);
++ await assert.rejects(changeMedia(pool,'admin',operation(key,'quarantine')));assert.equal((await pool.query('SELECT status FROM assets WHERE key=$1',[key])).rows[0].status,'ready');await db.exec('DROP TRIGGER reject_media_audit ON admin_audit_log');
++ await user('deleted');const owned=await asset('deleted');await pool.query('DELETE FROM profiles WHERE id=$1',['deleted']);const row=(await pool.query('SELECT owner_id,storage_owner FROM assets WHERE key=$1',[owned])).rows[0];assert.equal(row.owner_id,null);assert.equal(row.storage_owner,'deleted');
++});
++test('expired upload reconciliation creates unverified quarantine, not silently trusted content',async()=>{
++ const key=crypto.randomUUID();await reserveClaim(pool,key,'member',JSON.stringify({size:100,type:'image/jpeg'}));await assert.rejects(reconcileReservation(pool,'admin',operation(key,'reconcile'),async()=>({url:'local',size:100})));
++ await pool.query('UPDATE upload_claims SET created_at=$1 WHERE key=$2',[Date.now()-7200000,key]);await reconcileReservation(pool,'admin',operation(key,'reconcile'),async()=>({url:'local-source:'+key,size:100}));assert.equal((await pool.query('SELECT verified FROM assets WHERE key=$1',[key])).rows[0].verified,false);
++ assert.equal(localAssetPath(key,'local-processed:'+key+'-1234567890123'),'.local/uploads/'+key+'-1234567890123');assert.throws(()=>localAssetPath(key,'local-processed:../../secrets'));
++});
