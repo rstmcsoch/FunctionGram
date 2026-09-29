@@ -1,0 +1,1862 @@
+diff --git a/.gitattributes b/.gitattributes
+index 642c971..0719854 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -1,2 +1,3 @@
+ patches/*.patch diff linguist-generated
+ FunctionGram-Phase-2-Users.patch text diff
++FunctionGram-Phase-3-Content.patch text diff
+diff --git a/app/api/admin/route.ts b/app/api/admin/route.ts
+index 0762464..1ba0191 100644
+--- a/app/api/admin/route.ts
++++ b/app/api/admin/route.ts
+@@ -1,3 +1,5 @@
++import { contentDetail, contentFilters, contentResource, listContent, moderateContent } from '@/lib/admin/content';
++import { writeSetting, readSettings } from '@/lib/admin/settings';
+ import { adminRoute } from '@/lib/admin/route';
+ import { getPool } from '@/lib/postgres';
+ import { getAuth } from '@/lib/auth';
+@@ -12,6 +14,12 @@ export const GET = adminRoute(async request => {
+   const params = new URL(request.url).searchParams;
+   if (params.get('ping') === '1') return Response.json({ ok: true });
+   const db = await getPool();
++  if (params.get('resource') === 'content') {
++    const resource=contentResource(params.get('type') || 'posts');
++    if(params.get('id'))return Response.json(await contentDetail(db,resource,params.get('id')!));
++    return Response.json(await listContent(db,contentFilters({...Object.fromEntries(params),resource})));
++  }
++  if(params.get('resource')==='contentSettings')return Response.json(await readSettings());
+   if (params.get('resource') === 'users') return Response.json(await listUsers(db, userFilters(Object.fromEntries(params))));
+   if (params.get('resource') === 'user' && params.get('id')) return Response.json(await userDetail(db, params.get('id')!));
+   return Response.json({ error: 'Unknown admin action.' }, { status: 400 });
+@@ -19,6 +27,11 @@ export const GET = adminRoute(async request => {
+ export const POST = adminRoute(async (request, actor) => {
+   const body = await adminBody(request);
+   const pool = await getPool();
++  if(body.action==='moderateContent')return Response.json(await moderateContent(pool,actor.userId,body));
++  if(body.action==='contentSetting'){
++    if(typeof body.key!=='string'||!body.key.startsWith('content.'))return Response.json({error:'Unknown content setting.'},{status:400});
++    await writeSetting(body.key,body.value,request);return Response.json({ok:true});
++  }
+   if (body.action === 'exportUsers') {
+     const filters = userFilters(body);
+     const result = await listUsers(pool, filters);
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 2e4e320..056290d 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -1,4 +1,9 @@
+-import { AppError,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
++import { checkReelDuration } from '@/lib/reel-duration';
++import { AdminError } from '@/lib/admin/validation';
++import { visibleComment, visiblePost, readablePost } from '@/lib/content-visibility';
++import { loadSettings } from '@/lib/admin/core';
++import { getPool } from '@/lib/postgres';
++import { AppError,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+ import type {MediaOption} from '@/lib/types';
+ export const dynamic='force-dynamic';
+ 
+@@ -18,14 +23,14 @@ function parseCursor(value:string|null):[number,string]|null{
+ export async function GET(request:Request){try{
+   const query=new URL(request.url).searchParams;
+   const headers=requestHeadersWithHost(request);
+-  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([db().prepare('SELECT n.*,p.username,p.avatar,(SELECT media FROM posts WHERE id=n.post_id) media,(SELECT media_type FROM posts WHERE id=n.post_id) media_type FROM notifications n JOIN profiles p ON p.id=n.actor_id WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 100').bind(viewer).all(),db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL').bind(viewer,viewer).first<{count:number}>()]);return json({notifications:notifs.results,unreadMessages:unread?.count||0});}
++  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>()]);return json({notifications:notifs.results,unreadMessages:unread?.count||0});}
+   if(query.has('comments')){
+     const postId=clean(query.get('comments'),100,true);
+     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
+     const cursor=parseCursor(query.get('cursor'));
+-    const post=await db().prepare('SELECT id FROM posts WHERE id=? AND (expires_at IS NULL OR expires_at>?)').bind(postId,Date.now()).first();
++    const post=await availablePost(await identity(headers),postId);
+     if(!post)throw new AppError('Post not found.',404);
+-    let sql='SELECT c.*,p.username,p.avatar FROM comments c JOIN profiles p ON p.id=c.author_id WHERE c.post_id=?';
++    let sql=`SELECT c.*,p.username,p.avatar FROM comments c JOIN profiles p ON p.id=c.author_id WHERE c.post_id=? AND ${visibleComment()}`;
+     const args:unknown[]=[postId];
+     if(cursor){sql+=' AND (c.created_at>? OR (c.created_at=? AND c.id>?))';args.push(cursor[0],cursor[0],cursor[1]);}
+     sql+=' ORDER BY c.created_at,c.id LIMIT ?';args.push(limit+1);
+@@ -37,15 +42,15 @@ export async function GET(request:Request){try{
+   if(query.has('messages')){const user=await identity(headers,true);const other=clean(query.get('messages'),100,true);
+     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
+     const cursor=parseCursor(query.get('cursor'));
+-    let sql='SELECT * FROM messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)';
+-    const args:unknown[]=[user,other,other,user];
++    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
++    const args:unknown[]=[user,user,user,user,other,other,user];
+     if(cursor){sql+=' AND (created_at<? OR (created_at=? AND id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
+     sql+=' ORDER BY created_at DESC,id DESC LIMIT ?';args.push(limit+1);
+     const rows=(await db().prepare(sql).bind(...args).all()).results;
+     const items=rows.slice(0,limit);
+     const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
+     return json({items,next_cursor});}
+-  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare('SELECT * FROM messages WHERE sender_id=? OR recipient_id=? ORDER BY created_at DESC,id DESC LIMIT 500').bind(user,user).all();return json(r.results);}
++  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${readablePost()}) THEN m.post_id ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
+   if(query.has('person'))return json(await person(await identity(headers),clean(query.get('person'),100,true)));
+   if(query.has('highlights'))return json(await highlights(await identity(headers),clean(query.get('highlights'),100,true)));
+   if(query.has('tagged'))return json(await feed(await identity(headers),300,0,{tagged:clean(query.get('tagged'),100,true)}));
+@@ -73,16 +78,16 @@ export async function GET(request:Request){try{
+   if(query.has('relations')){const id=clean(query.get('relations'),100,true);const kind=query.get('kind');if(kind!=='followers'&&kind!=='following')throw new AppError('Invalid relationship.');return json(await relatedPeople(await identity(headers),id,kind));}
+   if(query.has('collections')){const user=await identity(headers,true);return json(await savedCollections(user!));}
+   if(query.has('story-viewers')){const user=await identity(headers,true);const storyId=clean(query.get('story-viewers'),100,true);
+-    const story=await db().prepare("SELECT id,author_id FROM posts WHERE id=? AND kind='story'").bind(storyId).first();
++    const story=await availablePost(user,storyId);
+     if(!story)throw new AppError('Story not found.',404);
+     // A 404 (rather than 403) keeps the list's very existence private.
+-    if(story.author_id!==user)throw new AppError('Story not found.',404);
++    if(story.author_id!==user||story.kind!=='story')throw new AppError('Story not found.',404);
+     return json(await storyViewers(user!,storyId));}
+   if(query.has('messages_search')){const user=await identity(headers,true);const term=clean(query.get('messages_search'),80,true);
+     if(term.length<2)throw new AppError('Type at least two characters.');
+     return json(await messageSearch(user!,term));}
+   return json(await bootstrap(headers));
+-}catch(error){return fail(error);}}
++}catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}}
+ 
+ const categories=['For you','Travel','Nature','Photography','Architecture','Lifestyle'];
+ const reportReasons=['spam','harassment','false_information','misleading','inappropriate','other'];
+@@ -105,14 +110,14 @@ function aspectRatios(value:unknown,length:number):number[]|null{
+ function taggedUsers(value:unknown,database:ReturnType<typeof db>):Promise<string[]>|string[]{
+   const tags=value??[];
+   if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
+-  return Promise.all(tags.map(async tagged=>{if(!await database.prepare('SELECT id FROM profiles WHERE id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');return tagged;}));
++  return Promise.all(tags.map(async tagged=>{if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');return tagged;}));
+ }
+ export async function POST(request:Request){try{
+   sameOrigin(request);const user=(await identity(requestHeadersWithHost(request),true))!;const input=await readBody(request);const action=clean(input.action,40,true);const database=db();
+   const id=typeof input.id==='string'?clean(input.id,100):'';const now=Date.now();
+   if(action==='reaction'){
+     const kind=clean(input.kind,20,true);if(!['like','save','seen','hidden'].includes(kind)||typeof input.active!=='boolean')throw new AppError('Invalid action.');
+-    const post=await database.prepare('SELECT author_id FROM posts WHERE id=? AND (expires_at IS NULL OR expires_at>?)').bind(id,now).first<{author_id:string}>();if(!post)throw new AppError('This post is no longer available.',404);
++    const post=await availablePost(user,id);if(!post)throw new AppError('This post is no longer available.',404);
+     const statements=[input.active?database.prepare('INSERT OR IGNORE INTO reactions (user_id,post_id,kind) VALUES (?,?,?)').bind(user,id,kind):database.prepare('DELETE FROM reactions WHERE user_id=? AND post_id=? AND kind=?').bind(user,id,kind)];
+     if(kind==='like'&&user!==post.author_id){const notificationId='like:'+user+':'+id;statements.push(input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(notificationId,post.author_id,user,'like',id,now):database.prepare('DELETE FROM notifications WHERE id=?').bind(notificationId));}
+     await database.batch(statements);
+@@ -128,21 +133,21 @@ export async function POST(request:Request){try{
+   }
+   if(action==='follow'){
+     if(id===user||typeof input.active!=='boolean')throw new AppError('Choose another profile.');
+-    if(!await database.prepare('SELECT id FROM profiles WHERE id=?').bind(id).first())throw new AppError('Profile not found.',404);
++    if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(id).first())throw new AppError('Profile not found.',404);
+     await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
+   }
+   if(action==='comment'){
+-    const body=clean(input.body,1000,true);const post=await database.prepare('SELECT author_id FROM posts WHERE id=? AND (expires_at IS NULL OR expires_at>?)').bind(id,now).first<{author_id:string}>();if(!post)throw new AppError('Post not found.',404);
++    const body=clean(input.body,1000,true);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
+     const commentId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO comments (id,post_id,author_id,body,created_at) VALUES (?,?,?,?,?)').bind(commentId,id,user,body,now)];
+     if(user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
+     await database.batch(stmts);const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
+     return json({id:commentId,post_id:id,author_id:user,body,created_at:now,username:author?.username||'',avatar:author?.avatar||''});
+   }
+   if(action==='delete_comment'){
+-    const comment=await database.prepare('SELECT c.*,p.author_id post_author FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id=?').bind(id).first<{author_id:string;post_author:string}>();
++    const comment=await database.prepare(`SELECT c.*,p.author_id post_author FROM comments c JOIN posts p ON p.id=c.post_id WHERE c.id=? AND ${visibleComment()} AND ${visiblePost()}`).bind(id).first<{author_id:string;post_author:string}>();
+     if(!comment)throw new AppError('Comment not found.',404);
+     if(comment.author_id!==user&&comment.post_author!==user)throw new AppError('You can only delete your own comments, or comments on your posts.',403);
+-    const result=await database.prepare('DELETE FROM comments WHERE id=?').bind(id).run();
++    const result=await database.prepare('UPDATE comments SET deleted_at=? WHERE id=?').bind(now,id).run();
+     if(!result.meta.changes)throw new AppError('Comment not found.',404);
+     return json({ok:true});
+   }
+@@ -155,24 +160,27 @@ export async function POST(request:Request){try{
+     await database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user).run();return json({ok:true});
+   }
+   if(action==='create_post'){
++    const contentSettings=await loadSettings(await getPool());
+     const kind=clean(input.kind,10,true);if(!['post','reel','story'].includes(kind))throw new AppError('Choose a post, story, or reel.');
++    if(kind==='reel'&&!contentSettings['content.reelsEnabled'])throw new AppError('Reels are currently paused.',403);
+     const caption=clean(input.caption,2200),location=clean(input.location,100);const media=input.media;
+     if(!Array.isArray(media)||media.length<1||media.length>6||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Add up to 6 photos or one video.');
+     const options=mediaOptions(input.media_options,media.length);
+     const tags=input.tagged_users??[];if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
+-    for(const tagged of tags){if(!await database.prepare('SELECT id FROM profiles WHERE id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');}
++    for(const tagged of tags){if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');}
+     const category=clean(input.category||'For you',50);if(!categories.includes(category))throw new AppError('Choose a valid category.');
+     const types:string[]=[];for(const url of media){const asset=await database.prepare('SELECT mime FROM assets WHERE key=? AND owner_id=?').bind(url.replace('/api/media/',''),user).first<{mime:string}>();if(!asset)throw new AppError('One of your uploads is unavailable. Please upload it again.');types.push(asset.mime);}
+     const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. A photo post can include up to 6 images.');
++    if(kind==='reel')await checkReelDuration(await getPool(),media,contentSettings['content.reelMaxSeconds']);
+     // Optional per-item aspect ratios (width/height) let the feed render media
+     // at its true size without cropping or layout shift.
+     const ratios=aspectRatios(input.aspects,media.length);
+-    const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+86400000:null,ratios?JSON.stringify(ratios):null)];
++    const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+contentSettings['content.storyHours']*3600000:null,ratios?JSON.stringify(ratios):null)];
+     for(const tagged of tags){if(tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
+     await database.batch(stmts);return json({id:postId});
+   }
+   if(action==='update_post'){
+-    const post=await database.prepare('SELECT id,author_id,media,caption,location FROM posts WHERE id=?').bind(id).first<{id:string;author_id:string;media:string;caption:string;location:string}>();
++    const post=await availablePost(user,id);
+     if(!post)throw new AppError('Post not found.',404);
+     if(post.author_id!==user)throw new AppError('You can only edit your own posts.',403);
+     const caption=clean(input.caption??post.caption,2200),location=clean(input.location??post.location,100),category=clean(input.category||'For you',50);
+@@ -188,21 +196,21 @@ export async function POST(request:Request){try{
+   }
+   if(action==='highlight'){
+     if(typeof input.active!=='boolean')throw new AppError('Invalid action.');
+-    const story=await database.prepare("SELECT id FROM posts WHERE id=? AND author_id=? AND kind='story'").bind(id,user).first();if(!story)throw new AppError('Only your stories can be highlighted.',403);
++    const story=await database.prepare(`SELECT id FROM posts p WHERE id=? AND author_id=? AND kind='story' AND ${visiblePost()}`).bind(id,user).first();if(!story)throw new AppError('Only your stories can be highlighted.',403);
+     await (input.active?database.prepare('INSERT OR IGNORE INTO story_highlights(post_id,owner_id,created_at) VALUES(?,?,?)').bind(id,user,now):database.prepare('DELETE FROM story_highlights WHERE post_id=? AND owner_id=?').bind(id,user)).run();return json({ok:true});
+   }
+-  if(action==='delete_post'){const result=await database.prepare('DELETE FROM posts WHERE id=? AND author_id=?').bind(id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
++  if(action==='delete_post'){await availablePost(user,id);const result=await database.prepare('UPDATE posts SET deleted_at=? WHERE id=? AND author_id=?').bind(now,id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
+   if(action==='message'){
+     const body=clean(input.body,2000,true);
+     // Story replies address the story's author through its post id.
+     let recipientId=id;
+     const storyPostId=typeof input.post_id==='string'?clean(input.post_id,100):'';
+     if(storyPostId){
+-      const story=await database.prepare("SELECT author_id FROM posts WHERE id=? AND kind='story' AND (expires_at IS NULL OR expires_at>?)").bind(storyPostId,now).first<{author_id:string}>();
+-      if(!story)throw new AppError('This story is no longer available.',404);
++      const story=await availablePost(user,storyPostId);
++      if(!story||story.kind!=='story')throw new AppError('This story is no longer available.',404);
+       recipientId=story.author_id;
+     }
+-    const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE id=?').bind(recipientId).first<{id:string;is_demo:number}>();
++    const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(recipientId).first<{id:string;is_demo:number}>();
+     if(!recipient)throw new AppError('Profile not found.',404);
+     if(recipient.is_demo)throw new AppError('This is a sample profile. You can message real members or save a note to yourself.');
+     // A block cuts off the blocked person's messages to the blocker.
+@@ -225,7 +233,7 @@ export async function POST(request:Request){try{
+   }
+   if(action==='block'){
+     if(id===user)throw new AppError('Choose another profile.');
+-    if(!await database.prepare('SELECT id FROM profiles WHERE id=?').bind(id).first())throw new AppError('Profile not found.',404);
++    if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(id).first())throw new AppError('Profile not found.',404);
+     await database.batch([
+       database.prepare('INSERT OR IGNORE INTO blocked_users (blocker_id,blocked_id,created_at) VALUES (?,?,?)').bind(user,id,now),
+       // Blocking also removes the follow relationship in both directions.
+@@ -246,10 +254,10 @@ export async function POST(request:Request){try{
+     if(!reportReasons.includes(reason))throw new AppError('Choose a reason for the report.');
+     const details=clean(input.details||'',1000);
+     if(targetType==='post'){
+-      const post=await database.prepare('SELECT id FROM posts WHERE id=?').bind(targetId).first();
++      const post=await availablePost(user,targetId);
+       if(!post)throw new AppError('Post not found.',404);
+     }else{
+-      const profile=await database.prepare('SELECT id FROM profiles WHERE id=?').bind(targetId).first();
++      const profile=await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(targetId).first();
+       if(!profile)throw new AppError('Profile not found.',404);
+     }
+     // One report per reporter, target and reason: re-submitting is a no-op.
+@@ -284,8 +292,8 @@ export async function POST(request:Request){try{
+     const collection=await database.prepare('SELECT id FROM saved_collections WHERE id=? AND owner_id=?').bind(collectionId,user).first();
+     if(!collection)throw new AppError('Collection not found.',404);
+     if(active){
+-      const post=await database.prepare("SELECT id FROM posts WHERE id=? AND kind!='story' AND (expires_at IS NULL OR expires_at>?)").bind(postId,now).first();
+-      if(!post)throw new AppError('This post is no longer available.',404);
++      const post=await availablePost(user,postId);
++      if(!post||post.kind==='story')throw new AppError('This post is no longer available.',404);
+       await database.batch([
+         database.prepare('INSERT OR IGNORE INTO saved_collection_items (collection_id,post_id,created_at) VALUES (?,?,?)').bind(collectionId,postId,now),
+         // Keep the saved tab consistent with the collections.
+@@ -297,4 +305,4 @@ export async function POST(request:Request){try{
+     return json({ok:true});
+   }
+   throw new AppError('Unknown action.');
+-}catch(error){return fail(error);}}
++}catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}}
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 099db08..81ff657 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -13,3 +13,8 @@
+ @media(max-width:700px){.admin-shell{padding:12px}.admin-header{padding:12px 16px;border-radius:20px}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-main{padding:24px 0}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
+ 
+ .admin-confirm-dialog>button{min-width:44px;min-height:44px;top:4px;right:4px;display:grid;place-items:center}
++.admin-content-editor select{min-height:44px;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}
++.content-checkbox{display:flex;align-items:center;justify-content:center;min-height:44px;min-width:44px}.admin-shell .content-checkbox input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
++.content-media{min-width:0;border:0;padding:0}.content-media p{color:var(--muted-foreground);margin:12px 0}.content-media-item{padding:12px 0;border-bottom:1px solid var(--border)}.content-media-item img,.content-media-item video{max-width:100%;width:auto;max-height:320px;object-fit:contain;background:var(--secondary);border-radius:12px}.content-media-item code,.admin-content-editor code{overflow-wrap:anywhere;word-break:break-word;display:block;font-size:12px}.admin-content-editor textarea{min-height:120px}.admin-content-editor .admin-button{align-self:start}
++
++.admin-content-fields{min-width:0;border:0;margin:0;padding:0}
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+new file mode 100644
+index 0000000..c58e6b1
+--- /dev/null
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -0,0 +1,22 @@
++import Link from 'next/link';
++import { notFound } from 'next/navigation';
++import { requireAdminPage } from '@/lib/admin/guard';
++import { getPool } from '@/lib/postgres';
++import { contentDetail, contentResource } from '@/lib/admin/content';
++import { AdminError } from '@/lib/admin/validation';
++import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { ContentActions, ContentEditor } from '@/components/admin/content';
++
++export default async function ContentItem({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{resource?:string}>}) {
++  const actor=await requireAdminPage();const {id}=await params;const query=await searchParams;
++  let resource;try{resource=contentResource(query.resource||'posts');}catch{notFound();}
++  const item=await contentDetail(await getPool(),resource,id).catch(error=>{if(error instanceof AdminError&&error.status===404)notFound();throw error;});
++  const operations=item.deleted_at?['restore',...actor.role==='owner'?['purge']:[]]:['hide','unhide','delete',...resource==='posts'?['pin','unpin',...item.kind==='story'?['expire','highlight']:[]]:[]];
++  const counts=item.counts as Record<string,unknown>|undefined;
++  return <><p className="admin-eyebrow">Control room / {resource}</p><h1>{resource==='posts'?String(item.kind)+' detail':'Comment detail'}</h1><p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
++    <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
++    {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
++    <section className="admin-card"><h2>Moderation actions</h2><ContentActions ids={[id]} resource={resource} operations={operations}/></section>
++    <section className="admin-card"><h2>{item.deleted_at?'Preview (trashed)':'Edit content'}</h2>{!!item.deleted_at&&<p>Restore before editing. Restoration preserves any moderation hide. Purged media files are not automatically deleted from storage.</p>}<fieldset className="admin-content-fields" disabled={!!item.deleted_at}><ContentEditor key={String(item.edited_at)+String(item.body)} item={item} resource={resource}/></fieldset></section>
++  </>;
++}
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+new file mode 100644
+index 0000000..89f400a
+--- /dev/null
++++ b/app/rstmcadmin/content/page.tsx
+@@ -0,0 +1,25 @@
++import Link from 'next/link';
++import { requireAdminPage } from '@/lib/admin/guard';
++import { getPool } from '@/lib/postgres';
++import { contentFilters, listContent } from '@/lib/admin/content';
++import { readSettings } from '@/lib/admin/settings';
++import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { ContentSettings, ContentTable } from '@/components/admin/content';
++
++export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
++  await requireAdminPage();let filter;
++  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
++  const data=await listContent(await getPool(),filter);const settings=await readSettings();const base=ADMIN_BASE_PATH+'/content';
++  const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
++  return <><p className="admin-eyebrow">Control room / Content</p><h1>Content & moderation</h1><p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
++    <ContentSettings settings={settings}/><form className="admin-search" action={base}>
++      <label>Search text<input name="q" maxLength={100} defaultValue={filter.q}/></label><label>Resource<select name="resource" defaultValue={filter.resource}><option value="posts">Posts, reels, stories</option><option value="comments">Comments</option></select></label>
++      <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
++      <label>Status<select name="status" defaultValue={filter.status}>{['all','visible','hidden','trash','pinned'].map(v=><option key={v}>{v}</option>)}</select></label>
++      <label>Author ID<input name="author" maxLength={100} defaultValue={filter.author}/></label><label>Post ID (comments)<input name="post" maxLength={100} defaultValue={filter.post}/></label><label>Category (posts)<select name="category" defaultValue={filter.category}>{['','For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(v=><option key={v} value={v}>{v||'All categories'}</option>)}</select></label>
++      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button">Filter content</button><Link className="admin-button" href={base}>Clear</Link>
++    </form><ContentTable key={JSON.stringify(filter)} items={data.items} resource={filter.resource} trash={filter.status==='trash'}/>
++    <nav className="admin-pagination" aria-label="Content pagination">{filter.page>1?<Link href={pageLink(filter.page-1)}>Previous</Link>:<span/>}<span>Page {filter.page} of {Math.max(1,Math.ceil(data.total/50))}</span>{filter.page*50<data.total&&<Link href={pageLink(filter.page+1)}>Next</Link>}</nav>
++    <p className="admin-muted">Trash can be restored for 30 days. No automatic purge runs; only owners can permanently purge one confirmed item at a time. Unhidden is not necessarily public: expiry, private profiles and account trash also apply.</p>
++  </>;
++}
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index cf78e22..f27fab9 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -8,5 +8,5 @@ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: {
+ export const dynamic = 'force-dynamic';
+ export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+   await requireAdminPage();
+-  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
++  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation"><Link href={ADMIN_BASE_PATH}>Overview</Link><Link href={ADMIN_BASE_PATH + '/users'}>Users</Link><Link href={ADMIN_BASE_PATH + '/content'}>Content</Link><Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
+ }
+diff --git a/components/admin/actions.tsx b/components/admin/actions.tsx
+index 1ec91c6..01453eb 100644
+--- a/components/admin/actions.tsx
++++ b/components/admin/actions.tsx
+@@ -26,7 +26,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+     finally { setPending(false); }
+   }
+   return <div className="admin-actions">
+-    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Trash disables login without deleting content; content moderation comes in Phase 3.</p>
++    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+     <div className="admin-action-grid">{actions.map(action => <button className="admin-button" key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+     {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
+     {!selected && message && <p role="status">{message}</p>}
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+new file mode 100644
+index 0000000..d3b29c8
+--- /dev/null
++++ b/components/admin/content.tsx
+@@ -0,0 +1,92 @@
++'use client';
++import { useRef, useState } from 'react';
++import Link from 'next/link';
++import Image from 'next/image';
++import { useRouter } from 'next/navigation';
++import { DialogDescription } from '@/components/ui/dialog';
++import { ConfirmDialog } from './actions';
++import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import type { ContentResource } from '@/lib/admin/content';
++import type { Settings } from '@/lib/admin/config';
++
++async function send(body:Record<string,unknown>) {
++  const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
++  const result=await response.json() as {error?:string};
++  if(!response.ok)throw new Error(result.error||'The operation failed.');
++}
++const labels:Record<string,string>={hide:'Hide',unhide:'Unhide',delete:'Move to trash',restore:'Restore',purge:'Permanently purge',pin:'Pin / feature',unpin:'Unpin',expire:'Expire now',highlight:'Promote to highlight'};
++export function ContentActions({ids,resource,operations,onDone}:{ids:string[];resource:ContentResource;operations:string[];onDone?:()=>void}) {
++  const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
++  const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
++  const expected=ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
++  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
++    {!operation&&message&&<p role="status">{message}</p>}
++    <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
++      <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>
++        <DialogDescription>{operation==='purge'?'Permanent deletion cannot be undone. Associated comments, reactions and saved references will also be removed. Media files are retained for the later storage cleanup tools.':operation==='highlight'?'This clears story expiry and adds the story to its author’s highlights. Hidden stories remain hidden.':operation==='restore'?'Restore is allowed within 30 days of deletion. Any separate hidden state is preserved.':'This affects the selected content on all public surfaces. All items succeed together or no changes are saved.'}</DialogDescription>
++        <label>Type <code>{expected}</code> to confirm<input aria-label="Content confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
++        <label>Moderation reason {operation==='hide'?'(required)':'(optional)'}<textarea maxLength={500} required={operation==='hide'} value={reason} onChange={event=>setReason(event.target.value)} /></label>
++        {message&&<p role="alert">{message}</p>}
++        <button className="admin-button admin-primary" disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
++      </form>
++    </ConfirmDialog>
++  </>;
++}
++export function ContentTable({items,resource,trash}:{items:Record<string,unknown>[];resource:ContentResource;trash:boolean}) {
++  const [selected,setSelected]=useState<string[]>([]);
++  return <><p className="admin-muted">{selected.length} selected · Bulk actions affect at most 50 items. Open an item for editing, media and permanent purge.</p>
++    <ContentActions resource={resource} ids={selected} operations={trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete']} onDone={()=>setSelected([])} />
++    <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
++      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
++      {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}
++    </tbody></table></div>
++  </>;
++}
++function safeMedia(value:string) {return /^\/api\/media\/[a-f0-9-]{36}$/.test(value)||/^\/media\/[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp|gif|mp4|webm)$/.test(value);}
++export function ContentEditor({item,resource}:{item:Record<string,unknown>;resource:ContentResource}) {
++  const router=useRouter();const post=resource==='posts';
++  const [caption,setCaption]=useState(String(post?item.caption:item.body)),[location,setLocation]=useState(String(item.location||'')),[kind,setKind]=useState(String(item.kind||'post')),[category,setCategory]=useState(String(item.category||'For you'));
++  const [media,setMedia]=useState<string[]>(post?JSON.parse(String(item.media)):[]),[tags,setTags]=useState(post?(JSON.parse(String(item.tagged_users)) as string[]).join(', '):''),[aspects,setAspects]=useState(String(item.aspects||'null'));
++  const [expires,setExpires]=useState(item.expires_at?new Date(Number(item.expires_at)).toISOString().slice(0,16):'');
++  const [expiryChanged,setExpiryChanged]=useState(false);
++  const [confirmation,setConfirmation]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState(''),[newMedia,setNewMedia]=useState('');
++  async function regenerate() {
++    setPending(true);setMessage('');
++    try {
++      const ratios=await Promise.all(media.map(url=>new Promise<number>((resolve,reject)=>{
++        if(!safeMedia(url)){reject(new Error('Use a registered or bundled media URL.'));return;}
++        const video=item.media_type==='video'||kind==='reel'||/\.(mp4|webm)$/.test(url);
++        const node=document.createElement(video?'video':'img');const timer=setTimeout(()=>{node.removeAttribute('src');reject(new Error('Media metadata timed out.'));},10000);
++        const done=()=>{clearTimeout(timer);const ratio=node instanceof HTMLVideoElement?node.videoWidth/node.videoHeight:node.naturalWidth/node.naturalHeight;node.removeAttribute('src');if(!Number.isFinite(ratio)||ratio<0.2||ratio>5)reject(new Error('Media aspect must be between 0.2 and 5.'));else resolve(ratio);};
++        node.onerror=()=>{clearTimeout(timer);reject(new Error('Could not load media.'));};if(node instanceof HTMLVideoElement){node.preload='metadata';node.onloadedmetadata=done;}else node.onload=done;node.src=url;
++      })));
++      setAspects(JSON.stringify(ratios));setMessage('Measured aspects loaded. Confirm and save to persist them.');
++    }catch(error){setMessage(error instanceof Error?error.message:'Could not read media.');}finally{setPending(false);}
++  }
++  return <form className="admin-content-editor admin-confirm" onSubmit={async event=>{
++    event.preventDefault();setPending(true);setMessage('');
++    try{await send({action:'moderateContent',resource,operation:'edit',ids:[item.id],confirmation,...post?{caption,location,category,kind,media,tagged_users:tags.split(',').map(tag=>tag.trim()).filter(Boolean),aspects:JSON.parse(aspects),...(expiryChanged?{expires_at:expires?Date.parse(expires+'Z'):null}:{})}:{body:caption}});setMessage('Content saved and audited.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Check your input.');}finally{setPending(false);}
++  }}>
++    <label>{post?'Caption':'Comment text'}<textarea maxLength={post?2200:1000} value={caption} onChange={event=>setCaption(event.target.value)} required={!post} /></label>
++    {post&&<>
++      <div className="admin-detail"><label>Location<input value={location} maxLength={100} onChange={event=>setLocation(event.target.value)} /></label><label>Category<select value={category} onChange={event=>setCategory(event.target.value)}>{['For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(value=><option key={value}>{value}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}>{['post','reel','story'].map(value=><option key={value}>{value}</option>)}</select></label><label>Expiry (UTC; blank means no expiry)<input type="datetime-local" value={expires} onChange={event=>{setExpires(event.target.value);setExpiryChanged(true);}} /><button type="button" className="admin-button" onClick={()=>{setExpires('');setExpiryChanged(true);}}>Clear expiry</button></label></div>
++      <label>Tagged account IDs (comma-separated, maximum 10)<input value={tags} onChange={event=>setTags(event.target.value)} maxLength={1100} /></label>
++      <fieldset className="content-media"><legend>Media preview & order</legend><p>New items must be verified uploads owned by you or the author. Reordering preserves each item’s layout and alt text.</p>{media.map((url,index)=><div className="content-media-item" key={url+index}>
++        {safeMedia(url)&&(item.media_type==='video'||kind==='reel'?<video src={url} controls preload="metadata" aria-label={'Preview media '+(index+1)} />:<Image unoptimized width={800} height={800} src={url} alt={'Content preview '+(index+1)} />)}
++        <code>{url}</code><div className="admin-action-grid"><button type="button" className="admin-button" disabled={index===0} onClick={()=>{const next=[...media];[next[index-1],next[index]]=[next[index],next[index-1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index-1],values[index]]=[values[index],values[index-1]];return JSON.stringify(values);}}catch{}return current;});}}>Move up</button><button type="button" className="admin-button" disabled={index===media.length-1} onClick={()=>{const next=[...media];[next[index+1],next[index]]=[next[index],next[index+1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index+1],values[index]]=[values[index],values[index+1]];return JSON.stringify(values);}}catch{}return current;});}}>Move down</button><button type="button" className="admin-button" onClick={()=>{setMedia(media.filter((_,i)=>i!==index));setAspects('null');}}>Remove</button></div>
++      </div>)}</fieldset>
++      <label>Verified upload URL<input value={newMedia} onChange={event=>setNewMedia(event.target.value)} placeholder="/api/media/…" /></label><button type="button" className="admin-button" disabled={!newMedia||media.length>=6} onClick={()=>{setMedia([...media,newMedia.trim()]);setNewMedia('');setAspects('null');}}>Add media</button>
++      <label>Aspect ratios (JSON array, or null to clear)<input value={aspects} onChange={event=>setAspects(event.target.value)} /></label><button type="button" className="admin-button" disabled={pending||!media.length} onClick={regenerate}>Regenerate aspects from media</button>
++    </>}
++    <label>Type content ID to confirm: <code>{String(item.id)}</code><input aria-label="Edit confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
++    {message&&<p role="status">{message}</p>}<button className="admin-button admin-primary" disabled={pending||confirmation!==item.id} type="submit">{pending?'Working…':'Save content'}</button>
++  </form>;
++}
++export function ContentSettings({settings}:{settings:Settings}) {
++  const router=useRouter();const [message,setMessage]=useState(''),[pending,setPending]=useState(false);
++  return <details className="admin-card admin-drawer"><summary>Story & reel controls</summary><p className="admin-muted">Default lifetime applies to new stories. Duration caps apply to new or admin-edited reels; existing content is not reprocessed. Zero seconds means no duration limit. Blank credit preserves the existing default. Paused reels are excluded from public queries; full navigation flags arrive in Phase 5.</p>
++    <form className="admin-search" onSubmit={async event=>{event.preventDefault();const form=new FormData(event.currentTarget);setPending(true);setMessage('');try{const key=String(form.get('key'));let value:unknown=String(form.get('value'));if(['content.storyHours','content.reelMaxSeconds'].includes(key))value=Number(value);if(key==='content.reelsEnabled'){if(!['true','false'].includes(String(value)))throw new Error('Use true or false for reels enabled.');value=value==='true';}await send({action:'contentSetting',key,value});setMessage('Setting saved and audited.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Setting failed.');}finally{setPending(false);}}}>
++      <label>Setting<select name="key"><option value="content.storyHours">New story lifetime (1–168 hours)</option><option value="content.reelsEnabled">Reels enabled (true / false)</option><option value="content.reelMaxSeconds">New reel duration cap (0–600 seconds)</option><option value="content.reelCredit">Reel credit text</option></select></label><label>New value<input name="value" maxLength={100} /></label><button className="admin-button" disabled={pending}>Save setting</button>
++    </form><p>Current: stories {settings['content.storyHours']}h · reels {settings['content.reelsEnabled']?'enabled':'paused'} · new reel cap {settings['content.reelMaxSeconds']||'unlimited'} · credit {settings['content.reelCredit']||'default'}</p>{message&&<p role="status">{message}</p>}
++  </details>;
++}
+diff --git a/components/social/app.tsx b/components/social/app.tsx
+index 8a5c560..5da0357 100644
+--- a/components/social/app.tsx
++++ b/components/social/app.tsx
+@@ -75,6 +75,25 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+ 
+   /* --------------------------------- data layer --------------------------------- */
+ 
++  // Always revalidate a viewer open, even when the feed already holds the item.
++  // A cached card must never resurrect an administratively hidden direct link.
++  const postRequest = useRef(0);
++  const loadPost = useCallback(async (id: string) => {
++    const requestId = ++postRequest.current;
++    setSelectedPost(null);
++    try {
++      const items = await request<Post[]>("/api/social?post=" + encodeURIComponent(id));
++      if (postRequest.current !== requestId) return;
++      if (items[0]) setSelectedPost(items[0]);
++      else {
++        setData(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
++        setFollowingFeed(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
++        toast.error("This post is no longer available.");
++      }
++    } catch { if (postRequest.current === requestId) toast.error("Could not load this post."); }
++  }, []);
++
++
+   const refresh = useCallback(async () => {
+     try {
+       const value = await request<SocialData>("/api/social");
+@@ -94,6 +113,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+     const fromKey = view + ":" + (profileId || "");
+     const toKey = target + ":" + (id || "");
+     scrollMemory.current[fromKey] = window.scrollY;
++    ++postRequest.current;
+     setView(target); setProfileId(id || null); setSelectedPost(null);
+     if (target === "messages") setRecipient(id || null);
+     if (target === "profile") setProfileTab("posts");
+@@ -109,13 +129,10 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+       let id = "";
+       try { id = decodeURIComponent(parts[1] || ""); } catch {}
+       if (target === "post") {
+-        const existing = data.posts.find(post => post.id === id);
+-        if (existing) { setSelectedPost(existing); return; }
+-        void request<Post[]>("/api/social?post=" + encodeURIComponent(id))
+-          .then(items => { if (items[0]) setSelectedPost(items[0]); else toast.error("This post is no longer available."); })
+-          .catch(() => toast.error("Could not load this post."));
++        void loadPost(id);
+         return;
+       }
++      ++postRequest.current;
+       setSelectedPost(null);
+       const allowed = ["home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
+       if (!target || allowed.includes(target)) {
+@@ -128,7 +145,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+     window.addEventListener("hashchange", update);
+     window.addEventListener("popstate", update);
+     return () => { window.removeEventListener("hashchange", update); window.removeEventListener("popstate", update); };
+-  }, [data.posts]);
++  }, [loadPost]);
+ 
+   useEffect(() => {
+     if (view === "notifications" && viewerId) {
+@@ -270,7 +287,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+ 
+   const actions: PostActions = {
+     react, submitComment,
+-    openPost: post => { setSelectedPost(post); window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); },
++    openPost: post => { window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); void loadPost(post.id); },
+     openProfile: id => navigate("profile", id),
+     openTag: tag => navigate("tag", tag),
+     share: setSharePost,
+@@ -488,7 +505,7 @@ export default function RstmcApp({ initial }: { initial: SocialData | null }) {
+       )}
+       {selectedPost && (
+         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
+-          onClose={() => { setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
++          onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
+           onCommentCountChange={delta => patchPost(selectedPost.id, post => ({ ...post, comment_count: Math.max(0, post.comment_count + delta) }))} />
+       )}
+       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
+diff --git a/components/social/common.tsx b/components/social/common.tsx
+index ef6246c..6c9783a 100644
+--- a/components/social/common.tsx
++++ b/components/social/common.tsx
+@@ -37,6 +37,7 @@ export function timeAgo(time: number) {
+ export function count(n: number) {
+   return new Intl.NumberFormat("en", { notation: n >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(n);
+ }
++export class RequestError extends Error { constructor(message: string, public readonly status: number) { super(message); } }
+ export async function request<T = unknown>(url: string, body?: unknown): Promise<T> {
+   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+   const response = await fetch(url, {
+@@ -47,7 +48,7 @@ export async function request<T = unknown>(url: string, body?: unknown): Promise
+   });
+   let data;
+   try { data = await response.json(); } catch { throw new Error("Unable to connect. Please try again."); }
+-  if (!response.ok) throw new Error((data as { error?: string }).error || "Your change could not be saved. Please try again.");
++  if (!response.ok) throw new RequestError((data as { error?: string }).error || "Your change could not be saved. Please try again.", response.status);
+   return data as T;
+ }
+ 
+diff --git a/components/social/post-viewer.tsx b/components/social/post-viewer.tsx
+index 01f80f1..a12db23 100644
+--- a/components/social/post-viewer.tsx
++++ b/components/social/post-viewer.tsx
+@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
+ import { X } from "lucide-react";
+ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+ import { toast } from "sonner";
+-import { Avatar, IconButton, request, timeAgo, HeartBurst, Busy } from "./common";
++import { Avatar, IconButton, request, RequestError, timeAgo, HeartBurst, Busy } from "./common";
+ import { Caption, PostActionsRow, PostMenu, PostMedia, CommentForm, CommentRow, type PostActions } from "./post-card";
+ import type { Post, Person, Comment } from "@/lib/types";
+ 
+@@ -14,6 +14,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+   const [nextCursor, setNextCursor] = useState<string | null>(null);
+   const [moreLoading, setMoreLoading] = useState(false);
+   const [error, setError] = useState("");
++  const [unavailable, setUnavailable] = useState(false);
+   const [burst, setBurst] = useState(false);
+   const listRef = useRef<HTMLDivElement>(null);
+ 
+@@ -23,7 +24,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+     let active = true;
+     void request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30")
+       .then(page => { if (active) { setComments(page.items); setNextCursor(page.next_cursor); } })
+-      .catch(e => { if (active) setError((e as Error).message); });
++      .catch(e => { if (active) { setError((e as Error).message); if (e instanceof RequestError && e.status === 404) setUnavailable(true); } });
+     return () => { active = false; };
+   }, [post.id]);
+ 
+@@ -39,7 +40,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+       const page = await request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30&cursor=" + encodeURIComponent(nextCursor));
+       setComments(current => [...(current ?? []), ...page.items.filter(item => !(current ?? []).some(existing => existing.id === item.id))]);
+       setNextCursor(page.next_cursor);
+-    } catch (e) { toast.error((e as Error).message); }
++    } catch (e) { if (e instanceof RequestError && e.status === 404) setUnavailable(true); toast.error((e as Error).message); }
+     finally { setMoreLoading(false); }
+   };
+ 
+@@ -64,6 +65,8 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
+     if (!post.liked) void actions.react(post, "like", true);
+   };
+ 
++  if (unavailable) return <Dialog open onOpenChange={value => { if (!value) onClose(); }}><DialogContent><DialogTitle>Post not available</DialogTitle><DialogDescription>This post is no longer available.</DialogDescription><button className="primary-button" onClick={onClose}>Close</button></DialogContent></Dialog>;
++
+   return (
+     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
+       <DialogContent className="social-modal post-viewer" showCloseButton={false}>
+diff --git a/components/social/reels.tsx b/components/social/reels.tsx
+index 99470f6..64e5b5f 100644
+--- a/components/social/reels.tsx
++++ b/components/social/reels.tsx
+@@ -6,7 +6,7 @@ import type { Post } from "@/lib/types";
+ import { Caption, type PostActions } from "./post-card";
+ 
+ export function Reels({ posts, actions, onCreate }: { posts: Post[]; actions: PostActions; onCreate: () => void }) {
+-  const videos = posts.filter(p => p.media_type === "video" && p.kind !== "story");
++  const videos = posts.filter(p => p.media_type === "video" && p.kind === "reel");
+   const [active, setActive] = useState(0);
+   const track = useRef<HTMLDivElement>(null);
+ 
+@@ -115,7 +115,7 @@ function Reel({ post: p, index, isActive, actions }: { post: Post; index: number
+             <button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
+           </div>
+           {p.caption && <p><Caption text={p.caption} people={actions.people} onProfile={actions.openProfile} onTag={actions.openTag} /></p>}
+-          <small>{p.author.is_demo ? "Sample reel · Original clip" : "Original video"} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
++          <small>{p.reel_credit || (p.author.is_demo ? "Sample reel · Original clip" : "Original video")} · {Number.isFinite(duration) ? Math.round(duration) : 0}s</small>
+         </div>
+         <div className="reel-actions">
+           <IconButton label={p.liked ? "Unlike" : "Like"} active={!!p.liked} disabled={pending} onClick={() => void react("like", !p.liked)}>
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+index db22b81..e6b40ac 100644
+--- a/lib/admin/config.ts
++++ b/lib/admin/config.ts
+@@ -8,6 +8,10 @@ export type AdminActor = { userId: string; email: string; role: AdminRole };
+ // Foundation registry only. Later phases wire these into the public app.
+ // No secrets, bootstrap state, role policy or audit-disable switch belongs here.
+ export const SETTINGS_DEFAULTS = {
++  'content.reelMaxSeconds': 0,
++  'content.storyHours': 24,
++  'content.reelsEnabled': true,
++  'content.reelCredit': '',
+   'brand.name': 'RSTMC.',
+   'brand.logoUrlLight': '',
+   'theme.primary': '#eb456e',
+diff --git a/lib/admin/content.ts b/lib/admin/content.ts
+new file mode 100644
+index 0000000..c9f1f7e
+--- /dev/null
++++ b/lib/admin/content.ts
+@@ -0,0 +1,140 @@
++import type { PoolLike, QueryExecutor } from '../postgres';
++import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
++import { AdminError } from './validation';
++import { checkReelDuration } from '../reel-duration';
++
++export type ContentResource = 'posts' | 'comments';
++export function contentResource(value: unknown): ContentResource {
++  if(value !== 'posts' && value !== 'comments')throw new AdminError('Choose posts or comments.');
++  return value;
++}
++export type ContentFilters = { resource: ContentResource; q: string; author: string; kind: string; status: string; category: string; post: string; from: string; to: string; flagged: boolean; page: number };
++export function contentFilters(input: Record<string,unknown>): ContentFilters {
++  const text=(key:string,max=100)=>{const value=input[key]??'';if(typeof value!=='string'||value.length>max)throw new AdminError('Invalid filters.');return value.trim();};
++  const resource=contentResource(input.resource??'posts'),kind=text('kind'),status=text('status')||'all',page=Number(input.page??1);
++  if(!['','post','reel','story'].includes(kind)||!['all','visible','hidden','trash','pinned'].includes(status)||!Number.isSafeInteger(page)||page<1||page>10000)throw new AdminError('Invalid filters.');
++  const from=text('from'),to=text('to');
++  for(const date of [from,to])if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date))throw new AdminError('Invalid date.');
++  if(from&&to&&from>to)throw new AdminError('End date must follow start date.');
++  return {resource,kind,status,page,q:text('q',100),author:text('author'),category:text('category',50),post:text('post'),from,to,flagged:input.flagged===true||input.flagged==='1'};
++}
++export async function listContent(db:QueryExecutor, input:ContentFilters) {
++  const filter=contentFilters(input); const comments=filter.resource==='comments';
++  const where:string[]=[];const values:unknown[]=[];const bind=(value:unknown)=>{values.push(value);return '$'+values.length;};
++  if(filter.q)where.push(`c.${comments?'body':'caption'} ILIKE ${bind('%'+filter.q.replace(/[\\%_]/g,'\\$&')+'%')}`);
++  if(filter.author)where.push(`c.author_id=${bind(filter.author)}`);
++  if(filter.post&&comments)where.push(`c.post_id=${bind(filter.post)}`);
++  if(filter.kind&&!comments)where.push(`c.kind=${bind(filter.kind)}`);
++  if(filter.category&&!comments)where.push(`c.category=${bind(filter.category)}`);
++  if(filter.from)where.push(`c.created_at>=${bind(Date.parse(filter.from))}`);
++  if(filter.to)where.push(`c.created_at<${bind(Date.parse(filter.to)+86400000)}`);
++  if(filter.status==='trash')where.push('c.deleted_at IS NOT NULL');
++  else {where.push('c.deleted_at IS NULL');if(filter.status==='hidden')where.push('c.hidden_at IS NOT NULL');if(filter.status==='visible')where.push('c.hidden_at IS NULL');}
++  if(filter.status==='pinned')where.push(comments?'FALSE':'c.pinned_at IS NOT NULL');
++  if(filter.flagged)where.push(`EXISTS(SELECT 1 FROM reports r WHERE r.target_type='post' AND r.target_id=c.${comments?'post_id':'id'})`);
++  const from=`FROM ${filter.resource} c JOIN profiles a ON a.id=c.author_id WHERE ${where.join(' AND ')}`;
++  const {rows:[total]}=await db.query('SELECT COUNT(*) total '+from,values);
++  // Explicitly bypass public privacy/moderation filters for this guarded admin-only view.
++  const {rows}=await db.query(`SELECT c.*,a.username,a.name ${from} ORDER BY c.created_at DESC,c.id LIMIT 50 OFFSET ${bind((filter.page-1)*50)}`,values);
++  return {items:rows,total:Number(total.total),filter};
++}
++export async function contentDetail(db:QueryExecutor, resource:ContentResource,id:string) {
++  contentResource(resource);
++  const {rows:[item]}=await db.query(`SELECT c.*,a.username,a.name FROM ${resource} c JOIN profiles a ON a.id=c.author_id WHERE c.id=$1`,[id]);
++  if(!item)throw new AdminError('Content not found.',404);
++  if(resource==='posts') {
++    const {rows:[counts]}=await db.query(`SELECT
++      (SELECT COUNT(*) FROM reactions WHERE post_id=$1 AND kind='like') real_likes,
++      (SELECT COUNT(*) FROM comments WHERE post_id=$1 AND hidden_at IS NULL AND deleted_at IS NULL) real_comments,
++      (SELECT COUNT(*) FROM reactions WHERE post_id=$1 AND kind='seen') story_views,
++      (SELECT COUNT(*) FROM reports WHERE target_type='post' AND target_id=$1) reports`,[id]);
++    item.counts=counts;
++  }
++  return item;
++}
++function text(value:unknown,max:number,required=false) {
++  if(typeof value!=='string'||value.length>max||(required&&!value.trim()))throw new AdminError('Invalid content text.');return value.trim();
++}
++const CATEGORIES=['For you','Travel','Nature','Photography','Architecture','Lifestyle'];
++async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknown>,input:Record<string,unknown>) {
++  const caption=text(input.caption??row.caption,2200),location=text(input.location??row.location,100),category=text(input.category??row.category,50),kind=text(input.kind??row.kind,10);
++  if(!CATEGORIES.includes(category)||!['post','reel','story'].includes(kind))throw new AdminError('Invalid category or content kind.');
++  const original=JSON.parse(String(row.media)) as string[];const media=input.media??original;
++  if(!Array.isArray(media)||media.length<1||media.length>6||new Set(media).size!==media.length||media.some(url=>typeof url!=='string'||url.length>250))throw new AdminError('Choose 1–6 unique media items.');
++  const types:string[]=[];
++  for(const url of media) {
++    if(original.includes(url)){types.push(row.media_type==='video'?'video/':'image/');continue;}
++    if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('New media must come from verified uploads, not external URLs.');
++    const {rows:[asset]}=await db.query('SELECT mime FROM assets WHERE key=$1 AND owner_id IN ($2,$3)',[url.slice(11),actorId,row.author_id]);
++    if(!asset||!['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'].includes(asset.mime))throw new AdminError('Use a verified upload owned by you or the author.');
++    types.push(asset.mime);
++  }
++  const video=types.some(type=>type.startsWith('video/'));
++  if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts up to six images.');
++  const tags=input.tagged_users??JSON.parse(String(row.tagged_users));
++  if(!Array.isArray(tags)||tags.length>10||new Set(tags).size!==tags.length||tags.some(id=>typeof id!=='string'||id.length>100))throw new AdminError('Tag up to 10 accounts.');
++  if(tags.length&&(await db.query('SELECT id FROM profiles WHERE id=ANY($1::text[]) AND deleted_at IS NULL',[tags])).rows.length!==tags.length)throw new AdminError('A tagged profile is unavailable.');
++  const oldOptions=JSON.parse(String(row.media_options||'[]'));const oldAspects=row.aspects?JSON.parse(String(row.aspects)):null;
++  const options=media.map(url=>oldOptions[original.indexOf(url)]??{ratio:'original',fit:'contain',alt:''});
++  let aspects=input.aspects===undefined?(oldAspects&&media.every(url=>original.includes(url))?media.map(url=>oldAspects[original.indexOf(url)]):null):input.aspects;
++  if(aspects!==null&&(!Array.isArray(aspects)||aspects.length!==media.length||aspects.some(r=>typeof r!=='number'||!Number.isFinite(r)||r<0.2||r>5)))throw new AdminError('Provide one valid aspect ratio (0.2–5) per item, or clear all.');
++  if(Array.isArray(aspects)&&!aspects.length)aspects=null;
++  const settings=await loadSettings(db);
++  if(kind==='reel')await checkReelDuration(db,media,settings['content.reelMaxSeconds']);
++  const expires=input.expires_at===undefined?(kind==='story'&&row.kind!=='story'?Date.now()+settings['content.storyHours']*3600000:row.expires_at):input.expires_at;
++  if(expires!==null&&(typeof expires!=='number'||!Number.isSafeInteger(expires)||expires<0||expires>8640000000000000))throw new AdminError('Invalid expiry.');
++  return {caption,location,category,kind,media:JSON.stringify(media),media_options:JSON.stringify(options),aspects:aspects?JSON.stringify(aspects):null,tagged_users:JSON.stringify(tags),media_type:video?'video':'image',expires_at:expires};
++}
++export async function moderateContent(pool:PoolLike,actorId:string,body:Record<string,unknown>) {
++  const resource=contentResource(body.resource);const action=text(body.operation,20,true),reason=text(body.reason??'',500);
++  if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit'].includes(action))throw new AdminError('Unknown content operation.');
++  const ids=body.ids;
++  if(!Array.isArray(ids)||!ids.length||ids.length>50||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id||id.length>100))throw new AdminError('Select 1–50 unique items.');
++  if(body.confirmation!==(ids.length===1?ids[0]:`CONFIRM ${ids.length}`))throw new AdminError('Confirmation does not match the selection.');
++  if(action==='hide'&&!reason)throw new AdminError('A reason is required to hide content.');
++  if(['edit','purge'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
++  if(resource==='comments'&&['pin','unpin','expire','highlight'].includes(action))throw new AdminError('This operation is only for posts.');
++  await authorizeAdmin(pool,actorId,action==='purge');
++  // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
++  // compare the row again under lock so a concurrent edit cannot be overwritten.
++  let original:Record<string,unknown>|undefined,patch:Record<string,unknown>|undefined;
++  if(action==='edit') {
++    original=(await pool.query(`SELECT * FROM ${resource} WHERE id=$1`,[ids[0]])).rows[0];
++    if(!original)throw new AdminError('Content not found.',404);
++    patch=resource==='posts'?await editPost(pool,actorId,original,body):{body:text(body.body,1000,true)};
++  }
++  return transaction(pool,async db=>{
++    const actor=await authorizeAdmin(db,actorId,action==='purge');
++    // Always lock in ID order to avoid deadlocks between overlapping bulk selections.
++    const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[ids]);
++    if(rows.length!==ids.length)throw new AdminError('An item no longer exists. Nothing was changed.',404);
++    for(const row of rows) {
++      if(row.deleted_at!=null&&!['restore','purge'].includes(action))throw new AdminError('Restore trashed content before changing it.');
++      if(action==='restore'&&(row.deleted_at==null||Date.now()-Number(row.deleted_at)>30*86400000))throw new AdminError('Restore is available only within 30 days of deletion.',409);
++      if(action==='purge'&&row.deleted_at==null)throw new AdminError('Move content to trash before permanent deletion.');
++      if(['expire','highlight'].includes(action)&&row.kind!=='story')throw new AdminError('Choose a story.');
++      let update:Record<string,unknown>={};const now=Date.now();
++      if(action==='hide')update={hidden_at:now,hidden_by:actor.userId,hidden_reason:reason};
++      if(action==='unhide')update={hidden_at:null,hidden_by:null,hidden_reason:null};
++      if(action==='delete')update={deleted_at:now};
++      if(action==='restore')update={deleted_at:null}; // Do not silently undo moderation.
++      if(action==='pin'||action==='unpin')update={pinned_at:action==='pin'?now:null};
++      if(action==='expire')update={expires_at:now};
++      if(action==='highlight') {
++        update={expires_at:null}; // Explicit in confirmation UI: highlighting clears expiry.
++        await db.query('INSERT INTO story_highlights(post_id,owner_id,created_at) VALUES($1,$2,$3) ON CONFLICT(post_id) DO NOTHING',[row.id,row.author_id,now]);
++      }
++      if(action==='edit') {
++        if(JSON.stringify(row)!==JSON.stringify(original))throw new AdminError('This item changed while editing. Reload before trying again.',409);
++        update={...patch,...resource==='posts'?{edited_at:now}:{}};
++      }
++      if(action==='purge')await db.query(`DELETE FROM ${resource} WHERE id=$1`,[row.id]);
++      else {
++        const keys=Object.keys(update); // Keys are constructed above, never from raw request fields.
++        await db.query(`UPDATE ${resource} SET ${keys.map((k,i)=>`"${k}"=$${i+2}`).join(',')} WHERE id=$1`,[row.id,...Object.values(update)]);
++      }
++      await insertAudit(db,actor,{action:`content.${action}`,targetType:resource,targetId:row.id,before:row,after:action==='purge'?null:{...row,...update},reason});
++    }
++    return {ok:true,changed:rows.length};
++  });
++}
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+index 588d823..c2f53cb 100644
+--- a/lib/admin/validation.ts
++++ b/lib/admin/validation.ts
+@@ -8,6 +8,10 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
+   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
+   let valid = false;
+   switch (key as SettingKey) {
++    case 'content.reelMaxSeconds': valid = typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 600; break;
++    case 'content.storyHours': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168; break;
++    case 'content.reelsEnabled': valid = typeof value === 'boolean'; break;
++    case 'content.reelCredit': valid = typeof value === 'string' && value.length <= 100; break;
+     case 'brand.name': valid = typeof value === 'string' && value.trim().length > 0 && value.length <= 80 && !/[\x00-\x1f]/.test(value); break;
+     case 'brand.logoUrlLight': {
+       if (typeof value !== 'string' || value.length > 2048) break;
+diff --git a/lib/content-visibility.ts b/lib/content-visibility.ts
+new file mode 100644
+index 0000000..9f1d5bc
+--- /dev/null
++++ b/lib/content-visibility.ts
+@@ -0,0 +1,17 @@
++// SQL fragments accept only source-code aliases (never request input).
++// Public views never bypass moderation, including for authors and admins.
++export function visibleComment(c = 'c') {
++  return `${c}.hidden_at IS NULL AND ${c}.deleted_at IS NULL AND EXISTS(SELECT 1 FROM profiles ca WHERE ca.id=${c}.author_id AND ca.deleted_at IS NULL)`;
++}
++export function visiblePost(p = 'p') {
++  return `${p}.hidden_at IS NULL AND ${p}.deleted_at IS NULL AND EXISTS(SELECT 1 FROM profiles pa WHERE pa.id=${p}.author_id AND pa.deleted_at IS NULL)
++    AND (${p}.kind!='reel' OR COALESCE((SELECT value FROM app_settings WHERE key='content.reelsEnabled'),'true')='true')`;
++}
++export function livePost(p = 'p') {
++  return `(${visiblePost(p)}) AND (${p}.expires_at IS NULL OR ${p}.expires_at > extract(epoch FROM now())*1000)`;
++}
++// Caller binds the viewer three times, in this order: privacy, follow, block.
++export function readablePost(p = 'p', a = 'a') {
++  return `(${livePost(p)}) AND (${a}.is_private=0 OR ${p}.author_id=? OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.followee_id=${p}.author_id))
++    AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=${p}.author_id)`;
++}
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index 4639632..ad0ce7b 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -112,3 +112,12 @@ export const adminUsersUpgradeStatements: string[] = [
+   'CREATE INDEX IF NOT EXISTS session_created_idx ON session("createdAt" DESC)',
+   'CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id,created_at DESC)',
+ ];
++
++// Version 7: content moderation queries and comment reasons. Purely additive.
++export const adminContentUpgradeStatements: string[] = [
++  'ALTER TABLE comments ADD COLUMN IF NOT EXISTS hidden_reason text',
++  'CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC,id)',
++  'CREATE INDEX IF NOT EXISTS idx_posts_hidden ON posts(hidden_at) WHERE hidden_at IS NOT NULL',
++  'CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(deleted_at) WHERE deleted_at IS NOT NULL',
++  'CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC,id)',
++];
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index 54d40a3..10f5142 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -2,7 +2,7 @@ import path from 'node:path';
+ import { Pool, types, type QueryResultRow } from 'pg';
+ import { serializedPool } from './serialized-pool';
+ import { postgresQuery } from './sql';
+-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements } from './postgres-schema';
++import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements } from './postgres-schema';
+ 
+ types.setTypeParser(20, value => Number(value));
+ types.setTypeParser(1700, value => Number(value));
+@@ -23,6 +23,7 @@ const migrations = [
+   { version: 4, statements: accountUpgradeStatements },
+   { version: 5, statements: adminUpgradeStatements },
+   { version: 6, statements: adminUsersUpgradeStatements },
++  { version: 7, statements: adminContentUpgradeStatements },
+ ];
+ 
+ let pool: Pool | undefined;
+@@ -131,7 +132,7 @@ export async function ensureSchema() {
+       await client.query('BEGIN');
+       await client.query('SELECT pg_advisory_xact_lock(67291004)');
+       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements]] as const) {
++      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements], [7, adminContentUpgradeStatements]] as const) {
+         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
+         if (!applied.rowCount) {
+           for (const statement of statements) await client.query(statement);
+diff --git a/lib/reel-duration.ts b/lib/reel-duration.ts
+new file mode 100644
+index 0000000..e2f990c
+--- /dev/null
++++ b/lib/reel-duration.ts
+@@ -0,0 +1,50 @@
++import { promises as fs } from 'node:fs';
++import path from 'node:path';
++import { parseBuffer } from 'music-metadata';
++import { localDevDatabase, type QueryExecutor } from './postgres';
++import { detectMediaType } from './media-type';
++import { AdminError } from './admin/validation';
++
++const MAX_BYTES = 20 * 1024 * 1024; // Current upload ceiling; Phase 7 owns upload limits.
++export async function mediaDuration(bytes: Uint8Array) {
++  const mime = detectMediaType(bytes.subarray(0,16));
++  if (!['video/mp4','video/webm'].includes(mime)) throw new AdminError('A verified MP4 or WebM video is required.');
++  try {
++    const metadata = await parseBuffer(bytes, { mimeType: mime, size: bytes.length }, { duration: true, skipCovers: true });
++    const duration = metadata.format.duration;
++    if (!duration || !Number.isFinite(duration) || duration <= 0) throw new Error();
++    return duration;
++  } catch { throw new AdminError('Could not verify video duration. Choose a video with readable duration metadata.'); }
++}
++export async function checkReelDuration(db: QueryExecutor, urls: string[], limit: number) {
++  if (!limit) return; // 0 preserves the original unlimited-duration behavior.
++  if (urls.length !== 1) throw new AdminError('A reel requires one video.');
++  const url = urls[0]; let bytes: Uint8Array;
++  async function readFile(file: string) {
++    const stat = await fs.stat(file);
++    if (stat.size > MAX_BYTES) throw new AdminError('Video exceeds the current 20 MB upload limit.');
++    return fs.readFile(file);
++  }
++  try {
++    if (/^\/media\/[a-zA-Z0-9_-]+\.(mp4|webm)$/.test(url)) {
++      bytes = await readFile(path.join(process.cwd(), 'public', url));
++    } else {
++      if (!/^\/api\/media\/[a-f0-9-]{36}$/.test(url)) throw new AdminError('Choose a registered video.');
++      const key = url.slice('/api/media/'.length);
++      const { rows: [asset] } = await db.query('SELECT blob_url,size FROM assets WHERE key=$1', [key]);
++      if (!asset || Number(asset.size) > MAX_BYTES) throw new AdminError('Video asset is unavailable or too large.');
++      if (localDevDatabase()) bytes = await readFile(path.join(process.cwd(),'.local/uploads',key));
++      else {
++        const blob = new URL(asset.blob_url);
++        if (blob.protocol !== 'https:' || !blob.hostname.endsWith('.blob.vercel-storage.com') || blob.username || blob.password) throw new AdminError('Untrusted media host.');
++        const response = await fetch(blob, { redirect:'error', signal:AbortSignal.timeout(10000) });
++        if (!response.ok || !response.body) throw new Error();
++        const reader=response.body.getReader(); const chunks: Uint8Array[]=[]; let size=0;
++        try { while(true) { const part=await reader.read(); if(part.done)break; size+=part.value.length; if(size>MAX_BYTES)throw new AdminError('Video exceeds the current upload limit.'); chunks.push(part.value); } }
++        finally { await reader.cancel(); }
++        bytes=Buffer.concat(chunks);
++      }
++    }
++  } catch (error) { if (error instanceof AdminError) throw error; throw new AdminError('Could not read video metadata. Please try again.',503); }
++  if (await mediaDuration(bytes) > limit) throw new AdminError(`Reels must be at most ${limit} seconds long.`);
++}
+diff --git a/lib/server.ts b/lib/server.ts
+index 4f82d41..d71899e 100644
+--- a/lib/server.ts
++++ b/lib/server.ts
+@@ -1,3 +1,4 @@
++import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
+ import { database } from './postgres';
+ import { getAppUser } from '@/lib/auth';
+ import { seed } from './seed';
+@@ -5,7 +6,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
+ 
+ export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
+ export function db(){return database();}
+-export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500});}
++export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
+ export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
+ 
+ // Origins the deployment explicitly trusts (custom domains, preview domains).
+@@ -79,21 +80,21 @@ export async function identity(requiredOrHeaders?:boolean|Headers,requiredIfHead
+ const privacyGuard=`NOT (a.is_private=1 AND ?<>p.author_id AND NOT EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.followee_id=p.author_id))`;
+ const blockedGuard=`NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=p.author_id)`;
+ // Expired (or deleted) posts behave as if they no longer exist, everywhere.
+-const activeGuard='(p.expires_at IS NULL OR p.expires_at>?)';
++const activeGuard=`(p.expires_at IS NULL OR p.expires_at>?) AND ${visiblePost()}`;
+ 
+ export async function people(viewer:string|null):Promise<Person[]>{const {sql,args}=buildPeopleQuery(viewer);const r=await db().prepare(sql).bind(...args).all<Person>();return r.results;}
+ export function buildPeopleQuery(viewer:string|null):{sql:string;args:unknown[]}{
+   const v=viewer||'';
+   return {
+-    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows WHERE followee_id=p.id) followers, (SELECT COUNT(*) FROM follows WHERE follower_id=p.id) following, (SELECT COUNT(*) FROM posts WHERE author_id=p.id AND kind!='story') post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo ASC,p.created_at ASC LIMIT 300`,
++    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p WHERE p.deleted_at IS NULL ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo ASC,p.created_at ASC LIMIT 300`,
+     args:[v,v,v],
+   };
+ }
+-const personColumns=`p.*, (SELECT COUNT(*) FROM follows WHERE followee_id=p.id) followers, (SELECT COUNT(*) FROM follows WHERE follower_id=p.id) following, (SELECT COUNT(*) FROM posts WHERE author_id=p.id AND kind!='story') post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked`;
+-export async function person(viewer:string|null,id:string):Promise<Person|null>{return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.id=?`).bind(viewer||'',viewer||'',id).first<Person>();}
++const personColumns=`p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked`;
++export async function person(viewer:string|null,id:string):Promise<Person|null>{return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND p.id=?`).bind(viewer||'',viewer||'',id).first<Person>();}
+ function searchPattern(value:string){return '%'+value.replace(/[\\%_]/g,'\\$&')+'%';}
+-export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\' ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
+-export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
++export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
++export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
+ 
+ type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean;following?:boolean;hashtag?:string};
+ function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({...p,media:JSON.parse(p.media as string) as string[],aspects:p.aspects?JSON.parse(p.aspects as string) as number[]:null,media_options:p.media_options?JSON.parse(p.media_options as string) as MediaOption[]:[],tagged_users:p.tagged_users?JSON.parse(p.tagged_users as string) as string[]:[],highlighted:!!p.highlighted,author:{id:p.author_id,username:p.username,name:p.name,avatar:p.avatar,bio:p.bio,website:p.website,is_demo:p.is_demo,is_private:p.is_private}})) as unknown as Post[];}
+@@ -124,15 +125,15 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
+     sql:
+       'SELECT p.*,p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
+       'COALESCE(cc.n,0) comment_count,'+
+-      "(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,"+
++      `(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
+       'EXISTS(SELECT 1 FROM story_highlights WHERE post_id=p.id) highlighted,'+
+-      'a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private '+
++      `COALESCE((SELECT value::jsonb #>> '{}' FROM app_settings WHERE key='content.reelCredit'),'') reel_credit,a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private `+
+       'FROM posts p JOIN profiles a ON a.id=p.author_id '+
+       'LEFT JOIN (SELECT post_id,COUNT(*) n FROM reactions WHERE kind=\'like\' GROUP BY post_id) lc ON lc.post_id=p.id '+
+-      'LEFT JOIN (SELECT post_id,COUNT(*) n FROM comments GROUP BY post_id) cc ON cc.post_id=p.id '+
++      `LEFT JOIN (SELECT c.post_id,COUNT(*) n FROM comments c WHERE ${visibleComment()} GROUP BY c.post_id) cc ON cc.post_id=p.id `+
+       'LEFT JOIN (SELECT post_id,MAX(CASE WHEN kind=\'like\' THEN 1 ELSE 0 END) liked,MAX(CASE WHEN kind=\'save\' THEN 1 ELSE 0 END) saved,MAX(CASE WHEN kind=\'seen\' THEN 1 ELSE 0 END) seen,MAX(CASE WHEN kind=\'hidden\' THEN 1 ELSE 0 END) hidden FROM reactions WHERE user_id=? GROUP BY post_id) vr ON vr.post_id=p.id '+
+       'WHERE '+activeGuard+' AND COALESCE(vr.hidden,0)=0 AND '+privacyGuard+' AND '+blockedGuard+extra+
+-      ' ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?',
++      ' ORDER BY p.pinned_at DESC NULLS LAST,p.created_at DESC,p.id LIMIT ? OFFSET ?',
+     args,
+   };
+ }
+@@ -143,27 +144,42 @@ export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilte
+ }
+ export async function highlights(viewer:string|null,owner:string):Promise<Post[]>{
+   const v=viewer||'';
+-  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
++  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
+   return parsePosts(r.results);
+ }
++export async function availablePost(viewer:string|null,id:string) {
++  const v=viewer||'';
++  const row=await db().prepare(`SELECT p.* FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=? AND ${readablePost()}`).bind(id,v,v,v).first();
++  if(!row)throw new AppError('This post is no longer available.',404);
++  return row;
++}
++export async function notifications(viewer:string) {
++  return db().prepare(`SELECT n.*,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
++    JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
++    WHERE n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
++    AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))
++    ORDER BY n.created_at DESC LIMIT 100`).bind(viewer,viewer,viewer,viewer).all();
++}
+ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
+   await seed();const viewer=await identity(requestHeaders);
+-  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?db().prepare(`SELECT n.*,p.username,p.avatar,(SELECT media FROM posts WHERE id=n.post_id) media,(SELECT media_type FROM posts WHERE id=n.post_id) media_type FROM notifications n JOIN profiles p ON p.id=n.actor_id WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 100`).bind(viewer).all():Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
++  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
+   return {me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
+ }
+ /* ------------------------------ account features ------------------------------ */
+ 
+ export async function storyViewers(viewer:string,storyId:string):Promise<StoryViewer[]>{
+   // "Seen" reactions are the source of truth for story views.
+-  const r=await db().prepare('SELECT p.username,p.name,p.avatar FROM reactions r JOIN profiles p ON p.id=r.user_id WHERE r.post_id=? AND r.kind=\'seen\' ORDER BY p.is_demo ASC,p.created_at ASC LIMIT 100').bind(storyId).all<StoryViewer>();
++  const r=await db().prepare('SELECT p.username,p.name,p.avatar FROM reactions r JOIN profiles p ON p.id=r.user_id WHERE r.post_id=? AND r.kind=\'seen\' AND p.deleted_at IS NULL ORDER BY p.is_demo ASC,p.created_at ASC LIMIT 100').bind(storyId).all<StoryViewer>();
+   return r.results;
+ }
+ export async function savedCollections(viewer:string):Promise<SavedCollection[]>{
+-  const r=await db().prepare("SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at) FILTER (WHERE i.post_id IS NOT NULL),'[]') post_ids FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100").bind(viewer).all<Record<string,unknown>>();
++  const r=await db().prepare(`SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at)
++    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${readablePost()})),'[]') post_ids
++    FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100`).bind(viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
+   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
+ }
+ export async function messageSearch(viewer:string,term:string):Promise<Person[]>{
+   const pattern=searchPattern(term);
+-  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE (m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
++  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
+   return r.results;
+ }
+diff --git a/lib/types.ts b/lib/types.ts
+index 5375d7a..31df573 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -1,6 +1,6 @@
+ export type Person={id:string;username:string;name:string;bio:string;website?:string;avatar:string;is_demo:number;is_private?:number;followers:number;following:number;post_count:number;followed:number;blocked?:number;last_message?:string|null};
+ export type MediaOption={ratio:'original'|'1:1'|'4:5'|'16:9';fit:'contain'|'cover';alt:string};
+-export type Post={id:string;author_id:string;media:string[];aspects?:number[]|null;media_options?:MediaOption[];tagged_users?:string[];highlighted?:boolean;edited_at?:number|null;media_type:'image'|'video';kind:'post'|'reel'|'story';caption:string;location:string;category:string;created_at:number;expires_at:number|null;likes:number;liked:number;saved:number;seen:number;comment_count:number;comment_preview?:{body:string;username:string}|null;author:Person};
++export type Post={reel_credit?:string;id:string;author_id:string;media:string[];aspects?:number[]|null;media_options?:MediaOption[];tagged_users?:string[];highlighted?:boolean;edited_at?:number|null;media_type:'image'|'video';kind:'post'|'reel'|'story';caption:string;location:string;category:string;created_at:number;expires_at:number|null;likes:number;liked:number;saved:number;seen:number;comment_count:number;comment_preview?:{body:string;username:string}|null;author:Person};
+ export type Comment={id:string;post_id:string;author_id:string;body:string;created_at:number;username:string;avatar:string};
+ export type Message={id:string;sender_id:string;recipient_id:string;body:string;post_id?:string|null;created_at:number;read_at:number|null};
+ export type Notification={id:string;actor_id:string;kind:string;post_id:string|null;created_at:number;read_at:number|null;username:string;avatar:string;media:string|null;media_type:string|null};
+diff --git a/package-lock.json b/package-lock.json
+index ad34df0..106101e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -21,6 +21,7 @@
+         "embla-carousel-react": "^8.6.0",
+         "input-otp": "^1.4.2",
+         "lucide-react": "^1.31.0",
++        "music-metadata": "^11.16.1",
+         "next": "16.2.6",
+         "next-themes": "^0.4.6",
+         "pg": "^8.23.0",
+@@ -400,6 +401,16 @@
+       "integrity": "sha512-ABkD1WhyfPZprKRQI3bhATjeiFuNWC9PXhfGWqL+sg/gKrM977oFrYkdb4msM3hgUGonr7KlOsOFT5TU2rht9g==",
+       "license": "MIT"
+     },
++    "node_modules/@borewit/text-codec": {
++      "version": "0.2.2",
++      "resolved": "https://registry.npmjs.org/@borewit/text-codec/-/text-codec-0.2.2.tgz",
++      "integrity": "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==",
++      "license": "MIT",
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/Borewit"
++      }
++    },
+     "node_modules/@cloudflare/kv-asset-handler": {
+       "version": "0.5.0",
+       "resolved": "https://registry.npmjs.org/@cloudflare/kv-asset-handler/-/kv-asset-handler-0.5.0.tgz",
+@@ -5506,6 +5517,29 @@
+         "tailwindcss": "4.2.1"
+       }
+     },
++    "node_modules/@tokenizer/inflate": {
++      "version": "0.4.1",
++      "resolved": "https://registry.npmjs.org/@tokenizer/inflate/-/inflate-0.4.1.tgz",
++      "integrity": "sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA==",
++      "license": "MIT",
++      "dependencies": {
++        "debug": "^4.4.3",
++        "token-types": "^6.1.1"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/Borewit"
++      }
++    },
++    "node_modules/@tokenizer/token": {
++      "version": "0.3.0",
++      "resolved": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
++      "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==",
++      "license": "MIT"
++    },
+     "node_modules/@tybys/wasm-util": {
+       "version": "0.10.2",
+       "resolved": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.2.tgz",
+@@ -7536,6 +7570,19 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/content-type": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/content-type/-/content-type-2.1.0.tgz",
++      "integrity": "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+     "node_modules/convert-source-map": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-2.0.0.tgz",
+@@ -7820,7 +7867,6 @@
+       "version": "4.4.3",
+       "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+       "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "ms": "^2.1.3"
+@@ -9480,6 +9526,24 @@
+         "node": ">=16.0.0"
+       }
+     },
++    "node_modules/file-type": {
++      "version": "21.3.4",
++      "resolved": "https://registry.npmjs.org/file-type/-/file-type-21.3.4.tgz",
++      "integrity": "sha512-Ievi/yy8DS3ygGvT47PjSfdFoX+2isQueoYP1cntFW1JLYAuS4GD7NUPGg4zv2iZfV52uDyk5w5Z0TdpRS6Q1g==",
++      "license": "MIT",
++      "dependencies": {
++        "@tokenizer/inflate": "^0.4.1",
++        "strtok3": "^10.3.4",
++        "token-types": "^6.1.1",
++        "uint8array-extras": "^1.4.0"
++      },
++      "engines": {
++        "node": ">=20"
++      },
++      "funding": {
++        "url": "https://github.com/sindresorhus/file-type?sponsor=1"
++      }
++    },
+     "node_modules/fill-range": {
+       "version": "7.1.1",
+       "resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
+@@ -9918,6 +9982,26 @@
+         "node": ">=10.17.0"
+       }
+     },
++    "node_modules/ieee754": {
++      "version": "1.2.1",
++      "resolved": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
++      "integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/feross"
++        },
++        {
++          "type": "patreon",
++          "url": "https://www.patreon.com/feross"
++        },
++        {
++          "type": "consulting",
++          "url": "https://feross.org/support"
++        }
++      ],
++      "license": "BSD-3-Clause"
++    },
+     "node_modules/ignore": {
+       "version": "5.3.2",
+       "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz",
+@@ -11070,6 +11154,19 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/media-typer": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-2.0.0.tgz",
++      "integrity": "sha512-kOy3OxT2HH39N70UnKgu4NWDZjLOz8W/mfyvniHjRH/DrL3f2pOfvWQ4p60offbbtDAnXWp0v9LfMIqMec269Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
+     "node_modules/merge-stream": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/merge-stream/-/merge-stream-2.0.0.tgz",
+@@ -11168,9 +11265,39 @@
+       "version": "2.1.3",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+-      "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/music-metadata": {
++      "version": "11.16.1",
++      "resolved": "https://registry.npmjs.org/music-metadata/-/music-metadata-11.16.1.tgz",
++      "integrity": "sha512-uR/mHK6eyfl8h3jVCobF5b38Mfg1IDJMiBxIVbmm5F+G1OXEFcUpQHveO84tJBAqvY93GCRY2R4kDyx7s06Rug==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/Borewit"
++        },
++        {
++          "type": "buymeacoffee",
++          "url": "https://buymeacoffee.com/borewit"
++        }
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "@borewit/text-codec": "^0.2.2",
++        "@tokenizer/token": "^0.3.0",
++        "content-type": "^2.1.0",
++        "debug": "^4.4.3",
++        "file-type": "^21.3.4",
++        "media-typer": "^2.0.0",
++        "strtok3": "^10.3.5",
++        "token-types": "^6.1.2",
++        "uint8array-extras": "^1.5.0",
++        "win-guid": "^0.2.1"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/nanoid": {
+       "version": "3.3.12",
+       "resolved": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.12.tgz",
+@@ -13042,6 +13169,22 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/strtok3": {
++      "version": "10.3.5",
++      "resolved": "https://registry.npmjs.org/strtok3/-/strtok3-10.3.5.tgz",
++      "integrity": "sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==",
++      "license": "MIT",
++      "dependencies": {
++        "@tokenizer/token": "^0.3.0"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/Borewit"
++      }
++    },
+     "node_modules/styled-jsx": {
+       "version": "5.1.6",
+       "resolved": "https://registry.npmjs.org/styled-jsx/-/styled-jsx-5.1.6.tgz",
+@@ -13290,6 +13433,24 @@
+         "node": ">=8.0"
+       }
+     },
++    "node_modules/token-types": {
++      "version": "6.1.2",
++      "resolved": "https://registry.npmjs.org/token-types/-/token-types-6.1.2.tgz",
++      "integrity": "sha512-dRXchy+C0IgK8WPC6xvCHFRIWYUbqqdEIKPaKo/AcTUNzwLTK6AH7RjdLWsEZcAN/TBdtfUw3PYEgPr5VPr6ww==",
++      "license": "MIT",
++      "dependencies": {
++        "@borewit/text-codec": "^0.2.1",
++        "@tokenizer/token": "^0.3.0",
++        "ieee754": "^1.2.1"
++      },
++      "engines": {
++        "node": ">=14.16"
++      },
++      "funding": {
++        "type": "github",
++        "url": "https://github.com/sponsors/Borewit"
++      }
++    },
+     "node_modules/ts-api-utils": {
+       "version": "2.5.0",
+       "resolved": "https://registry.npmjs.org/ts-api-utils/-/ts-api-utils-2.5.0.tgz",
+@@ -13500,6 +13661,18 @@
+         "typescript": ">=4.8.4 <6.1.0"
+       }
+     },
++    "node_modules/uint8array-extras": {
++      "version": "1.6.0",
++      "resolved": "https://registry.npmjs.org/uint8array-extras/-/uint8array-extras-1.6.0.tgz",
++      "integrity": "sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
+     "node_modules/unbox-primitive": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/unbox-primitive/-/unbox-primitive-1.1.0.tgz",
+@@ -14415,6 +14588,12 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/win-guid": {
++      "version": "0.2.1",
++      "resolved": "https://registry.npmjs.org/win-guid/-/win-guid-0.2.1.tgz",
++      "integrity": "sha512-gEIQU4mkgl2OPeoNrWflcJFJ3Ae2BPd4eCsHHA/XikslkIVms/nHhvnvzIZV7VLmBvtFlDOzLt9rrZT+n6D67A==",
++      "license": "MIT"
++    },
+     "node_modules/word-wrap": {
+       "version": "1.2.5",
+       "resolved": "https://registry.npmjs.org/word-wrap/-/word-wrap-1.2.5.tgz",
+diff --git a/package.json b/package.json
+index 27a7500..324ed1c 100644
+--- a/package.json
++++ b/package.json
+@@ -28,6 +28,7 @@
+     "embla-carousel-react": "^8.6.0",
+     "input-otp": "^1.4.2",
+     "lucide-react": "^1.31.0",
++    "music-metadata": "^11.16.1",
+     "next": "16.2.6",
+     "next-themes": "^0.4.6",
+     "pg": "^8.23.0",
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index bc6dd94..67aabc0 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -11,7 +11,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
+ | 0 | Discovery | Done; access defaults and bootstrap role confirmed | This report (notes-only exception in §7) |
+ | 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
+ | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
+-| 3–12 | Content through handover | Not started | — |
++| 3 | Content control | Done locally; deployment pending | `phase-03-content.patch` |
++| 4–12 | Appearance through handover | Not started | — |
+ 
+ No application code, environment files, secrets, or production data changed in discovery.
+ 
+@@ -191,3 +192,52 @@ Phase 3 — content control. Implement moderation-aware public queries across fe
+ - Implementation commit: `2782e25`.
+ - Independent `patches/phase-02-users.patch` generated and `git apply --check` passed against a scratch export of the preserved Phase 1 baseline (`2b5070a`).
+ - Original Phase 1 patch unchanged. All changes remain local to the fixed Arena branch; no push/PR was attempted in this closed session.
++
++## Phase 3 — Content control
++
++**Completed locally; user will apply/publish. No push or PR.** Independent application baseline: `ccef943` (preserved Phase 2 implementation and its downloadable patch copies). Phases 4–12 are not started.
++
++### Implemented
++
++- Individually server-guarded content list and detail pages at `/rstmcadmin/content`, linked from the admin navigation. Posts/reels/stories and global/per-post comments; text, author, kind, category, date, report, hidden, pinned and trash filters; 50-row pages and selections capped at 50. Comment report filtering explicitly means reports on their parent post because there is no comment-report schema yet.
++- Media previews, caption/location/category/kind/tag editing, verified media replacement/reordering, preserved per-item options/aspects, aspect regeneration from media, expiry set/clear, and recorded engagement counters. New media references must belong to a verified upload owned by the acting admin or author; arbitrary remote URLs are rejected. Counter manipulation remains Phase 5.
++- Bulk hide/unhide, pin/unpin, soft-delete and restore; story expire-now and promote-to-highlight. Highlight confirmation explicitly discloses clearing expiry. Hidden/trash states remain independent. Restore is available for 30 days; no automatic purge job runs. Trashed detail remains available as a disabled preview.
++- Typed confirmation on writes: exact content ID for one item or `CONFIRM N` for a bulk selection. A moderation reason is required for hiding. Permanent purge is single-item, **owner-only**, and requires prior trash; the default bootstrap **admin cannot purge or promote itself**.
++- Writes use the existing same-origin, byte-limited, fresh-role admin API guard. Content mutations lock rows in deterministic order and audit each changed item in the same transaction. Failures roll back the entire selection, including audit failures. Media/duration preflight runs outside the transaction; a changed row is rejected rather than overwritten.
++- Audited content settings: default story lifetime (24h, range 1–168), reels enabled (true), original-credit text (blank retains existing credit), and reel duration cap (0/unlimited, range 0–600 seconds). Duration is read server-side from registered MP4/WebM bytes with `music-metadata`, not trusted client input. Reads have a 20 MB ceiling; remote reads allow only HTTPS Vercel Blob hosts, no redirects, and a 10-second timeout.
++- Migration **7**, registered in local and managed paths, adds comment moderation reason and content/query indexes. Existing content/data is preserved. New package manifest/lock entries are included.
++
++### Public visibility and caching
++
++- Shared SQL guards exclude hidden/trashed posts, trashed authors, hidden/trashed comments and trashed comment authors. Feed, profile, explore, following, tagged, hashtag/search, reels, saved collections, direct post reads, comment previews/counts, story highlights/viewers and notifications respect moderation and expiry. Profile/follow counts no longer include trashed profiles/content.
++- Direct comment and interaction endpoints now enforce the same profile privacy/block policy as public reads, including when the viewer is the author or an admin. Shared-story message references are nulled when the post becomes unavailable; message bodies are retained.
++- Author post/comment deletion is soft-delete by default. Public API responses, including errors, are `private, no-store`.
++- Opening a post always fetches current availability rather than trusting the resident feed copy. Hidden direct links display “This post is no longer available”; unavailable comment reads replace a viewer with an unavailable state. Out-of-order viewer requests cannot reopen an old item after navigation. Restore is visible on the next read.
++- This is request-time enforcement, not a push/realtime moderation channel: pixels already displayed in another idle browser are not remotely erased. Previously known public Blob/bundled media URLs also remain accessible; purging content does **not** delete media objects from storage. Asset deletion/CDN policy belongs to the later media phase.
++
++### Deliberate settings semantics
++
++- Default lifetime applies to **new stories**, not retroactive rescheduling of existing stories. Admins can explicitly set/clear each item's expiry; converting a post to a story through the API uses the default when no expiry is supplied.
++- Reel duration caps apply to **new reels and admin edits of reels**. Existing reels are not automatically reprocessed or hidden when the cap changes. Unreadable duration fails closed when a cap is enabled. Zero skips probing and preserves previous behavior.
++- Pausing reels removes `kind=reel` from all public reads and rejects new reel creation. Ordinary video posts are still posts and no longer appear as reels. Navigation/compose feature flags remain Phase 5.
++- Moderation controls explicitly allow administrators to inspect private content in the guarded admin panel; there is no privacy bypass through the public API. Demo counters are displayed separately from real engagement and are not editable here.
++
++### Verification
++
++- `npm run typecheck`, `npm run lint`, `npm run build`: passed. Lint has 0 errors and the same 7 existing public-image warnings; no new warnings.
++- **54/54 tests passed, 0 skipped** with `ADMIN_TEST_DATABASE_URL` pointing only to an isolated local PostgreSQL 18.4 database. Without that optional URL, 51 pass and 3 managed-PostgreSQL tests skip.
++- Dedicated tests cover guards, typed confirmation, bulk limits, strict dates, bounded pagination, safe search, metadata/asset validation, per-item option/aspect preservation, comment edits, hide/delete/restore/purge policy, story expiry/highlight, rollback on audit failure, stale-edit rejection, actual video duration and cap enforcement, overlapping PostgreSQL row locks, and public visibility/privacy regressions.
++- The actual managed migration runner upgraded a 1–6 ledger to **1–7** and retained an existing post. Migration 7 was also replayed idempotently in isolated populated PGlite and PostgreSQL schemas.
++- Live HTTP checks against both dev/PGlite and a production build/local PostgreSQL verified independently guarded pages/APIs: guest/unverified/expired/revoked/forged sessions denied, users/banned admins denied, admin allowed, cross-origin writes denied, exact confirmations required, owner-only purge denied to bootstrap admin, real content edits/settings/hide/trash/restore visible immediately through public API reads.
++- Chromium checks against both dev and production at **320/360/390/430/768/1024**, light and dark: post/comment list/detail (48 page checks per mode), no document overflow, contained table scrolling, visible controls and checkbox hit targets >=44px, keyboard access, modal Escape/focus restoration, confirmation lock, real bulk hide/unhide, aspect regeneration/save, settings expansion, and a cached public direct-link hide/restore regression. No browser page errors.
++- `git diff --check`: passed. Databases, synthetic sessions, downloaded test tooling, logs and screenshots are excluded from the patch. No real email, production database, Blob store, `.env.local`, or deployment was modified.
++
++### Apply and operate
++
++1. Apply `phase-03-content.patch` to the Phase 2 application baseline; it is not a replacement for Phases 1 and 2. Run `git apply --check` first, then `git apply`, `npm ci`, and your usual validation/build. The existing migration runner applies migration 7 when the updated app starts.
++2. Sign in through the existing account login; open **Content** in `/rstmcadmin`. Select filters or open a post and follow **Manage comments on this post**.
++3. Select items for bulk moderation, or open detail for editing/story actions. Use **Trash** status for restoration; only an explicitly promoted owner sees permanent purge.
++4. **Story & reel controls** changes one validated setting per audited request. Use `true`/`false` for reels; `0` means unlimited duration; blank credit restores the normal original-credit label.
++5. The delivery includes identical root copies named `FunctionGram-Phase-3-Content.patch` and `FunctionGram-Phase-3-Content.patch.txt` for reliable attachment viewing/downloading. Use **one** patch copy, not all three.
++
++**Next authorized work:** none. Phase 4 (appearance) awaits the user's request.
+diff --git a/scripts/admin-check.mts b/scripts/admin-check.mts
+index 7f16c0d..2f5896c 100644
+--- a/scripts/admin-check.mts
++++ b/scripts/admin-check.mts
+@@ -21,7 +21,7 @@ if (process.argv[2] === 'seed') {
+   const db = new PGlite(directory);
+   const cookies: Record<string, string> = {};
+   try {
+-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements]) await db.exec(sql);
++    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await db.exec(sql);
+     for (const [id, role, verified, banned] of [
+       ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
+       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
+@@ -41,8 +41,9 @@ if (process.argv[2] === 'seed') {
+   const cookies = JSON.parse(await readFile(fixturePath, 'utf8')) as Record<string, string>;
+   // Better Auth prefixes its session cookie in production.
+   if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
++  await fetch(origin+'/api/social');
+   for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
+-    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular']) {
++    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/content/demo_coast', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings']) {
+       const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
+       const body = await response.text();
+       assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
+@@ -52,7 +53,7 @@ if (process.argv[2] === 'seed') {
+       if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
+       else if (route === ADMIN_BASE_PATH) {
+         assert.match(body, /A pulse on your community./);
+-        assert.match(body, /1, 2, 3, 4, 5, 6/);
++        assert.match(body, /1, 2, 3, 4, 5, 6, 7/);
+         assert.match(body, /noindex/);
+       }
+       assert.ok(!body.includes(secret), 'No server secret in responses');
+diff --git a/scripts/content-browser.mjs b/scripts/content-browser.mjs
+new file mode 100644
+index 0000000..82a84ee
+--- /dev/null
++++ b/scripts/content-browser.mjs
+@@ -0,0 +1,54 @@
++// Optional isolated QA: same tooling/fixtures as scripts/admin-browser.mjs.
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import {createRequire} from 'node:module';
++const require=createRequire(path.resolve('.local/browser-tools/package.json'));
++const {chromium:playwright}=require('playwright-core');const {default:chromium}=await import(require.resolve('@sparticuz/chromium'));
++const cookies=JSON.parse(fs.readFileSync('.local/admin-check.json','utf8'));const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';const base='/rstmcadmin/content';
++const browser=await playwright.launch({executablePath:await chromium.executablePath(),args:chromium.args.filter(arg=>arg!=='--single-process'),headless:true});
++try{
++ for(const width of [320,360,390,430,768,1024])for(const theme of ['light','dark']){
++  const context=await browser.newContext({viewport:{width,height:900},colorScheme:theme,hasTouch:true});
++  const [rawName,...value]=cookies.admin.split('=');const name=(process.env.ADMIN_TEST_SECURE_COOKIES==='1'?'__Secure-':'')+rawName;
++  await context.addCookies([{name,value:value.join('='),domain:new URL(origin).hostname,path:'/',secure:process.env.ADMIN_TEST_SECURE_COOKIES==='1'}]);
++  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
++  for(const route of [base,base+'?resource=comments',base+'/demo_coast',base+'/demo_comment_0?resource=comments']){
++   assert.equal((await page.goto(origin+route)).status(),200);await page.waitForLoadState('networkidle');await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
++   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow: ${width} ${theme} ${route}`);
++   for(const control of await page.locator('.admin-shell button,.admin-shell input:not([type=checkbox]),.admin-shell select,.admin-shell nav a,.content-checkbox').all()){
++    const box=await control.boundingBox();if(box&&await control.isVisible()&&await control.evaluate(e=>!e.closest('details:not([open])')))assert.ok(box.height>=44,`Small touch control ${route} ${await control.getAttribute('name')}`);
++   }
++   await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.activeElement!==document.body));
++   if(width===390)await page.screenshot({path:`.local/phase3-${route.includes('demo')?'detail':'list'}-${route.includes('comments')?'comments':'posts'}-${theme}.png`,fullPage:true});
++  }
++  const hide=page.getByRole('button',{name:'Hide',exact:true});await hide.click();const dialog=page.getByRole('dialog');await dialog.waitFor();
++  assert.ok(await dialog.getByRole('button',{name:'Confirm content action'}).isDisabled());await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.ok(await hide.evaluate(e=>document.activeElement===e));
++  if(width===390&&theme==='light'){
++   await page.goto(origin+base);await page.getByRole('checkbox',{name:'Select demo_coast',exact:true}).check();await page.getByRole('checkbox',{name:'Select demo_alpine',exact:true}).check();
++   for(const operation of ['Hide','Unhide']){
++    await page.getByRole('button',{name:operation,exact:true}).click();await dialog.getByLabel('Content confirmation').fill('CONFIRM 2');await dialog.getByLabel(/Moderation reason/).fill('Browser bulk regression');
++    await dialog.getByRole('button',{name:'Confirm content action'}).click();await dialog.waitFor({state:'hidden'});await page.waitForLoadState('networkidle');
++    assert.equal((await context.request.get(origin+'/api/social?post=demo_coast').then(r=>r.json())).length,operation==='Hide'?0:1);
++    if(operation==='Hide'){await page.getByRole('checkbox',{name:'Select demo_coast',exact:true}).check();await page.getByRole('checkbox',{name:'Select demo_alpine',exact:true}).check();}
++   }
++   await page.goto(origin+base+'/demo_coast');await page.getByRole('button',{name:'Regenerate aspects from media'}).click();await page.getByText('Measured aspects loaded.',{exact:false}).waitFor();
++   assert.ok(JSON.parse(await page.getByLabel('Aspect ratios', {exact:false}).inputValue())[0]>0);
++   await page.getByLabel('Edit confirmation').fill('demo_coast');await page.getByRole('button',{name:'Save content',exact:true}).click();await page.waitForLoadState('networkidle');
++   // A hidden direct link must not reopen a resident cached feed item.
++   const guest=await browser.newContext();const publicPage=await guest.newPage();publicPage.on('pageerror',e=>errors.push('Public: '+e.message));await publicPage.bringToFront();await publicPage.goto(origin+'/');await publicPage.waitForLoadState('networkidle');
++   const moderate=operation=>context.request.post(origin+'/api/admin',{headers:{origin},data:{action:'moderateContent',resource:'posts',operation,ids:['demo_coast'],confirmation:'demo_coast',reason:'Cached-link regression'}});
++   try{
++    assert.equal((await moderate('hide')).status(),200);
++    const response=publicPage.waitForResponse(r=>r.url().includes('/api/social?post=demo_coast'),{timeout:15000});
++    await publicPage.evaluate(()=>window.location.hash='#/post/demo_coast');assert.deepEqual(await (await response).json(),[]);
++    await publicPage.getByText('This post is no longer available.',{exact:true}).waitFor();assert.equal(await publicPage.locator('.post-viewer').count(),0);
++    assert.equal((await moderate('unhide')).status(),200);await publicPage.evaluate(()=>{window.location.hash='#/';});
++    await publicPage.evaluate(()=>{window.location.hash='#/post/demo_coast';});await publicPage.locator('.post-viewer').waitFor();
++   }finally{await moderate('unhide');await guest.close();}
++   await page.goto(origin+base);await page.getByText('Story & reel controls',{exact:true}).click();
++   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Settings overflow');
++  }
++  assert.deepEqual(errors,[]);await context.close();console.log(`Content browser passed: ${width}px ${theme}`);
++ }
++}finally{await browser.close();}
+diff --git a/scripts/content-check.mts b/scripts/content-check.mts
+new file mode 100644
+index 0000000..3243d6b
+--- /dev/null
++++ b/scripts/content-check.mts
+@@ -0,0 +1,31 @@
++/** Isolated HTTP checks. Run after scripts/admin-check.mts, never against real accounts. */
++import assert from 'node:assert/strict';
++import type {Post} from '../lib/types';
++import {readFile} from 'node:fs/promises';
++const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';
++const cookies=JSON.parse(await readFile('.local/admin-check.json','utf8')) as Record<string,string>;
++if(process.env.ADMIN_TEST_SECURE_COOKIES==='1')for(const key of Object.keys(cookies))cookies[key]='__Secure-'+cookies[key];
++const get=(query:string)=>fetch(origin+'/api/social'+query).then(r=>r.json() as Promise<Post[]>);
++const action=(operation:string,extra:Record<string,unknown>={},who='admin',requestOrigin=origin)=>fetch(origin+'/api/admin',{method:'POST',headers:{origin:requestOrigin,cookie:cookies[who]||'','content-type':'application/json'},body:JSON.stringify({action:'moderateContent',resource:'posts',operation,ids:['demo_coast'],confirmation:'demo_coast',reason:'Isolated phase three regression',...extra})});
++for(const who of ['guest','regular','banned','unverified','forged'])assert.ok([401,403].includes((await action('hide',{},who)).status));
++assert.equal((await action('hide',{},'admin','https://foreign.example.test')).status,403);
++assert.equal((await action('hide',{confirmation:'wrong'})).status,400);
++assert.equal((await action('hide')).status,200);
++assert.equal((await get('?post=demo_coast')).length,0);
++assert.equal((await fetch(origin+'/api/social?comments=demo_coast')).status,404);
++assert.equal((await action('unhide')).status,200);assert.equal((await get('?post=demo_coast')).length,1);
++assert.equal((await action('delete')).status,200);assert.equal((await get('?post=demo_coast')).length,0);
++assert.equal((await action('purge')).status,403,'bootstrap admin cannot purge');
++assert.equal((await action('restore')).status,200);assert.equal((await get('?post=demo_coast')).length,1);
++assert.equal((await action('edit',{caption:'Phase three HTTP edit'})).status,200);
++assert.equal((await get('?post=demo_coast'))[0].caption,'Phase three HTTP edit');
++const setting=(key:string,value:unknown)=>action('',{action:'contentSetting',key,value});
++assert.equal((await setting('content.storyHours',169)).status,400);
++assert.equal((await setting('brand.name','not content')).status,400);
++assert.equal((await setting('content.reelsEnabled',false)).status,200);assert.equal((await get('?post=demo_flowers')).length,0);
++assert.equal((await setting('content.reelsEnabled',true)).status,200);
++assert.equal((await setting('content.reelCredit','Phase three original credit')).status,200);
++assert.equal((await get('?post=demo_flowers'))[0].reel_credit,'Phase three original credit');
++assert.equal((await setting('content.reelCredit','')).status,200);
++// Keep demo fixtures intact for browser QA. Permanent purge and rollback are covered by isolated unit databases.
++console.log('Content HTTP checks passed: denial, origin, typed confirmation, hide/restore, settings and immediate public visibility.');
+diff --git a/tests/admin-content.test.ts b/tests/admin-content.test.ts
+new file mode 100644
+index 0000000..890c53e
+--- /dev/null
++++ b/tests/admin-content.test.ts
+@@ -0,0 +1,129 @@
++import assert from 'node:assert/strict';
++import {test} from 'node:test';
++import {Pool} from 'pg';
++import {readFileSync} from 'node:fs';
++import {PGlite} from '@electric-sql/pglite';
++import * as schema from '../lib/postgres-schema';
++import {serializedPool} from '../lib/serialized-pool';
++import {moderateContent,contentDetail,contentFilters,listContent} from '../lib/admin/content';
++import {mediaDuration,checkReelDuration} from '../lib/reel-duration';
++import {saveSetting} from '../lib/admin/core';
++
++async function fixture() {
++ const db=new PGlite();
++ const all=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements];
++ for(const sql of all)await db.exec(sql);
++ for(const sql of schema.adminContentUpgradeStatements)await db.exec(sql);
++ const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
++ for(const [id,role] of [['owner','owner'],['admin','admin'],['author','user']]){
++  await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified") VALUES($1,$1,$2,$3,true)',[id,id+'@example.test',role]);
++  await pool.query('INSERT INTO profiles(id,username,name,created_at) VALUES($1,$1,$1,0)',[id]);
++ }
++ for(const id of ['p1','p2','story'])await pool.query(`INSERT INTO posts(id,author_id,media,caption,kind,created_at,media_options,aspects) VALUES($1,'author',$2,'Test caption',$3,1,$4,'[1,2]')`,[id,JSON.stringify(['/media/coast.jpg','/media/japan.jpg']),id==='story'?'story':'post',JSON.stringify([{ratio:'original',fit:'contain',alt:'coast'},{ratio:'original',fit:'contain',alt:'japan'}])]);
++ await pool.query(`UPDATE posts SET media='["/media/coast.jpg"]',aspects='[1]' WHERE id='story'`);
++ await pool.query(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','author','Original comment',1)`);
++ const act=(operation:string,ids=['p1'],extra:Record<string,unknown>={},actor='admin')=>moderateContent(pool,actor,{resource:'posts',operation,ids,reason:'test reason',confirmation:ids.length===1?ids[0]:`CONFIRM ${ids.length}`,...extra});
++ return {db,pool,act};
++}
++test('content guard, bulk bounds, confirmation and SQL-bound filters fail closed',async()=>{
++ const {db,pool,act}=await fixture();try{
++  await assert.rejects(act('hide',['p1'],{},'author'),{status:403});
++  await assert.rejects(act('hide',['p1'],{confirmation:'wrong'}),{status:400});
++  await assert.rejects(act('hide',['p1'],{reason:''}),{status:400});
++  await assert.rejects(act('hide',Array.from({length:51},(_,i)=>String(i))),{status:400});
++  await assert.rejects(act('hide',['p1','p1']),{status:400});
++  assert.throws(()=>contentFilters({resource:'posts;DROP TABLE posts'}));
++  assert.throws(()=>contentFilters({from:'2026-09-30',to:'2026-09-01'}));
++  assert.throws(()=>contentFilters({from:'2026-02-31'}));
++  assert.equal((await listContent(pool,contentFilters({q:"' OR true --"}))).total,0);
++  assert.equal((await listContent(pool,contentFilters({kind:'story'}))).total,1);
++  await pool.query(`INSERT INTO posts(id,author_id,media,created_at) SELECT 'extra'||n,'author','[]',n FROM generate_series(1,110) n`);
++  assert.equal((await listContent(pool,contentFilters({}))).items.length,50);
++  assert.equal((await listContent(pool,contentFilters({page:3}))).items.length,13);
++ }finally{await db.close();}
++});
++test('bulk hide/trash/restore preserve moderation; purge is owner-only, typed and requires trash',async()=>{
++ const {db,pool,act}=await fixture();try{
++  await act('hide',['p1','p2']);
++  assert.equal((await listContent(pool,contentFilters({status:'hidden'}))).total,2);
++  await act('delete',['p1']);await act('restore',['p1']);
++  assert.ok((await contentDetail(pool,'posts','p1')).hidden_at,'restore does not unhide');
++  await act('unhide',['p1']);assert.equal((await contentDetail(pool,'posts','p1')).hidden_at,null);
++  await assert.rejects(act('purge'),{status:403});
++  await assert.rejects(act('purge',['p1'],{},'owner'),{status:400});
++  await act('delete',['p1']);
++  await pool.query('UPDATE posts SET deleted_at=$1 WHERE id=\'p1\'',[Date.now()-31*86400000]);
++  await assert.rejects(act('restore'),{status:409});
++  await act('purge',['p1'],{},'owner');
++  await assert.rejects(contentDetail(pool,'posts','p1'),{status:404});
++  assert.equal((await pool.query(`SELECT id FROM comments WHERE id='c1'`)).rows.length,0);
++  assert.equal((await pool.query(`SELECT * FROM admin_audit_log WHERE action='content.purge'`)).rows.length,1);
++ }finally{await db.close();}
++});
++test('edit/reorder preserve metadata; reject third-party assets and malformed tags/aspects; comments audited',async()=>{
++ const {db,pool,act}=await fixture();try{
++  await act('edit',['p1'],{caption:'Updated',media:['/media/japan.jpg','/media/coast.jpg'],tagged_users:['admin'],expires_at:null});
++  const post=await contentDetail(pool,'posts','p1');assert.equal(post.caption,'Updated');assert.ok(post.edited_at);
++  assert.deepEqual(JSON.parse(post.aspects),[2,1]);assert.equal(JSON.parse(post.media_options)[0].alt,'japan');
++  await assert.rejects(act('edit',['p1'],{media:['https://evil.test/a.jpg']}),{status:400});
++  const key=crypto.randomUUID();await pool.query('INSERT INTO assets(key,owner_id,mime,size,created_at) VALUES($1,\'owner\',\'image/jpeg\',100,0)',[key]);
++  await assert.rejects(act('edit',['p1'],{media:['/api/media/'+key]}),{status:400});
++  await assert.rejects(act('edit',['p1'],{tagged_users:['missing']}),{status:400});
++  await assert.rejects(act('edit',['p1'],{aspects:[-1,2]}),{status:400});
++  await act('edit',['c1'],{resource:'comments',body:'Edited by moderator'});
++  assert.equal((await contentDetail(pool,'comments','c1')).body,'Edited by moderator');
++  await act('hide',['c1'],{resource:'comments'});assert.ok((await contentDetail(pool,'comments','c1')).hidden_at);
++  assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length,3);
++ }finally{await db.close();}
++});
++test('story expiry/highlight/pinning and audit failure are atomic across the bulk selection',async()=>{
++ const {db,pool,act}=await fixture();try{
++  await act('expire',['story']);assert.ok((await contentDetail(pool,'posts','story')).expires_at);
++  await act('highlight',['story']);assert.equal((await contentDetail(pool,'posts','story')).expires_at,null);
++  assert.equal((await pool.query(`SELECT * FROM story_highlights WHERE post_id='story'`)).rows.length,1);
++  await act('pin');assert.ok((await contentDetail(pool,'posts','p1')).pinned_at);
++  await assert.rejects(act('expire',['story','p1']),{status:400});
++  assert.equal((await contentDetail(pool,'posts','story')).expires_at,null,'mixed bulk operation rolled back');
++  await db.exec(`CREATE FUNCTION reject_content_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit unavailable'; END $$;
++   CREATE TRIGGER reject_content_audit BEFORE INSERT ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_content_audit()`);
++  await assert.rejects(act('hide',['p1','p2']));
++  assert.equal((await contentDetail(pool,'posts','p1')).hidden_at,null);assert.equal((await contentDetail(pool,'posts','p2')).hidden_at,null);
++ }finally{await db.close();}
++});
++test('duration is parsed from actual video bytes, not client metadata; new/edit reel caps enforced',async()=>{
++ const {db,pool,act}=await fixture();try{
++  const duration=await mediaDuration(readFileSync('public/media/flowers.mp4'));
++  assert.ok(duration>5&&duration<6);
++  await assert.rejects(mediaDuration(Buffer.from('not a video')),{status:400});
++  await checkReelDuration(pool,['/media/flowers.mp4'],6);
++  await assert.rejects(checkReelDuration(pool,['/media/flowers.mp4'],1),{status:400});
++  await saveSetting(pool,'admin','content.reelMaxSeconds',1);
++  await pool.query(`UPDATE posts SET kind='reel',media_type='video',media='["/media/flowers.mp4"]',aspects='[1]' WHERE id='p1'`);
++  await assert.rejects(act('edit',['p1'],{caption:'Does not bypass cap'}),{status:400});
++  await saveSetting(pool,'admin','content.reelMaxSeconds',6);
++  await act('edit',['p1'],{caption:'Valid duration'});
++ }finally{await db.close();}
++});
++test('stale metadata preflight cannot overwrite an intervening content edit',async()=>{
++ const {db,pool}=await fixture();try{
++  const racing={connect:pool.connect,async query(sql:string,values?:unknown[]){const result=await pool.query(sql,values);if(sql==='SELECT * FROM posts WHERE id=$1')await pool.query(`UPDATE posts SET caption='Concurrent edit' WHERE id='p1'`);return result;}};
++  await assert.rejects(moderateContent(racing,'admin',{resource:'posts',operation:'edit',ids:['p1'],confirmation:'p1',caption:'Stale replacement'}),{status:409});
++  assert.equal((await contentDetail(pool,'posts','p1')).caption,'Concurrent edit');
++ }finally{await db.close();}
++});
++test('managed PostgreSQL migration 7 preserves content and serializes overlapping bulk moderation',{skip:!process.env.ADMIN_TEST_DATABASE_URL},async()=>{
++ const pool=new Pool({connectionString:process.env.ADMIN_TEST_DATABASE_URL,options:'-c search_path=admin_phase_three_test',max:4});
++ try{
++  await pool.query('CREATE SCHEMA admin_phase_three_test');
++  for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements])await pool.query(sql);
++  await pool.query(`INSERT INTO "user"(id,name,email,role,"emailVerified") VALUES('admin','Admin','phase3@example.test','admin',true)`);
++  await pool.query(`INSERT INTO profiles(id,username,name,created_at) VALUES('admin','admin','Admin',1)`);
++  await pool.query(`INSERT INTO posts(id,author_id,media,caption,created_at) VALUES('p1','admin','[]','Preserved',1),('p2','admin','[]','Preserved',2)`);
++  await pool.query(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','admin','Preserved comment',1)`);
++  for(let i=0;i<2;i++)for(const sql of schema.adminContentUpgradeStatements)await pool.query(sql);
++  assert.equal((await contentDetail(pool,'posts','p1')).caption,'Preserved');assert.equal((await contentDetail(pool,'comments','c1')).body,'Preserved comment');
++  await Promise.all([['p1','p2'],['p2','p1']].map(ids=>moderateContent(pool,'admin',{resource:'posts',operation:'hide',ids,reason:'overlapping bulk',confirmation:'CONFIRM 2'})));
++  assert.equal((await listContent(pool,contentFilters({status:'hidden'}))).total,2);
++  assert.equal((await pool.query('SELECT id FROM admin_audit_log')).rows.length,4);
++ }finally{await pool.query('DROP SCHEMA IF EXISTS admin_phase_three_test CASCADE');await pool.end();}
++});
+diff --git a/tests/admin.test.ts b/tests/admin.test.ts
+index 7f1a89c..d645898 100644
+--- a/tests/admin.test.ts
++++ b/tests/admin.test.ts
+@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
+ const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
+ async function fixture() {
+   const db = new PGlite();
+-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await db.exec(sql);
++  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await db.exec(sql);
+   const pool = serializedPool({ async query(sql, values) {
+     const result = await db.query(sql, values);
+     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
+@@ -31,7 +31,7 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
+   try {
+     for (const sql of old) await db.exec(sql);
+     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
+-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await db.exec(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await db.exec(sql);
+     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
+     assert.deepEqual(existing, { role: 'user', banned: false });
+     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
+@@ -44,6 +44,8 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
+     assert.match(source, /version: 5, statements: adminUpgradeStatements/);
+     assert.match(source, /\[5, adminUpgradeStatements\]/);
+     assert.match(source, /version: 6, statements: adminUsersUpgradeStatements/);
++    assert.match(source, /version: 7, statements: adminContentUpgradeStatements/);
++    assert.match(source, /\[7, adminContentUpgradeStatements\]/);
+     assert.match(source, /\[6, adminUsersUpgradeStatements\]/);
+   } finally { await db.close(); }
+ });
+@@ -171,7 +173,7 @@ test('PGlite standalone queries cannot join an open transaction', async () => {
+ });
+ 
+ // Set ONLY to a disposable PostgreSQL database. Never use a production URL.
+-test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 5', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
++test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 7', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
+   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL });
+   const client = await pool.connect();
+   try {
+@@ -179,7 +181,7 @@ test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 5'
+     await client.query('CREATE SCHEMA admin_phase_one_test');
+     await client.query('SET LOCAL search_path TO admin_phase_one_test');
+     for (const sql of old) await client.query(sql);
+-    for (let i = 0; i < 2; i++) for (const sql of schema.adminUpgradeStatements) await client.query(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await client.query(sql);
+     assert.equal(Number((await client.query('SELECT COUNT(*) FROM app_settings')).rows[0].count), 0);
+   } finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
+ });
+@@ -188,7 +190,7 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
+   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
+   try {
+     await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
+-    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await pool.query(sql);
++    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements]) await pool.query(sql);
+     await user(pool, 'first', 'user');
+     await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
+     assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);
+diff --git a/tests/social.test.ts b/tests/social.test.ts
+index 099265b..1d369bb 100644
+--- a/tests/social.test.ts
++++ b/tests/social.test.ts
+@@ -78,7 +78,7 @@ async function api(user: User | null, body?: Record<string, unknown> | null, que
+       }))
+     : await GET(new Request(origin + '/api/social' + query, { headers: { host, ...headers, ...(user ? { cookie: user.cookie } : {}) } }));
+   const data = (await response.json().catch(() => null)) as any;
+-  return { status: response.status, data };
++  return { status: response.status, data, headers: response.headers };
+ }
+ 
+ let alice: User, bob: User, carol: User;
+@@ -399,3 +399,93 @@ test('hashtag discovery matches whole words case-insensitively and excludes stor
+   await api(alice, { action: 'delete_post', id: post.data.id });
+   await api(alice, { action: 'delete_post', id: story.data.id });
+ });
++
++test('Phase 3 moderation removes posts from every public read surface and denies direct mutations',async()=>{
++ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ const key=await grantAsset(alice.id);
++ const made=await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'visibilityprobe #phase3',tagged_users:[bob.id]});
++ const id=made.data.id as string;
++ await api(bob,{action:'reaction',id,kind:'save',active:true});
++ await api(bob,{action:'follow',id:alice.id,active:true});
++ const collection=(await api(bob,{action:'create_collection',name:'Phase three'})).data.id;
++ await api(bob,{action:'save_to_collection',collection_id:collection,post_id:id});
++ const comment=(await api(bob,{action:'comment',id,body:'visibilitycomment'})).data.id;
++ const act=(operation:string,resource='posts',target=id)=>moderateContent(pool,carol.id,{operation,resource,ids:[target],confirmation:target,reason:'moderation regression'});
++ try {
++  assert.equal((await api(bob,null,'?post='+id)).data.length,1);
++  await act('hide');
++  for(const query of ['?post='+id,'?profile='+alice.id,'?saved=1','?tagged='+bob.id,'?explore=1','?offset=0']) {
++   const result=await api(bob,null,query);assert.equal(result.status,200);assert.ok(!result.data.some((p:{id:string})=>p.id===id),query);
++  }
++  assert.ok(!(await api(bob,null,'?following=1')).data.posts.some((p:{id:string})=>p.id===id));
++  assert.ok(!(await api(bob,null,'?search=visibilityprobe')).data.posts.length);
++  assert.ok(!(await api(bob,null,'?hashtag=phase3')).data.posts.length);
++  assert.ok(!(await api(bob,null,'?collections=1')).data.find((c:{id:string})=>c.id===collection).post_ids.includes(id));
++  assert.ok(!(await api(alice,null,'?activity=1')).data.notifications.some((n:{post_id:string})=>n.post_id===id));
++  assert.ok(!(await api(alice)).data.posts.some((p:{id:string})=>p.id===id),'bootstrap excludes hidden');
++  for(const viewer of [null,alice,bob,carol]){const result=await api(viewer,null,'?comments='+id);assert.equal(result.status,404,'even author/admin public comments deny hidden');assert.match(result.headers.get('cache-control')||'',/no-store/);}
++  for(const body of [{action:'reaction',id,kind:'like',active:true},{action:'comment',id,body:'blocked'},{action:'update_post',id,caption:'blocked'},{action:'save_to_collection',collection_id:collection,post_id:id},{action:'report',target_type:'post',target_id:id,reason:'spam'}])assert.equal((await api(alice,body)).status,404);
++  await act('unhide');assert.equal((await api(bob,null,'?post='+id)).data.length,1);
++  await act('hide','comments',comment);
++  const restored=(await api(bob,null,'?post='+id)).data[0];assert.equal(restored.comment_count,0);assert.equal(restored.comment_preview,null);
++  assert.equal((await api(bob,null,'?comments='+id)).data.items.length,0);
++  assert.ok(!(await api(alice,null,'?activity=1')).data.notifications.some((n:{id:string})=>n.id===comment));
++  await act('unhide','comments',comment);assert.equal((await api(bob,null,'?comments='+id)).data.items.length,1);
++  await act('delete');assert.equal((await api(alice,null,'?post='+id)).data.length,0);await act('restore');
++  assert.equal((await api(alice,null,'?post='+id)).data.length,1);
++ } finally {await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
++
++test('Phase 3 hides story highlights, viewer lists and message references; private comments cannot be read directly',async()=>{
++ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key],caption:'storyvisibility'})).data.id;
++ try{
++  await api(alice,{action:'highlight',id,active:true});
++  const reply=await api(bob,{action:'message',id:alice.id,post_id:id,body:'story message without copied caption'});assert.equal(reply.status,200);
++  await moderateContent(pool,carol.id,{operation:'hide',resource:'posts',ids:[id],confirmation:id,reason:'hide story'});
++  assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
++  assert.equal((await api(alice,null,'?story-viewers='+id)).status,404);
++  const messages=(await api(bob,null,'?messages='+alice.id)).data.items;
++  assert.equal(messages.find((m:{id:string})=>m.id===reply.data.id).post_id,null);
++  const inbox=(await api(bob,null,'?inbox=1')).data;assert.equal(inbox.find((m:{id:string})=>m.id===reply.data.id).post_id,null);
++  assert.equal((await api(bob,{action:'message',id:alice.id,post_id:id,body:'blocked'})).status,404);
++  const privateId=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'privatecomments'})).data.id;
++  await api(alice,{action:'set_privacy',private:true});
++  assert.equal((await api(null,null,'?comments='+privateId)).status,404);
++  assert.equal((await api(carol,null,'?comments='+privateId)).status,404,'admin has no public privacy bypass');
++ }finally{await api(alice,{action:'set_privacy',private:false});await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
++
++test('Phase 3 trash profile hides people and their content; story defaults and reel pause apply server-side',async()=>{
++ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ try{
++  await pool.query('UPDATE profiles SET deleted_at=$1 WHERE id=$2',[Date.now(),bob.id]);
++  assert.equal((await api(null,null,'?person='+bob.id)).data,null);
++  assert.ok(!(await api(null,null,'?accounts='+bob.name)).data.some((p:{id:string})=>p.id===bob.id));
++  assert.equal((await api(null,null,'?profile='+bob.id)).data.length,0);
++  await pool.query('UPDATE profiles SET deleted_at=NULL WHERE id=$1',[bob.id]);
++  await saveSetting(pool,carol.id,'content.storyHours',2);
++  const key=await grantAsset(alice.id);const start=Date.now();const story=await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key]});assert.equal(story.status,200);
++  const row=(await pool.query('SELECT expires_at FROM posts WHERE id=$1',[story.data.id])).rows[0];assert.ok(Number(row.expires_at)>=start+7200000&&Number(row.expires_at)<Date.now()+7200001);
++  await saveSetting(pool,carol.id,'content.reelsEnabled',false);
++  assert.equal((await api(null,null,'?reels=1')).data.length,0);
++  const video=await grantAsset(alice.id,'video/mp4');assert.equal((await api(alice,{action:'create_post',kind:'reel',media:['/api/media/'+video]})).status,403);
++ }finally{await saveSetting(pool,carol.id,'content.storyHours',24);await saveSetting(pool,carol.id,'content.reelsEnabled',true);await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
++
++test('expired highlights stay unavailable until explicit admin promotion clears expiry; hide still wins',async()=>{
++ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
++ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
++ const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key]})).data.id;
++ const act=(operation:string)=>moderateContent(pool,carol.id,{resource:'posts',operation,ids:[id],confirmation:id,reason:'highlight regression'});
++ try{
++  await api(alice,{action:'highlight',id,active:true});await pool.query('UPDATE posts SET expires_at=1 WHERE id=$1',[id]);
++  assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
++  await act('expire');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
++  await act('highlight');assert.ok((await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
++  await act('hide');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
++ }finally{await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
++});
+diff --git a/tests/vercel.test.ts b/tests/vercel.test.ts
+index 8dd038e..e70b3cb 100644
+--- a/tests/vercel.test.ts
++++ b/tests/vercel.test.ts
+@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
+ import {test} from 'node:test';
+ import {readFileSync} from 'node:fs';
+ import {PGlite} from '@electric-sql/pglite';
+-import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements} from '../lib/postgres-schema';
++import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements,adminUpgradeStatements} from '../lib/postgres-schema';
+ import {postgresQuery} from '../lib/sql';
+ import {buildFeedQuery,buildPeopleQuery} from '../lib/server';
+ import {getAuthTables} from 'better-auth/db';
+@@ -11,8 +11,8 @@ import {detectMediaType} from '../lib/media-type';
+ test('PostgreSQL schema supports actual feed, social actions, ownership and transaction rollback',async()=>{
+  const db=new PGlite();
+  try{
+-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements])await db.exec(sql);
+-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
++  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements])await db.exec(sql);
++  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
+   const authTables=getAuthTables({emailAndPassword:{enabled:true},rateLimit:{enabled:true,storage:'database'}});
+   for(const table of Object.values(authTables)){
+    const columns=await db.query<{column_name:string}>('SELECT column_name FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=$1',[table.modelName]);
