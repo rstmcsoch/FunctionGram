@@ -20,7 +20,7 @@ export async function listUsers(db: QueryExecutor, filter: UserFilters) {
   const where = ['TRUE']; const values: unknown[] = [];
   const bind = (value: unknown) => { values.push(value); return '$' + values.length; };
   if (filter.q) {
-    const term = bind('%' + filter.q.replace(/[\%_]/g, '\\$&') + '%');
+    const term = bind('%' + filter.q.replace(/[\\%_]/g, '\\$&') + '%');
     where.push(`(u.email ILIKE ${term} OR u.name ILIKE ${term} OR p.username ILIKE ${term})`);
   }
   if (filter.role !== 'all') where.push('u.role=' + bind(filter.role));
