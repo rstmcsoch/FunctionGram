@@ -210,3 +210,19 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
     assert.equal(JSON.stringify((await loadSettings(pool))['brand.name']), current);
   } finally { await pool.query('DROP SCHEMA IF EXISTS admin_phase_one_concurrency CASCADE'); await pool.end(); }
 });
+
+test('Phase 6 label saves are authorized, normalized, audited and rolled back on audit failure',async()=>{
+ const {db,pool}=await fixture();
+ try{
+  await user(pool);await user(pool,'member','user');
+  await assert.rejects(saveSetting(pool,'member','labels.config',JSON.stringify({'nav.reels':'Films'})),{status:403});
+  await saveSetting(pool,'admin','labels.config',JSON.stringify({'nav.reels':'Films','nav.home':'Home'}));
+  assert.equal((await loadSettings(pool))['labels.config'],JSON.stringify({'nav.reels':'Films'}));
+  const audit=(await pool.query('SELECT * FROM admin_audit_log WHERE target_id=$1',['labels.config'])).rows;
+  assert.equal(audit.length,1);assert.equal(audit[0].action,'settings.write');
+  await assert.rejects(saveSetting(pool,'admin','labels.config',JSON.stringify({'metadata.title':'Missing required site placeholder'})),{status:400});
+  await db.exec(`CREATE FUNCTION labels_reject_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic audit failure'; END $$; CREATE TRIGGER labels_reject_audit BEFORE INSERT ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION labels_reject_audit()`);
+  await assert.rejects(saveSetting(pool,'admin','labels.config','{}'));
+  assert.equal((await loadSettings(pool))['labels.config'],JSON.stringify({'nav.reels':'Films'}));
+ }finally{await db.close();}
+});

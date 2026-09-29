@@ -10,6 +10,7 @@ export type AdminActor = { userId: string; email: string; role: AdminRole };
 export const SETTINGS_DEFAULTS = {
   'appearance.config': '',
   'features.config': '',
+  'labels.config': '',
   'content.reelMaxSeconds': 0,
   'content.storyHours': 24,
   'content.reelsEnabled': true,

@@ -1,4 +1,6 @@
 "use client";
+import {useLabels} from "./labels";
+
 import {Feature,useFeatures} from "./features";
 import { useState, useEffect, type FormEvent } from "react";
 import { Shield, Plus, Trash2, Mail, Lock, Bookmark } from "lucide-react";
@@ -10,6 +12,7 @@ import type { Person, SavedCollection } from "@/lib/types";
 export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   me: Person; onClose: () => void; onSaved: () => Promise<void> | void; onSignOut: () => void;
 }) {
+  const t=useLabels();
   const flags=useFeatures();
   const [busy, setBusy] = useState("");
   const [privacy, setPrivacy] = useState<number>(me.is_private ? 1 : 0);
@@ -21,17 +24,17 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   useEffect(() => {
     if(!flags.saves)return;
     let active = true;
-    void request<SavedCollection[]>("/api/social?collections=1").then(items => { if (active) setCollections(items); }).catch(() => { if (active) setCollections([]); });
+    void request<SavedCollection[]>("/api/social?collections=1", undefined, t).then(items => { if (active) setCollections(items); }).catch(() => { if (active) setCollections([]); });
     return () => { active = false; };
-  }, [flags.saves]);
+  }, [flags.saves, t]);
 
   const togglePrivacy = async () => {
     const next = privacy ? 0 : 1;
     setPrivacy(next);
     try {
-      await request("/api/social", { action: "set_privacy", private: !!next });
+      await request("/api/social", { action: "set_privacy", private: !!next }, t);
       await onSaved();
-      toast(next ? "Your account is now private." : "Your account is public again.");
+      toast(next ? t("settings.your_account_is_now_private") : t("settings.your_account_is_public_again"));
     } catch (e) {
       setPrivacy(privacy);
       toast.error((e as Error).message);
@@ -43,9 +46,9 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
     if (!newCollection.trim() || busy) return;
     setBusy("collection");
     try {
-      await request("/api/social", { action: "create_collection", name: newCollection.trim() });
+      await request("/api/social", { action: "create_collection", name: newCollection.trim() }, t);
       setNewCollection("");
-      setCollections(await request<SavedCollection[]>("/api/social?collections=1"));
+      setCollections(await request<SavedCollection[]>("/api/social?collections=1", undefined, t));
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(""); }
   };
@@ -53,7 +56,7 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   const removeCollection = async (id: string) => {
     setBusy(id);
     try {
-      await request("/api/social", { action: "delete_collection", id });
+      await request("/api/social", { action: "delete_collection", id }, t);
       setCollections(current => (current || []).filter(item => item.id !== id));
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(""); }
@@ -66,9 +69,9 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
     setBusy("email");
     try {
       const result = await authClient.changeEmail({ newEmail: address, callbackURL: "/verify-email?changed=1" });
-      if (result.error) throw new Error(result.error.status === 429 ? "Please wait a minute before trying again." : result.error.message || "Unable to start the email change.");
+      if (result.error) throw new Error(result.error.status === 429 ? t("settings.please_wait_a_minute_before_trying_again") : result.error.message || t("settings.unable_to_start_the_email_change"));
       setNewEmail("");
-      toast("A confirmation link was sent to the new address. Your email stays the same until you open it.");
+      toast(t("settings.a_confirmation_link_was_sent_to_the_new_address_your_email_stays_"));
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(""); }
   };
@@ -77,43 +80,43 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
     setBusy("delete");
     try {
       const result = await authClient.deleteUser({ callbackURL: "/verify-email?deleted=1" });
-      if (result.error) throw new Error(result.error.status === 429 ? "Please wait a minute before trying again." : result.error.message || "Unable to start account deletion.");
-      toast("A deletion link is on its way to your email. Your account stays until you open it.");
+      if (result.error) throw new Error(result.error.status === 429 ? t("settings.please_wait_a_minute_before_trying_again") : result.error.message || t("settings.unable_to_start_account_deletion"));
+      toast(t("settings.a_deletion_link_is_on_its_way_to_your_email_your_account_stays_un"));
       setDeleteConfirm(false);
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(""); }
   };
 
   return (
-    <Modal open onClose={() => !busy && onClose()} title="Settings and privacy" description="Privacy, collections, and your account.">
+    <Modal open onClose={() => !busy && onClose()} title={t("app.settings_and_privacy")} description={t("settings.privacy_collections_and_your_account")}>
       <div className="settings-sections">
         <Feature name="privateAccounts"><section className="settings-section">
-          <h3><Shield size={18} />Privacy</h3>
+          <h3><Shield size={18} />{t("settings.privacy")}</h3>
           <div className="settings-row">
             <div>
-              <strong>Private account</strong>
-              <p>Only approved followers can see your posts and your profile content.</p>
+              <strong>{t("settings.private_account")}</strong>
+              <p>{t("settings.only_approved_followers_can_see_your_posts_and_your_profile_conte")}</p>
             </div>
-            <button role="switch" aria-checked={!!privacy} className={"switch " + (privacy ? "on" : "")} onClick={() => void togglePrivacy()} aria-label="Toggle private account">
+            <button role="switch" aria-checked={!!privacy} className={"switch " + (privacy ? "on" : "")} onClick={() => void togglePrivacy()} aria-label={t("settings.toggle_private_account")}>
               <span />
             </button>
           </div>
         </section></Feature>
 
         <Feature name="saves"><section className="settings-section">
-          <h3><Bookmark size={18} />Collections</h3>
-          <p className="settings-hint">Organize saved posts into groups of your own.</p>
+          <h3><Bookmark size={18} />{t("settings.collections")}</h3>
+          <p className="settings-hint">{t("settings.organize_saved_posts_into_groups_of_your_own")}</p>
           <form onSubmit={addCollection} className="collection-form">
-            <input aria-label="New collection name" placeholder="New collection name" maxLength={40} value={newCollection} onChange={e => setNewCollection(e.target.value)} />
-            <button className="primary-button" disabled={busy === "collection" || !newCollection.trim()}>{busy === "collection" ? <Busy size={15} /> : <Plus size={16} />}Add</button>
+            <input aria-label={t("settings.new_collection_name")} placeholder={t("settings.new_collection_name")} maxLength={40} value={newCollection} onChange={e => setNewCollection(e.target.value)} />
+            <button className="primary-button" disabled={busy === "collection" || !newCollection.trim()}>{busy === "collection" ? <Busy size={15} /> : <Plus size={16} />}{t("settings.add")}</button>
           </form>
           {collections && collections.length > 0 && (
             <ul className="collection-list">
               {collections.map(item => (
                 <li key={item.id}>
                   <span className="collection-name">{item.name}</span>
-                  <small>{item.post_ids.length} saved</small>
-                  <button aria-label={"Delete collection " + item.name} disabled={busy === item.id} onClick={() => void removeCollection(item.id)}>
+                  <small>{item.post_ids.length}{t("settings.saved")}</small>
+                  <button aria-label={t("settings.delete_collection") + item.name} disabled={busy === item.id} onClick={() => void removeCollection(item.id)}>
                     {busy === item.id ? <Busy size={14} /> : <Trash2 size={15} />}
                   </button>
                 </li>
@@ -123,26 +126,26 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
         </section></Feature>
 
         <section className="settings-section">
-          <h3><Mail size={18} />Account email</h3>
-          <p className="settings-hint">Currently signed in as <strong>{me.username}</strong>. Changing your email sends a confirmation to the new address.</p>
+          <h3><Mail size={18} />{t("settings.account_email")}</h3>
+          <p className="settings-hint">{t("settings.currently_signed_in_as")}<strong>{me.username}</strong>{t("settings.changing_your_email_sends_a_confirmation_to_the_new_address")}</p>
           <form onSubmit={changeEmail} className="collection-form">
-            <input type="email" aria-label="New email address" placeholder="New email address" autoComplete="email" maxLength={254} value={newEmail} onChange={e => setNewEmail(e.target.value)} />
-            <button className="secondary-button" disabled={busy === "email" || !newEmail.trim()}>{busy === "email" ? <Busy size={15} /> : "Change email"}</button>
+            <input type="email" aria-label={t("settings.new_email_address")} placeholder={t("settings.new_email_address")} autoComplete="email" maxLength={254} value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+            <button className="secondary-button" disabled={busy === "email" || !newEmail.trim()}>{busy === "email" ? <Busy size={15} /> : t("settings.change_email")}</button>
           </form>
         </section>
 
         <section className="settings-section danger">
-          <h3><Lock size={18} />Danger zone</h3>
+          <h3><Lock size={18} />{t("settings.danger_zone")}</h3>
           <div className="settings-row">
             <div>
-              <strong>Delete your account</strong>
-              <p>Permanently removes your profile, posts, messages, and saved items. A link is sent to your email to confirm.</p>
+              <strong>{t("settings.delete_your_account")}</strong>
+              <p>{t("settings.permanently_removes_your_profile_posts_messages_and_saved_items_a")}</p>
             </div>
             <button className="secondary-button danger-button" disabled={busy === "delete"} onClick={() => setDeleteConfirm(true)}>
-              {busy === "delete" ? <Busy size={15} /> : "Delete account"}
+              {busy === "delete" ? <Busy size={15} /> : t("settings.delete_account")}
             </button>
           </div>
-          <button className="text-action signout-link" onClick={onSignOut}>Sign out of this device</button>
+          <button className="text-action signout-link" onClick={onSignOut}>{t("settings.sign_out_of_this_device")}</button>
         </section>
       </div>
 
@@ -152,13 +155,14 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
 }
 
 function ConfirmDelete({ open, busy, onCancel, onConfirm }: { open: boolean; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const t=useLabels();
   if (!open) return null;
   return (
-    <div className="settings-confirm" role="alertdialog" aria-label="Confirm account deletion">
-      <p>Permanently delete your account? This cannot be undone.</p>
+    <div className="settings-confirm" role="alertdialog" aria-label={t("settings.confirm_account_deletion")}>
+      <p>{t("settings.permanently_delete_your_account_this_cannot_be_undone")}</p>
       <div>
-        <button className="secondary-button" onClick={onCancel} disabled={busy}>Keep my account</button>
-        <button className="secondary-button danger-button" onClick={onConfirm} disabled={busy}>{busy ? <Busy size={15} /> : "Email me the deletion link"}</button>
+        <button className="secondary-button" onClick={onCancel} disabled={busy}>{t("settings.keep_my_account")}</button>
+        <button className="secondary-button danger-button" onClick={onConfirm} disabled={busy}>{busy ? <Busy size={15} /> : t("settings.email_me_the_deletion_link")}</button>
       </div>
     </div>
   );

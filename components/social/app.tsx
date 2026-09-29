@@ -1,5 +1,8 @@
 "use client";
+import {useLabels} from "./labels";
+
 import {Feature,FeatureContext} from "./features";
+import {navigationLabel} from "@/lib/admin/labels";
 import {ALL_FEATURES,VIEW_FEATURES} from "@/lib/features";
 import { Brand, Banners, PublicFooter, navIcons } from './appearance';
 import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
@@ -29,11 +32,13 @@ const emptyData: SocialData = { me: null, people: [], posts: [], notifications: 
 type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
 export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
+  const t=useLabels();
   const [data, setData] = useState<SocialData>(initial || emptyData);
   const flags=data.features||ALL_FEATURES;
-  const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,enabled:item.enabled&&(!feature||flags[feature])};})};
+  const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,label:navigationLabel(t,target,item.label),enabled:item.enabled&&(!feature||flags[feature])};})};
   const [loadError, setLoadError] = useState(!initial);
   const [view, setView] = useState<View>("home");
+  useEffect(()=>{document.title=view==="home"?t("metadata.title",{site:storedAppearance.name}):t("metadata.sectionTitle",{site:storedAppearance.name,section:navigationLabel(t,view,t.text(view[0].toUpperCase()+view.slice(1)))});},[view,t,storedAppearance.name]);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [feedTab, setFeedTab] = useState("for-you");
   const [profileTab, setProfileTab] = useState("posts");
@@ -77,24 +82,24 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     const requestId = ++postRequest.current;
     setSelectedPost(null);
     try {
-      const items = await request<Post[]>("/api/social?post=" + encodeURIComponent(id));
+      const items = await request<Post[]>("/api/social?post=" + encodeURIComponent(id), undefined, t);
       if (postRequest.current !== requestId) return;
       if (items[0]) setSelectedPost(items[0]);
       else {
         setData(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
         setFollowingFeed(current => ({ ...current, posts: current.posts.filter(post => post.id !== id) }));
-        toast.error("This post is no longer available.");
+        toast.error(t("app.this_post_is_no_longer_available"));
       }
-    } catch { if (postRequest.current === requestId) toast.error("Could not load this post."); }
-  }, [setSelectedPost,setData,setFollowingFeed]);
+    } catch { if (postRequest.current === requestId) toast.error(t("app.could_not_load_this_post")); }
+  }, [setSelectedPost,setData,setFollowingFeed,t]);
 
 
   const refresh = useCallback(async () => {
     try {
-      const value = await request<SocialData>("/api/social");
+      const value = await request<SocialData>("/api/social", undefined, t);
       setData(value); setLoadError(false);
     } catch (e) { setLoadError(true); throw e; }
-  }, []);
+  }, [t]);
 
   const patchPost = useCallback((id: string, update: (post: Post) => Post) => {
     setData(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
@@ -144,11 +149,11 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   useEffect(() => {
     if (view === "notifications" && viewerId) {
-      void request("/api/social", { action: "read_notifications" })
+      void request("/api/social", { action: "read_notifications" }, t)
         .then(() => setData(current => ({ ...current, notifications: current.notifications.map(n => ({ ...n, read_at: n.read_at || Date.now() })) })))
         .catch(() => {});
     }
-  }, [view, viewerId]);
+  }, [view, viewerId, t]);
 
   // Activity polling backs off from 15s toward 60s while the inbox is quiet,
   // resets when something arrives, and pauses entirely in hidden tabs.
@@ -161,7 +166,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     const poll = async () => {
       if (active && timer) { clearTimeout(timer); timer = undefined; }
       try {
-        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1");
+        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1", undefined, t);
         if (!active) return;
         const newest = activity.notifications[0]?.created_at || 0;
         const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
@@ -178,13 +183,13 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     document.addEventListener("visibilitychange", onVisibility);
     void poll();
     return () => { active = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
-  }, [viewerId]);
+  }, [viewerId, t]);
 
   /* ---------------------------------- actions ---------------------------------- */
 
   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast(t("app.creation_is_not_available"));return;} if (!needsLogin()) setCreate(kind); };
 
   const setFollowPendingFor = (id: string, pending: boolean) => {
     setFollowPending(current => {
@@ -204,7 +209,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       people: current.people.map(user => user.id === person.id
         ? { ...user, followed: active ? 1 : 0, followers: user.followers + (active ? 1 : -1) } : user),
     }));
-    try { await request("/api/social", { action: "follow", id: person.id, active }); }
+    try { await request("/api/social", { action: "follow", id: person.id, active }, t); }
     catch (e) {
       // Roll back exactly what the optimistic update changed.
       setData(current => ({
@@ -225,13 +230,13 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
       setSelectedPost(null);
       try {
-        await request("/api/social", { action: "reaction", id: post.id, kind, active: true });
-        toast("Post hidden", {
+        await request("/api/social", { action: "reaction", id: post.id, kind, active: true }, t);
+        toast(t("app.post_hidden"), {
           action: {
-            label: "Undo",
-            onClick: () => void request("/api/social", { action: "reaction", id: post.id, kind, active: false })
+            label: t("app.undo"),
+            onClick: () => void request("/api/social", { action: "reaction", id: post.id, kind, active: false }, t)
               .then(refresh)
-              .catch(() => toast.error("Could not restore the post.")),
+              .catch(() => toast.error(t("app.could_not_restore_the_post"))),
           },
         });
       } catch (e) {
@@ -247,7 +252,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     try {
       // The response is the canonical post-reaction state; apply it instead of
       // trusting the optimistic arithmetic (base likes can change meanwhile).
-      const result = await request<{ liked: number; saved: number; seen: number; likes: number;display_likes:number|null;display_comments:number|null;display_views:number|null }>("/api/social", { action: "reaction", id: post.id, kind, active });
+      const result = await request<{ liked: number; saved: number; seen: number; likes: number;display_likes:number|null;display_comments:number|null;display_views:number|null }>("/api/social", { action: "reaction", id: post.id, kind, active }, t);
       patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes,display_likes:result.display_likes,display_comments:result.display_comments,display_views:result.display_views }));
     } catch (e) {
       patchPost(post.id, current => ({ ...current, ...snapshot }));
@@ -256,10 +261,10 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   };
 
   const submitComment = async (post: Post, body: string): Promise<Comment> => {
-    if(!flags.comments)throw new Error("Comments are unavailable.");
-    if (needsLogin()) throw new Error("Sign in required");
-    const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body });
-    const fresh=await request<Post[]>("/api/social?post="+encodeURIComponent(post.id));if(fresh[0])patchPost(post.id,()=>fresh[0]);
+    if(!flags.comments)throw new Error(t("app.comments_are_unavailable"));
+    if (needsLogin()) throw new Error(t("app.sign_in_required"));
+    const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body }, t);
+    const fresh=await request<Post[]>("/api/social?post="+encodeURIComponent(post.id), undefined, t);if(fresh[0])patchPost(post.id,()=>fresh[0]);
     return { id: created.id, post_id: post.id, author_id: data.me!.id, body, created_at: Date.now(), username: data.me!.username, avatar: data.me!.avatar };
   };
 
@@ -269,7 +274,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
     setSelectedPost(null); setDeleteTarget(null);
     try {
-      await request("/api/social", { action: "delete_post", id: post.id });
+      await request("/api/social", { action: "delete_post", id: post.id }, t);
       void refresh();
     } catch (e) {
       setData(current => ({ ...current, posts: [post, ...current.posts] }));
@@ -280,7 +285,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const copyLink = async (post: Post) => {
     if(!flags.shares)return;
     const link = window.location.origin + "/#/post/" + encodeURIComponent(post.id);
-    try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { setSharePost(post); }
+    try { await navigator.clipboard.writeText(link); toast(t("app.link_copied")); } catch { setSharePost(post); }
   };
 
   const actions: PostActions = {
@@ -299,7 +304,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const loadMore = async () => {
     setMoreLoading(true);
     try {
-      const more = await request<Post[]>("/api/social?offset=" + data.posts.length);
+      const more = await request<Post[]>("/api/social?offset=" + data.posts.length, undefined, t);
       setData(current => ({ ...current, posts: [...current.posts, ...more.filter(item => !current.posts.some(existing => existing.id === item.id))], hasMore: more.length === 40 }));
     } catch (e) { toast.error((e as Error).message); }
     finally { setMoreLoading(false); }
@@ -316,7 +321,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     await Promise.resolve();
     setFollowingFeed(current => ({ ...current, loading: true }));
     try {
-      const page = await request<{ posts: Post[]; hasMore: boolean }>("/api/social?following=1&offset=" + offset);
+      const page = await request<{ posts: Post[]; hasMore: boolean }>("/api/social?following=1&offset=" + offset, undefined, t);
       setFollowingFeed(current => ({
         posts: offset === 0 ? page.posts : [...current.posts, ...page.posts.filter(item => !current.posts.some(existing => existing.id === item.id))],
         hasMore: page.hasMore,
@@ -328,7 +333,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     } finally {
       followingInFlight.current = false;
     }
-  }, [viewerId]);
+  }, [viewerId, t]);
 
   useEffect(() => {
     if (flags.follow && view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
@@ -341,8 +346,8 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     const blocking = !person.blocked;
     setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 1 : 0 } : user) }));
     try {
-      await request("/api/social", { action: blocking ? "block" : "unblock", id: person.id });
-      toast(blocking ? "You no longer see " + person.username + "'s content and they can't message you." : "Unblocked " + person.username + ".");
+      await request("/api/social", { action: blocking ? "block" : "unblock", id: person.id }, t);
+      toast(blocking ? t("app.you_no_longer_see") + person.username + t("app.s_content_and_they_can_t_message_you") : t("app.unblocked") + person.username + ".");
       await refresh();
     } catch (e) {
       setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 0 : 1 } : user) }));
@@ -371,8 +376,8 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   const navItems = appearance.nav.filter(item=>item.enabled).map(item=>({...item,icon:navIcons[item.icon]}));
   const sidebar = (
-    <aside className="app-sidebar" aria-label="Main navigation">
-      <button className="brand" onClick={() => navigate("home")} aria-label={appearance.name+" home"}><Brand appearance={appearance}/></button>
+    <aside className="app-sidebar" aria-label={t("app.main_navigation")}>
+      <button className="brand" onClick={() => navigate("home")} aria-label={t("common.homeLink",{site:appearance.name})}><Brand appearance={appearance}/></button>
       <nav className="main-nav">
         {navItems.filter(item=>item.sidebar).map(item => (
           <button key={item.id} className={"nav-link " + (view === item.target ? "nav-active" : "")}
@@ -388,16 +393,16 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       </nav>
       <div className="sidebar-footer">
         {!data.me && (
-          <button className="nav-link" onClick={() => openAuth()} aria-label="Sign in"><LogIn /><span>Sign in</span></button>
+          <button className="nav-link" onClick={() => openAuth()} aria-label={t("auth.signIn")}><LogIn /><span>{t("auth.signIn")}</span></button>
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="nav-link" aria-label="More"><Menu /><span>More</span></button>
+            <button className="nav-link" aria-label={t("app.more")}><Menu /><span>{t("app.more")}</span></button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="social-menu more-menu">
-            <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
-            {data.me && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>}
+            <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? t("app.dark_mode") : t("app.light_mode")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAbout(true)}><Info />{t("app.about_rstmc")}</DropdownMenuItem>
+            {data.me && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>{t("app.settings_and_privacy")}</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -409,20 +414,20 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       {/* Visual layer only: same brand button, same controls, same handlers —
           the pill is the shape the old full-width bar used to have. */}
       <div className="header-bar">
-        <button className="brand" onClick={() => navigate("home")} aria-label={appearance.name+" home"}><Brand appearance={appearance}/></button>
+        <button className="brand" onClick={() => navigate("home")} aria-label={t("common.homeLink",{site:appearance.name})}><Brand appearance={appearance}/></button>
         <div className="header-actions">
           {navItems.filter(item=>item.header).map(item=><IconButton key={item.id} label={item.label} onClick={()=>nav(item.target)} current={view===item.target}><item.icon/>{item.badge&&<small className="appearance-badge">{item.badge}</small>}</IconButton>)}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="icon-button" aria-label="More options"><Menu size={22} /></button>
+              <button className="icon-button" aria-label={t("app.more_options")}><Menu size={22} /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="social-menu">
-              {targetEnabled(appearance,"saved")&&<DropdownMenuItem onClick={() => nav("saved")}><Bookmark />{navItems.find(n=>n.target==="saved")?.label||"Saved"}</DropdownMenuItem>}
-              <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? "Dark mode" : "Light mode"}</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setAbout(true)}><Info />About RSTMC</DropdownMenuItem>
+              {targetEnabled(appearance,"saved")&&<DropdownMenuItem onClick={() => nav("saved")}><Bookmark />{navItems.find(n=>n.target==="saved")?.label||t("nav.saved")}</DropdownMenuItem>}
+              <DropdownMenuItem onClick={toggleTheme}>{theme === "light" ? <Moon /> : <Sun />}{theme === "light" ? t("app.dark_mode") : t("app.light_mode")}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAbout(true)}><Info />{t("app.about_rstmc")}</DropdownMenuItem>
               {data.me
-                ? <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>Settings and privacy</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
-                : <DropdownMenuItem onClick={() => openAuth()}><LogIn />Sign in</DropdownMenuItem>}
+                ? <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => setSettings(true)}>{t("app.settings_and_privacy")}</DropdownMenuItem><DropdownMenuItem asChild><SignOutButton /></DropdownMenuItem></>
+                : <DropdownMenuItem onClick={() => openAuth()}><LogIn />{t("auth.signIn")}</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -436,7 +441,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   return (
     <FeatureContext value={flags}><div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
-      <a className="skip-link" href="#main-content">Skip to content</a>
+      <a className="skip-link" href="#main-content">{t("app.skip_to_content")}</a>
       {sidebar}
       {mobileHeader}
 
@@ -444,19 +449,19 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
         <Banners appearance={appearance}/>
         {!data.me && (
           <div className="guest-auth-bar glass-card">
-            <p>Share your moments on {appearance.name}</p>
+            <p>{t("app.share_your_moments_on")}{appearance.name}</p>
             <div>
-              <button className="secondary-button" onClick={() => openAuth("signin")}>Sign in</button>
-              <Feature name="signups"><button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button></Feature>
+              <button className="secondary-button" onClick={() => openAuth("signin")}>{t("auth.signIn")}</button>
+              <Feature name="signups"><button className="primary-button" onClick={() => openAuth("signup")}>{t("auth.signUp")}</button></Feature>
             </div>
           </div>
         )}
-        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
-          <Empty icon={<RefreshCw />} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment."
-            action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>Reload feed</button>} />
+        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading={t("app.this_section_is_not_available")} body={t("app.the_site_administrator_has_removed_this_navigation_destination")}/>:loadError ? (
+          <Empty icon={<RefreshCw />} heading={t("app.let_s_try_that_again")} body={t("app.we_couldn_t_connect_to_your_feed_please_try_again_in_a_moment")}
+            action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>{t("app.reload_feed")}</button>} />
         ) : (
           <div className="view-transition" key={view + ":" + (profileId || "")}>
-            {view === "create" && <Empty icon={<Info/>} heading="Share a moment" body="Create a post, story or reel." action={<button className="primary-button" onClick={()=>openCreate()}>Create</button>}/>}
+            {view === "create" && <Empty icon={<Info/>} heading={t("app.share_a_moment")} body={t("app.create_a_post_story_or_reel")} action={<button className="primary-button" onClick={()=>openCreate()}>{t("nav.create")}</button>}/>}
             {view === "home" && (
               <HomeView data={data} feedTab={feedTab} setFeedTab={setFeedTab} stories={stories}
                 onOpenStory={setStory} onCreateStory={() => openCreate("story")}
@@ -478,15 +483,15 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
                   follow={person => void follow(person)} followPending={followPending} onShare={() => setShareProfile(profile)}
                   onRelations={(person, kind) => setRelation({ person, kind })}
                   onReport={person => setReportTarget(person)} onBlock={person => void toggleBlock(person)}
-                  onMessage={person => { if (person.is_demo) toast("This is a sample profile. Message real members in Messages."); else if (person.blocked) toast("You cannot message this profile while it is blocked."); else navigate("messages", person.id); }} />
-              : <Empty icon={<UserRound />} heading="Your own corner of RSTMC" body="Sign in to create a profile and share your world."
-                  action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
+                  onMessage={person => { if (person.is_demo) toast(t("app.this_is_a_sample_profile_message_real_members_in_messages")); else if (person.blocked) toast(t("app.you_cannot_message_this_profile_while_it_is_blocked")); else navigate("messages", person.id); }} />
+              : <Empty icon={<UserRound />} heading={t("app.your_own_corner_of_rstmc")} body={t("app.sign_in_to_create_a_profile_and_share_your_world")}
+                  action={<button className="primary-button" onClick={() => openAuth()}>{t("auth.signIn")}</button>} />)}
             {view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
             {view === "tag" && profileId && <TagView tag={profileId} openPost={actions.openPost} />}
             {view === "messages" && (data.me
               ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} onProfile={id => navigate("profile", id)} />
-              : <Empty icon={<Send />} heading="Your conversations, here" body="Sign in to send messages and save notes to yourself."
-                  action={<button className="primary-button" onClick={() => openAuth()}>Sign in</button>} />)}
+              : <Empty icon={<Send />} heading={t("app.your_conversations_here")} body={t("app.sign_in_to_send_messages_and_save_notes_to_yourself")}
+                  action={<button className="primary-button" onClick={() => openAuth()}>{t("auth.signIn")}</button>} />)}
             {view === "notifications" && (
               <NotificationsView notifications={data.notifications} posts={data.posts}
                 openPost={actions.openPost} onProfile={id => navigate("profile", id)} />
@@ -508,22 +513,22 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
           onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
-          onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id)).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
+          onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id), undefined, t).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
       {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
-      <Modal open={login} onClose={() => setLogin(false)} title="Make yourself at home" description="Sign in to share your moments, follow people, and join the conversation.">
+      <Modal open={login} onClose={() => setLogin(false)} title={t("app.make_yourself_at_home")} description={t("app.sign_in_to_share_your_moments_follow_people_and_join_the_conversa")}>
         <div className="sign-in-content"><AuthForm key={authMode} initialMode={authMode} /></div>
       </Modal>
       <AlertDialog open={!!deleteTarget} onOpenChange={value => { if (!value) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this post?</AlertDialogTitle>
-            <AlertDialogDescription>The post, its comments, and likes will be removed.</AlertDialogDescription>
+            <AlertDialogTitle>{t("app.delete_this_post")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("app.the_post_its_comments_and_likes_will_be_removed")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep post</AlertDialogCancel>
-            <AlertDialogAction className="delete-action" onClick={() => void deletePost()}>Delete post</AlertDialogAction>
+            <AlertDialogCancel>{t("app.keep_post")}</AlertDialogCancel>
+            <AlertDialogAction className="delete-action" onClick={() => void deletePost()}>{t("app.delete_post")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -539,38 +544,38 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 /* ---------------------------------- overlays ---------------------------------- */
 
 function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | null; people: Person[]; onClose: () => void }) {
+  const t=useLabels();
   const [sent, setSent] = useState("");
   const [busy, setBusy] = useState("");
   const link = typeof window !== "undefined" ? window.location.origin + "/#/post/" + encodeURIComponent(post.id) : "";
   return (
-    <Modal open onClose={onClose} title="Share this moment">
+    <Modal open onClose={onClose} title={t("app.share_this_moment")}>
       <div className="share-link">
         <LinkIcon size={20} />
-        <input aria-label="Post link" value={link} readOnly onFocus={event => event.target.select()} />
+        <input aria-label={t("app.post_link")} value={link} readOnly onFocus={event => event.target.select()} />
         <button className="text-action" onClick={async () => {
-          try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { toast("Select and copy the link above."); }
-        }}>Copy</button>
+          try { await navigator.clipboard.writeText(link); toast(t("app.link_copied")); } catch { toast(t("app.select_and_copy_the_link_above")); }
+        }}>{t("app.copy")}</button>
       </div>
       {typeof navigator !== "undefined" && !!navigator.share && (
-        <button className="secondary-button wide" onClick={() => void navigator.share({ title: "A moment on RSTMC", url: link }).catch(() => {})}>
-          <Send size={17} />Share to another app
-        </button>
+        <button className="secondary-button wide" onClick={() => void navigator.share({ title: t("app.a_moment_on_rstmc"), url: link }).catch(() => {})}>
+          <Send size={17} />{t("app.share_to_another_app")}</button>
       )}
       {me && (
         <div className="share-people">
-          <h3>Send in a message</h3>
+          <h3>{t("app.send_in_a_message")}</h3>
           {[me, ...people.filter(person => person.id !== me.id && !person.is_demo)].map(person => (
             <div className="suggestion" key={person.id}>
               <Avatar person={person} size={40} />
-              <span className="person-detail"><strong>{person.id === me.id ? "Saved messages" : person.username}</strong></span>
+              <span className="person-detail"><strong>{person.id === me.id ? t("app.saved_messages") : person.username}</strong></span>
               <button className="follow-button" disabled={!!busy || sent === person.id}
                 onClick={async () => {
                   setBusy(person.id);
-                  try { await request("/api/social", { action: "message", id: person.id, body: link }); setSent(person.id); }
+                  try { await request("/api/social", { action: "message", id: person.id, body: link }, t); setSent(person.id); }
                   catch (e) { toast.error((e as Error).message); }
                   finally { setBusy(""); }
                 }}>
-                {sent === person.id ? "Sent" : busy === person.id ? <Busy size={14} /> : "Send"}
+                {sent === person.id ? t("app.sent") : busy === person.id ? <Busy size={14} /> : t("app.send")}
               </button>
             </div>
           ))}
@@ -581,54 +586,55 @@ function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | n
 }
 
 function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: () => void }) {
+  const t=useLabels();
   const link = typeof window !== "undefined" ? window.location.origin + "/#/profile/" + encodeURIComponent(profile.id) : "";
   return (
-    <Modal open onClose={onClose} title={"Share " + profile.username + "’s profile"}>
+    <Modal open onClose={onClose} title={t("app.share") + profile.username + t("app.s_profile")}>
       <div className="share-link">
         <LinkIcon size={20} />
-        <input aria-label="Profile link" value={link} readOnly onFocus={event => event.target.select()} />
+        <input aria-label={t("app.profile_link")} value={link} readOnly onFocus={event => event.target.select()} />
         <button className="text-action" onClick={async () => {
-          try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { toast("Select and copy the link above."); }
-        }}>Copy</button>
+          try { await navigator.clipboard.writeText(link); toast(t("app.link_copied")); } catch { toast(t("app.select_and_copy_the_link_above")); }
+        }}>{t("app.copy")}</button>
       </div>
       {typeof navigator !== "undefined" && !!navigator.share && (
-        <button className="secondary-button wide" onClick={() => void navigator.share({ title: profile.name + " on RSTMC", url: link }).catch(() => {})}>
-          <Send size={17} />Share to another app
-        </button>
+        <button className="secondary-button wide" onClick={() => void navigator.share({ title: profile.name + t("app.on_rstmc"), url: link }).catch(() => {})}>
+          <Send size={17} />{t("app.share_to_another_app")}</button>
       )}
     </Modal>
   );
 }
 
 function ReportDialog({ person, onClose }: { person: Person; onClose: () => void }) {
+  const t=useLabels();
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const reasons = [
-    ["spam", "Spam"],
-    ["harassment", "Harassment or bullying"],
-    ["false_information", "False information"],
-    ["misleading", "Misleading content"],
-    ["inappropriate", "Inappropriate content"],
-    ["other", "Something else"],
+    ["spam", t("app.spam")],
+    ["harassment", t("app.harassment_or_bullying")],
+    ["false_information", t("app.false_information")],
+    ["misleading", t("app.misleading_content")],
+    ["inappropriate", t("app.inappropriate_content")],
+    ["other", t("app.something_else")],
   ] as const;
   const submit = async () => {
     if (!reason || busy) return;
     setBusy(true); setError("");
     try {
-      await request("/api/social", { action: "report", id: person.id, target_type: "profile", reason, details });
+      await request("/api/social", { action: "report", id: person.id, target_type: "profile", reason, details }, t);
       setSent(true);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   return (
-    <Modal open onClose={() => !busy && onClose()} title={"Report " + person.username} description="Reports are private. A human will review what you send.">
+    <Modal open onClose={() => !busy && onClose()} title={t("app.report") + person.username} description={t("app.reports_are_private_a_human_will_review_what_you_send")}>
       {sent
-        ? <p role="status">Thank you. Your report has been recorded and will be reviewed.</p>
+        ? <p role="status">{t("app.thank_you_your_report_has_been_recorded_and_will_be_reviewed")}</p>
         : <>
-          <div className="report-reasons" role="radiogroup" aria-label="Report reason">
+          <div className="report-reasons" role="radiogroup" aria-label={t("app.report_reason")}>
             {reasons.map(([value, label]) => (
               <label key={value} className={"report-option " + (reason === value ? "selected" : "")}>
                 <input type="radio" name="report-reason" value={value} checked={reason === value} onChange={() => setReason(value)} />
@@ -636,11 +642,11 @@ function ReportDialog({ person, onClose }: { person: Person; onClose: () => void
               </label>
             ))}
           </div>
-          <textarea aria-label="Add details (optional)" placeholder="Add details (optional)" maxLength={1000} rows={3} value={details} onChange={e => setDetails(e.target.value)} />
+          <textarea aria-label={t("app.add_details_optional")} placeholder={t("app.add_details_optional")} maxLength={1000} rows={3} value={details} onChange={e => setDetails(e.target.value)} />
           {error && <p role="alert" className="form-error">{error}</p>}
           <div className="create-preview-actions">
-            <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !reason}>{busy ? <Busy /> : "Send report"}</button>
+            <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>{t("app.cancel")}</button>
+            <button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !reason}>{busy ? <Busy /> : t("app.send_report")}</button>
           </div>
         </>}
     </Modal>
@@ -648,24 +654,25 @@ function ReportDialog({ person, onClose }: { person: Person; onClose: () => void
 }
 
 function About({ onClose }: { onClose: () => void }) {
+  const t=useLabels();
   const [credits, setCredits] = useState<{ credit: string; source: string }[]>([]);
   useEffect(() => {
     void Promise.all([
-      request<{ credit: string; source: string }[]>("/media/photo-credits.json"),
-      request<{ credit: string; source: string }[]>("/media/portrait-credits.json"),
+      request<{ credit: string; source: string }[]>("/media/photo-credits.json", undefined, t),
+      request<{ credit: string; source: string }[]>("/media/portrait-credits.json", undefined, t),
     ]).then(lists => setCredits(lists.flat())).catch(() => {});
-  }, []);
+  }, [t]);
   return (
-    <Modal open onClose={onClose} title="About RSTMC" className="about-modal">
-      <p>A place for your photos, stories, reels, and conversations.</p>
-      <p>RSTMC is an independent social app inspired by Instagram. It is not affiliated with Instagram or Meta.</p>
-      <h3>Your data</h3>
-      <p>Your posts, comments, saved items, follows, and messages are stored with your account. Saved posts and private conversations are only visible to you and the relevant participants. Stories expire after 24 hours.</p>
-      <h3>Sample content</h3>
-      <p>The starter profiles, captions, and engagement counts are fictional examples. Sample profiles do not receive messages. All features also work with your own uploaded photos and videos.</p>
-      <h3>Photo credits</h3>
+    <Modal open onClose={onClose} title={t("app.about_rstmc")} className="about-modal">
+      <p>{t("app.a_place_for_your_photos_stories_reels_and_conversations")}</p>
+      <p>{t("app.rstmc_is_an_independent_social_app_inspired_by_instagram_it_is_no")}</p>
+      <h3>{t("app.your_data")}</h3>
+      <p>{t("app.your_posts_comments_saved_items_follows_and_messages_are_stored_w")}</p>
+      <h3>{t("app.sample_content")}</h3>
+      <p>{t("app.the_starter_profiles_captions_and_engagement_counts_are_fictional")}</p>
+      <h3>{t("app.photo_credits")}</h3>
       <div className="credits">{credits.map((credit, index) => <a key={index} href={credit.source} target="_blank" rel="noreferrer">{credit.credit}</a>)}</div>
-      <p className="form-hint">Sample flower video: MDN public-domain media collection.</p>
+      <p className="form-hint">{t("app.sample_flower_video_mdn_public_domain_media_collection")}</p>
     </Modal>
   );
 }
