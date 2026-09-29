@@ -1,3 +1,5 @@
+import { contentDetail, contentFilters, contentResource, listContent, moderateContent } from '@/lib/admin/content';
+import { writeSetting, readSettings } from '@/lib/admin/settings';
 import { adminRoute } from '@/lib/admin/route';
 import { getPool } from '@/lib/postgres';
 import { getAuth } from '@/lib/auth';
@@ -12,6 +14,12 @@ export const GET = adminRoute(async request => {
   const params = new URL(request.url).searchParams;
   if (params.get('ping') === '1') return Response.json({ ok: true });
   const db = await getPool();
+  if (params.get('resource') === 'content') {
+    const resource=contentResource(params.get('type') || 'posts');
+    if(params.get('id'))return Response.json(await contentDetail(db,resource,params.get('id')!));
+    return Response.json(await listContent(db,contentFilters({...Object.fromEntries(params),resource})));
+  }
+  if(params.get('resource')==='contentSettings')return Response.json(await readSettings());
   if (params.get('resource') === 'users') return Response.json(await listUsers(db, userFilters(Object.fromEntries(params))));
   if (params.get('resource') === 'user' && params.get('id')) return Response.json(await userDetail(db, params.get('id')!));
   return Response.json({ error: 'Unknown admin action.' }, { status: 400 });
@@ -19,6 +27,11 @@ export const GET = adminRoute(async request => {
 export const POST = adminRoute(async (request, actor) => {
   const body = await adminBody(request);
   const pool = await getPool();
+  if(body.action==='moderateContent')return Response.json(await moderateContent(pool,actor.userId,body));
+  if(body.action==='contentSetting'){
+    if(typeof body.key!=='string'||!body.key.startsWith('content.'))return Response.json({error:'Unknown content setting.'},{status:400});
+    await writeSetting(body.key,body.value,request);return Response.json({ok:true});
+  }
   if (body.action === 'exportUsers') {
     const filters = userFilters(body);
     const result = await listUsers(pool, filters);

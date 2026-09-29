@@ -1,3 +1,4 @@
+import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
 import { database } from './postgres';
 import { getAppUser } from '@/lib/auth';
 import { seed } from './seed';
@@ -5,7 +6,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
 
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
 export function db(){return database();}
-export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500});}
+export function fail(error:unknown){if(error instanceof AppError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
 
 // Origins the deployment explicitly trusts (custom domains, preview domains).
@@ -79,21 +80,21 @@ export async function identity(requiredOrHeaders?:boolean|Headers,requiredIfHead
 const privacyGuard=`NOT (a.is_private=1 AND ?<>p.author_id AND NOT EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.followee_id=p.author_id))`;
 const blockedGuard=`NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=p.author_id)`;
 // Expired (or deleted) posts behave as if they no longer exist, everywhere.
-const activeGuard='(p.expires_at IS NULL OR p.expires_at>?)';
+const activeGuard=`(p.expires_at IS NULL OR p.expires_at>?) AND ${visiblePost()}`;
 
 export async function people(viewer:string|null):Promise<Person[]>{const {sql,args}=buildPeopleQuery(viewer);const r=await db().prepare(sql).bind(...args).all<Person>();return r.results;}
 export function buildPeopleQuery(viewer:string|null):{sql:string;args:unknown[]}{
   const v=viewer||'';
   return {
-    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows WHERE followee_id=p.id) followers, (SELECT COUNT(*) FROM follows WHERE follower_id=p.id) following, (SELECT COUNT(*) FROM posts WHERE author_id=p.id AND kind!='story') post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo ASC,p.created_at ASC LIMIT 300`,
+    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p WHERE p.deleted_at IS NULL ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo ASC,p.created_at ASC LIMIT 300`,
     args:[v,v,v],
   };
 }
-const personColumns=`p.*, (SELECT COUNT(*) FROM follows WHERE followee_id=p.id) followers, (SELECT COUNT(*) FROM follows WHERE follower_id=p.id) following, (SELECT COUNT(*) FROM posts WHERE author_id=p.id AND kind!='story') post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked`;
-export async function person(viewer:string|null,id:string):Promise<Person|null>{return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.id=?`).bind(viewer||'',viewer||'',id).first<Person>();}
+const personColumns=`p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked`;
+export async function person(viewer:string|null,id:string):Promise<Person|null>{return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND p.id=?`).bind(viewer||'',viewer||'',id).first<Person>();}
 function searchPattern(value:string){return '%'+value.replace(/[\\%_]/g,'\\$&')+'%';}
-export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\' ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
-export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
+export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
+export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
 
 type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean;following?:boolean;hashtag?:string};
 function parsePosts(rows:Record<string,unknown>[]):Post[]{return rows.map(p=>({...p,media:JSON.parse(p.media as string) as string[],aspects:p.aspects?JSON.parse(p.aspects as string) as number[]:null,media_options:p.media_options?JSON.parse(p.media_options as string) as MediaOption[]:[],tagged_users:p.tagged_users?JSON.parse(p.tagged_users as string) as string[]:[],highlighted:!!p.highlighted,author:{id:p.author_id,username:p.username,name:p.name,avatar:p.avatar,bio:p.bio,website:p.website,is_demo:p.is_demo,is_private:p.is_private}})) as unknown as Post[];}
@@ -124,15 +125,15 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
     sql:
       'SELECT p.*,p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
       'COALESCE(cc.n,0) comment_count,'+
-      "(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,"+
+      `(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
       'EXISTS(SELECT 1 FROM story_highlights WHERE post_id=p.id) highlighted,'+
-      'a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private '+
+      `COALESCE((SELECT value::jsonb #>> '{}' FROM app_settings WHERE key='content.reelCredit'),'') reel_credit,a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private `+
       'FROM posts p JOIN profiles a ON a.id=p.author_id '+
       'LEFT JOIN (SELECT post_id,COUNT(*) n FROM reactions WHERE kind=\'like\' GROUP BY post_id) lc ON lc.post_id=p.id '+
-      'LEFT JOIN (SELECT post_id,COUNT(*) n FROM comments GROUP BY post_id) cc ON cc.post_id=p.id '+
+      `LEFT JOIN (SELECT c.post_id,COUNT(*) n FROM comments c WHERE ${visibleComment()} GROUP BY c.post_id) cc ON cc.post_id=p.id `+
       'LEFT JOIN (SELECT post_id,MAX(CASE WHEN kind=\'like\' THEN 1 ELSE 0 END) liked,MAX(CASE WHEN kind=\'save\' THEN 1 ELSE 0 END) saved,MAX(CASE WHEN kind=\'seen\' THEN 1 ELSE 0 END) seen,MAX(CASE WHEN kind=\'hidden\' THEN 1 ELSE 0 END) hidden FROM reactions WHERE user_id=? GROUP BY post_id) vr ON vr.post_id=p.id '+
       'WHERE '+activeGuard+' AND COALESCE(vr.hidden,0)=0 AND '+privacyGuard+' AND '+blockedGuard+extra+
-      ' ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?',
+      ' ORDER BY p.pinned_at DESC NULLS LAST,p.created_at DESC,p.id LIMIT ? OFFSET ?',
     args,
   };
 }
@@ -143,27 +144,42 @@ export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilte
 }
 export async function highlights(viewer:string|null,owner:string):Promise<Post[]>{
   const v=viewer||'';
-  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments WHERE post_id=p.id) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
+  const r=await db().prepare(`SELECT p.*,p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v).all<Record<string,unknown>>();
   return parsePosts(r.results);
+}
+export async function availablePost(viewer:string|null,id:string) {
+  const v=viewer||'';
+  const row=await db().prepare(`SELECT p.* FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=? AND ${readablePost()}`).bind(id,v,v,v).first();
+  if(!row)throw new AppError('This post is no longer available.',404);
+  return row;
+}
+export async function notifications(viewer:string) {
+  return db().prepare(`SELECT n.*,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
+    JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
+    WHERE n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
+    AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))
+    ORDER BY n.created_at DESC LIMIT 100`).bind(viewer,viewer,viewer,viewer).all();
 }
 export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
   await seed();const viewer=await identity(requestHeaders);
-  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?db().prepare(`SELECT n.*,p.username,p.avatar,(SELECT media FROM posts WHERE id=n.post_id) media,(SELECT media_type FROM posts WHERE id=n.post_id) media_type FROM notifications n JOIN profiles p ON p.id=n.actor_id WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 100`).bind(viewer).all():Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
+  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
   return {me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
 }
 /* ------------------------------ account features ------------------------------ */
 
 export async function storyViewers(viewer:string,storyId:string):Promise<StoryViewer[]>{
   // "Seen" reactions are the source of truth for story views.
-  const r=await db().prepare('SELECT p.username,p.name,p.avatar FROM reactions r JOIN profiles p ON p.id=r.user_id WHERE r.post_id=? AND r.kind=\'seen\' ORDER BY p.is_demo ASC,p.created_at ASC LIMIT 100').bind(storyId).all<StoryViewer>();
+  const r=await db().prepare('SELECT p.username,p.name,p.avatar FROM reactions r JOIN profiles p ON p.id=r.user_id WHERE r.post_id=? AND r.kind=\'seen\' AND p.deleted_at IS NULL ORDER BY p.is_demo ASC,p.created_at ASC LIMIT 100').bind(storyId).all<StoryViewer>();
   return r.results;
 }
 export async function savedCollections(viewer:string):Promise<SavedCollection[]>{
-  const r=await db().prepare("SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at) FILTER (WHERE i.post_id IS NOT NULL),'[]') post_ids FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100").bind(viewer).all<Record<string,unknown>>();
+  const r=await db().prepare(`SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at)
+    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${readablePost()})),'[]') post_ids
+    FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100`).bind(viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
 }
 export async function messageSearch(viewer:string,term:string):Promise<Person[]>{
   const pattern=searchPattern(term);
-  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE (m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
+  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
   return r.results;
 }

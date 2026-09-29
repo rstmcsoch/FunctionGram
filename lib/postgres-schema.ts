@@ -112,3 +112,12 @@ export const adminUsersUpgradeStatements: string[] = [
   'CREATE INDEX IF NOT EXISTS session_created_idx ON session("createdAt" DESC)',
   'CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id,created_at DESC)',
 ];
+
+// Version 7: content moderation queries and comment reasons. Purely additive.
+export const adminContentUpgradeStatements: string[] = [
+  'ALTER TABLE comments ADD COLUMN IF NOT EXISTS hidden_reason text',
+  'CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC,id)',
+  'CREATE INDEX IF NOT EXISTS idx_posts_hidden ON posts(hidden_at) WHERE hidden_at IS NOT NULL',
+  'CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(deleted_at) WHERE deleted_at IS NOT NULL',
+  'CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC,id)',
+];

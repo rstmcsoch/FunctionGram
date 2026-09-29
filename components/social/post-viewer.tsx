@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Avatar, IconButton, request, timeAgo, HeartBurst, Busy } from "./common";
+import { Avatar, IconButton, request, RequestError, timeAgo, HeartBurst, Busy } from "./common";
 import { Caption, PostActionsRow, PostMenu, PostMedia, CommentForm, CommentRow, type PostActions } from "./post-card";
 import type { Post, Person, Comment } from "@/lib/types";
 
@@ -14,6 +14,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState("");
+  const [unavailable, setUnavailable] = useState(false);
   const [burst, setBurst] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -23,7 +24,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
     let active = true;
     void request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30")
       .then(page => { if (active) { setComments(page.items); setNextCursor(page.next_cursor); } })
-      .catch(e => { if (active) setError((e as Error).message); });
+      .catch(e => { if (active) { setError((e as Error).message); if (e instanceof RequestError && e.status === 404) setUnavailable(true); } });
     return () => { active = false; };
   }, [post.id]);
 
@@ -39,7 +40,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
       const page = await request<{ items: Comment[]; next_cursor: string | null }>("/api/social?comments=" + encodeURIComponent(post.id) + "&limit=30&cursor=" + encodeURIComponent(nextCursor));
       setComments(current => [...(current ?? []), ...page.items.filter(item => !(current ?? []).some(existing => existing.id === item.id))]);
       setNextCursor(page.next_cursor);
-    } catch (e) { toast.error((e as Error).message); }
+    } catch (e) { if (e instanceof RequestError && e.status === 404) setUnavailable(true); toast.error((e as Error).message); }
     finally { setMoreLoading(false); }
   };
 
@@ -63,6 +64,8 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
     setTimeout(() => setBurst(false), 720);
     if (!post.liked) void actions.react(post, "like", true);
   };
+
+  if (unavailable) return <Dialog open onOpenChange={value => { if (!value) onClose(); }}><DialogContent><DialogTitle>Post not available</DialogTitle><DialogDescription>This post is no longer available.</DialogDescription><button className="primary-button" onClick={onClose}>Close</button></DialogContent></Dialog>;
 
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
