@@ -1,7 +1,7 @@
 # Admin panel progress
 
 Last updated: 2026-09-29 (Asia/Calcutta)  
-Branch: `arena/01a0e8f1-functiongram`  
+Branch: `codex/phase3-content-20260929`
 Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 
 ## Status
@@ -11,7 +11,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 0 | Discovery | Done; access defaults and bootstrap role confirmed | This report (notes-only exception in §7) |
 | 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
 | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
-| 3–12 | Content through handover | Not started | — |
+| 3 | Content control | Implemented; validation in progress | `phase-03-content.patch` |
+| 4–12 | Appearance through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -182,6 +183,27 @@ Phase 2 only: dashboard/users table and guarded, validated, audited user actions
 5. **Export this page** exports only the current filtered page and is recorded in the audit log. Session tokens and password material are never part of the export.
 6. Owner-only role actions are unavailable to the bootstrap admin by design. Do not change the bootstrap variable to try to elevate an existing account.
 
+## Phase 3 — Content control (2026-09-29)
+
+### Implemented
+
+- Added guarded admin content list/detail views for posts, reels, stories, and comments, with bounded filters, pagination, media previews, editing, and audited settings.
+- Added audited hide/unhide, pin/unpin, soft-delete/restore, single-item owner-only purge, and story expiry/highlight operations. Restoring content preserves its moderation state.
+- Added verified-media editing and server-side reel duration validation. Story lifetime, reel availability, credit text, and duration caps are configurable.
+- Enforced moderation, deletion, expiry, profile trash, privacy, and block visibility rules across public reads and mutations. Direct post opens revalidate availability; public responses are non-cacheable.
+- Added migration 7 and focused coverage for moderation policy, public visibility, settings, media duration, and rollback behavior.
+
+### Boundaries
+
+- Duration limits apply to new or admin-edited reels; changing settings does not reprocess existing reels. Story lifetime defaults apply to new stories.
+- Trash can be restored for 30 days. Permanent purge is owner-only and does not delete media objects from storage. Moderation takes effect on the next request; it cannot erase pixels already loaded in another browser.
+- Public endpoints do not bypass privacy for administrators. Admin-only content inspection remains behind the existing per-page and API authorization guards.
+
+### Verification
+
+- `npm run typecheck`: passed on the isolated Phase 2 worktree after applying the implementation.
+- Lint, full tests, production build, and database/browser checks remain to be run for this branch.
+
 ### Next phase
 
-Phase 3 — content control. Implement moderation-aware public queries across feed/profile/search/saved/direct links before exposing hide/delete content controls. Preserve both existing phase patches. Do not conflate this phase's account suspension/trash with hiding or purging content.
+Phase 4 — appearance. Content visibility and moderation controls are implemented in this phase; preserve the Phase 1 and 2 artifacts.

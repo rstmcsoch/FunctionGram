@@ -2,7 +2,7 @@ import path from 'node:path';
 import { Pool, types, type QueryResultRow } from 'pg';
 import { serializedPool } from './serialized-pool';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -23,6 +23,7 @@ const migrations = [
   { version: 4, statements: accountUpgradeStatements },
   { version: 5, statements: adminUpgradeStatements },
   { version: 6, statements: adminUsersUpgradeStatements },
+  { version: 7, statements: adminContentUpgradeStatements },
 ];
 
 let pool: Pool | undefined;
@@ -131,7 +132,7 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements]] as const) {
+      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements], [7, adminContentUpgradeStatements]] as const) {
         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
         if (!applied.rowCount) {
           for (const statement of statements) await client.query(statement);

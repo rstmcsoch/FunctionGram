@@ -26,7 +26,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
     finally { setPending(false); }
   }
   return <div className="admin-actions">
-    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Trash disables login without deleting content; content moderation comes in Phase 3.</p>
+    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
     <div className="admin-action-grid">{actions.map(action => <button className="admin-button" key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
     {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
     {!selected && message && <p role="status">{message}</p>}

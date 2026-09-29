@@ -21,7 +21,7 @@ if (process.argv[2] === 'seed') {
   const db = new PGlite(directory);
   const cookies: Record<string, string> = {};
   try {
-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements]) await db.exec(sql);
+    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await db.exec(sql);
     for (const [id, role, verified, banned] of [
       ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
@@ -41,8 +41,9 @@ if (process.argv[2] === 'seed') {
   const cookies = JSON.parse(await readFile(fixturePath, 'utf8')) as Record<string, string>;
   // Better Auth prefixes its session cookie in production.
   if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
+  await fetch(origin+'/api/social');
   for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
-    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular']) {
+    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/content/demo_coast', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings']) {
       const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
       const body = await response.text();
       assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
@@ -52,7 +53,7 @@ if (process.argv[2] === 'seed') {
       if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
       else if (route === ADMIN_BASE_PATH) {
         assert.match(body, /A pulse on your community./);
-        assert.match(body, /1, 2, 3, 4, 5, 6/);
+        assert.match(body, /1, 2, 3, 4, 5, 6, 7/);
         assert.match(body, /noindex/);
       }
       assert.ok(!body.includes(secret), 'No server secret in responses');
