@@ -13,8 +13,11 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
 | 3 | Content control | Done locally; deployment pending | `phase-03-content.patch` |
 | 4 | Appearance | Done locally; deployment pending | `phase-04-appearance.patch` |
-| 5 | Feature flags, counters & maintenance | Applied to this branch; deployment pending | `FunctionGram-Phase-5-Flags-Counters.patch` |
-| 6–12 | Editable copy through handover | Not started | — |
+| 5 | Feature flags, counters & maintenance | Applied and merged to main | `FunctionGram-Phase-5-Flags-Counters.patch` |
+| 6 | Editable labels & copy | Applied and merged to main (PR #22) | `phase06.patch` |
+| 7 | Media & upload pipeline | Applied and merged to main (PR #23) | `patch07.patch` |
+| 8 | Moderation: reports, filters, safety | Applied on `arena/01a0ec62-functiongram`; deployment pending | `patch 08.patch` |
+| 9–12 | IP allowlisting through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -419,3 +422,45 @@ Applied from `patch07.patch` on top of the complete Phase 1–6 checkout. Phase 
 - Fixed local cleanup of failed processed derivatives as well as staged originals; whole-path validation still rejects traversal, and deletion remains idempotent. Added filesystem regression coverage.
 - Verification results and remaining deployment checks are recorded in `VERIFICATION.md` under Phase 7.
 - No earlier-phase feature or test was removed. Production databases, Blob objects, email services and credentials were not modified; fixtures and optional browser tooling are ignored local artifacts.
+
+## Phase 8 — Moderation: reports queue, filters, safety
+
+Implemented locally on the complete Phase 1–7 baseline (`67c0f89`) as a focused follow-on. This patch adds database migration 9 and preserves the established email/password login, `/rstmcadmin` entry point, bootstrap `admin` role, explicit owner protections, and earlier migrations/features.
+
+### Delivered
+
+- **`/rstmcadmin/moderation` and `/api/admin/moderation`**: bounded reports inbox with status, reason, target and ID/username filters; reporter/target context; internal notes; assign-to-me; target/action links; and audited, typed-ID-confirmed hide, account-ban and dismiss actions. Normal reports remain in the existing `reports` table and are visible on the next queue fetch. Resolutions record status, actor, time, notes and action target. Bans revoke existing sessions; admins cannot ban owners or other admins, and account safety controls cannot restrict privileged accounts unless operated by the owner.
+- **Word/domain policy**: server-validated draft preview and explicit publish, capped at 50 whole-token words/patterns and 50 normalized hostnames. Safe-subset regex validation excludes groups, alternation and backreferences and permits at most one repetition operator. Exact domains and their subdomains match. Enabled rules guard new captions, caption edits, comments and direct messages; they do not rewrite existing posts.
+- **Account safety**: shadow-ban and comment-ban flags/reasons live in a separate `profile_moderation` table, never in `profiles` or public `p.*` projections. Shadow-banned authors retain visibility of their own posts; feeds, direct post reads, notifications, highlights, saved collections and message-linked posts filter those posts for other viewers. Comment bans are enforced at the API write boundary.
+- **Rate-limit inspector**: recent Better Auth path/IP buckets are visible for 24 hours with endpoint path, hit count and a keyed pseudonymous client hash. The UI/API never return raw keys or IPs. A client-wide clear action uses an AES-GCM encrypted, 15-minute action token derived from the configured Better Auth secret and records an audited pseudonymous target. If the auth secret is missing/invalid, rate controls fail closed.
+- Additive, repeatable **migration 9** extends report assignment/action metadata and creates private account-moderation state. It is registered after Phase 7 migration 8 for both PGlite and managed Postgres. No profiles columns, auth schema, role defaults, earlier phase behavior, dependencies or environment variables were replaced.
+
+### Scope boundary and safety decisions
+
+- **IP allowlisting remains deferred to Phase 9**, exactly as recorded in `adminpanel.md`: it requires the owner’s current IP. Phase 8 adds no IP allowlist or guessed address. Phase 9 2FA and the established bootstrap `admin` role are unchanged.
+- Rate-limit inspection is IP-bucket based because Better Auth keys its limiter by client IP and endpoint, not by account. “Unblock client” clears all recent/current limiter buckets for that client without disclosing the address; it does not ban or unban an account.
+- Admin-only routes use the existing fresh verified-account/same-origin guards and no-store responses. Mutations are transactional with audit records. Report and moderation lists have a maximum 50-row page; rules have strict count/length bounds.
+
+### Verification
+
+- `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test:vercel` and `git diff --check` pass. Lint reports **0 errors** and the repository’s **7 existing image warnings**.
+- Automated suite: **89 tests; 86 passed, 0 failed/cancelled, 3 optional managed-PostgreSQL tests skipped** because an isolated managed database was not supplied.
+- `tests/moderation.test.ts` exercises repeatable migration 9, settings validation and preview, report filter/assign/note/hide/ban/dismiss flows, actor/status/audit records, owner/admin protections, session revocation, shadow-ban self-visibility/privacy, comment bans, and encrypted short-lived rate-limit clearing without IP leakage.
+- The real social API acceptance test confirms a normal-user report appears in a refreshed filtered queue, blocked test captions fail, and a shadow-banned author sees their own post while another user does not. Existing social/feed, message and saved-collection regressions pass after adding viewer-aware shadow-ban checks.
+- Managed-Postgres tests remain skipped without the required isolated database URL; no production database, accounts, IP allowlist, secrets, object storage, email provider or deployment settings were changed.
+
+### Apply and operate
+
+1. Apply `patches/phase-08-moderation.patch` **after the complete Phase 1–7 source** (`67c0f89` in this workspace). Run `git apply --check` before applying, then install and run typecheck, lint, tests and build. Migration 9 is appended; do not replace earlier migrations.
+2. Sign in through the existing admin login and open **Safety** at `/rstmcadmin/moderation`. Reports refresh from the server; every resolve action requires the full report ID, and ban/hide also require a reason. Use report action links or enter a profile ID for account safety controls.
+3. Preview draft filters before publishing. Enabling filters affects new captions, caption edits, comments and messages; existing content is not bulk-rewritten.
+4. Review recent rate buckets under **Rate limits** and type the displayed client hash to clear that client’s buckets. Raw IP addresses are never displayed. Do not treat this control as an account ban.
+5. `FunctionGram-Phase-8-Moderation.patch` is an identical downloadable copy; apply only one patch copy. No push or pull request was made.
+
+### Integration verification — 2026-09-29 (Phase 8)
+
+- Applied all 19 file diffs from `patch 08.patch`. Every pre-image hash in the upload matched this checkout's Git blob exactly, and all 18 code, test and configuration files landed on the upload's expected output hashes (`git hash-object`), so no implementation hunk was altered, invented or omitted.
+- The upload again replaced each new file's `--- /dev/null` marker with an HTML link and stripped the leading whitespace of context lines. Those were reconstructed against the matching original blobs before applying, exactly as `patch07.patch` was handled; the uploaded file is retained unchanged as provenance and must not be applied again.
+- The progress-document hunk was merged manually because it was authored against a tail without the retained Phase 6/7 integration notes. Its Phase 8 section is preserved verbatim above this note; nothing from the upload was cut.
+- Verified in this checkout: `npm run typecheck`, `npm run lint` (0 errors, 7 existing image warnings), `npm run build` (now lists `/rstmcadmin/moderation` and `/api/admin/moderation`) and `npm run test:vercel` (**93 tests, 90 passed, 0 failed, 3 optional managed-PostgreSQL skips**).
+- A live dev-server smoke test against isolated PGlite passed: guest/user/admin guards on the page and API, admin page render of all four surfaces, filtered report queue, assign/notes/dismiss with audit rows, account-safety round trip, draft preview, published filters rejecting a real social write with 422, and an audited rate-limit clear built from real Better Auth sign-in buckets with the client address never disclosed.

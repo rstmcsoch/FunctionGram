@@ -195,3 +195,29 @@ Applied all 47 file diffs from `patch07.patch`, retaining the complete Phase 1�
 - Public Blob URLs already known to clients cannot be recalled by application quarantine. App media URLs are blocked immediately; provider/CDN retention is separate.
 
 All generated database/upload fixtures and optional browser tooling remain ignored local files. Earlier phase features, roles, appearance, labels, feature flags and regression tests are retained.
+
+## Phase 8 integration — 2026-09-29
+
+Applied all 19 file diffs from `patch 08.patch` on top of the complete Phase 1–7 checkout. The upload carried the same HTML damage as the Phase 7 artifact (`--- /dev/null` replaced by a link for new files, leading whitespace stripped from context lines), so each file was reconstructed against the matching original blob before applying. Every pre-image hash in the upload equaled this checkout's blob and **all 18 code, test and configuration files matched the upload's expected output hashes exactly**; no implementation hunk was altered or omitted. The progress-document hunk was merged separately because it was authored against a tail without the retained Phase 6/7 integration notes, and its Phase 8 section is preserved verbatim.
+
+### Verified in this checkout
+
+- `npm run typecheck`: passed.
+- `npm run lint`: zero errors; the seven existing Next.js image warnings.
+- `npm run test:vercel`: **93 tests, 90 passed, 0 failed, 3 optional managed-PostgreSQL tests skipped**.
+- `npm run build`: passed and lists `/rstmcadmin/moderation` and `/api/admin/moderation`.
+- `git diff --check`: passed.
+- Migration 9 is additive and repeatable, registered after migration 8 for both PGlite and managed PostgreSQL, and creates the private `profile_moderation` table without adding columns to `profiles` or any public `p.*` projection.
+- Word/domain policy: whole-token matching, exact-host and subdomain matching, domain normalization (no paths/ports/invalid hosts), 50/50 limits, and rejection of unsafe regexes (`(a+)+$`, `a|b`, `(a)`, `a**`, `\1`).
+- Reports queue: filters, assign-to-me, notes, hide/dismiss with actor, status and audit rows; owner/admin ban protection; session revocation on ban; already-resolved reports return 409.
+- Account safety: shadow-banned authors keep self-visibility while other viewers lose the posts in feeds, direct reads, notifications, highlights, saved collections and message-linked posts; comment bans are enforced at the write boundary; the flags never appear in profile projections.
+- Rate-limit inspector: only a keyed client hash and endpoint path are returned, tampered or expired action tokens are rejected (403), and a clear removes that client's buckets with an audit record that contains no address. Cross-checked against the installed Better Auth 1.7.x internals, where the database limiter keys rows as `<client>|<endpoint>` and uses the `no-trusted-ip` sentinel.
+- Live dev-server smoke test on isolated PGlite (real HTTP, real session cookies): guest 401 / user 403 / admin 200 on the page and API, all four admin surfaces render, a normal user's report appears in a refreshed filtered queue, assign/notes/dismiss record the actor, account-safety flags round-trip, draft preview blocks a token, published filters reject a real social write with **422**, and a real Better Auth sign-in bucket is cleared through the encrypted token without disclosing the client address.
+
+### Remaining deployment verification
+
+- Managed-PostgreSQL migrations 8–9 still skip without `ADMIN_TEST_DATABASE_URL`; run them once against the target database or preview branch.
+- No browser sweep was repeated in this checkout. The patch-author viewport results in `patches/ADMIN_PROGRESS.md` remain historical.
+- IP allowlisting stays deferred to Phase 9, exactly as the guide records; Phase 8 adds no allowlist.
+
+No production database, account, email provider, object storage or deployment setting was modified. Local fixtures and tooling remain ignored under `.local/`.

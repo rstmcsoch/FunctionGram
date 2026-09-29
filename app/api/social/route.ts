@@ -1,3 +1,4 @@
+import {requireAllowedText,requireCommentPermission} from '@/lib/moderation-policy';
 import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
 import {MIB} from '@/lib/media-config';
 import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
@@ -51,14 +52,14 @@ export async function GET(request:Request){try{
     const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
     const cursor=parseCursor(query.get('cursor'));
     let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
-    const args:unknown[]=[user,user,user,user,other,other,user];
+    const args:unknown[]=[user,user,user,user,user,other,other,user];
     if(cursor){sql+=' AND (created_at<? OR (created_at=? AND id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
     sql+=' ORDER BY created_at DESC,id DESC LIMIT ?';args.push(limit+1);
     const rows=(await db().prepare(sql).bind(...args).all()).results;
     const items=rows.slice(0,limit);
     const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
     return json({items,next_cursor});}
-  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user).all();return json(r.results);}
+  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user,user).all();return json(r.results);}
   if(query.has('person'))return json(await person(await identity(headers),clean(query.get('person'),100,true)));
   if(query.has('highlights'))return json(await highlights(await identity(headers),clean(query.get('highlights'),100,true)));
   if(query.has('tagged'))return json(await feed(await identity(headers),300,0,{tagged:clean(query.get('tagged'),100,true)}));
@@ -148,7 +149,7 @@ export async function POST(request:Request){try{
     await database.batch([input.active?database.prepare('INSERT OR IGNORE INTO follows (follower_id,followee_id) VALUES (?,?)').bind(user,id):database.prepare('DELETE FROM follows WHERE follower_id=? AND followee_id=?').bind(user,id),input.active&&policy.flags.notifications?database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,created_at) VALUES (?,?,?,?,?)').bind('follow:'+user+':'+id,id,user,'follow',now):database.prepare('DELETE FROM notifications WHERE id=?').bind('follow:'+user+':'+id)]);return json({ok:true});
   }
   if(action==='comment'){
-    const body=clean(input.body,1000,true);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
+    const body=clean(input.body,1000,true);await requireAllowedText(body);await requireCommentPermission(await getPool(),user);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
     const commentId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO comments (id,post_id,author_id,body,created_at) VALUES (?,?,?,?,?)').bind(commentId,id,user,body,now)];
     if(policy.flags.notifications&&user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
     await database.batch(stmts);const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
@@ -176,7 +177,7 @@ export async function POST(request:Request){try{
     const contentSettings=await loadSettings(await getPool());const mediaPolicy=await readMediaConfig(await getPool());
     const kind=clean(input.kind,10,true);if(!['post','reel','story'].includes(kind))throw new AppError('Choose a post, story, or reel.');
     if(kind==='reel'&&!contentSettings['content.reelsEnabled'])throw new AppError('Reels are currently paused.',403);
-    const caption=clean(input.caption,2200),location=clean(input.location,100);const media=input.media;
+    const caption=clean(input.caption,2200),location=clean(input.location,100);await requireAllowedText(caption);const media=input.media;
     if(!Array.isArray(media)||media.length<1||media.length>mediaPolicy.maxMedia||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Check the current media-per-post limit.');
     const options=mediaOptions(input.media_options,media.length);
     const tags=input.tagged_users??[];if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
@@ -196,7 +197,7 @@ export async function POST(request:Request){try{
     const post=await availablePost(user,id);
     if(!post)throw new AppError('Post not found.',404);
     if(post.author_id!==user)throw new AppError('You can only edit your own posts.',403);
-    const caption=clean(input.caption??post.caption,2200),location=clean(input.location??post.location,100),category=clean(input.category||'For you',50);
+    const caption=clean(input.caption??post.caption,2200),location=clean(input.location??post.location,100),category=clean(input.category||'For you',50);if(input.caption!==undefined)await requireAllowedText(caption);
     if(!categories.includes(category))throw new AppError('Choose a valid category.');
     const media=JSON.parse(post.media) as string[];
     const options=mediaOptions(input.media_options,media.length);
@@ -214,7 +215,7 @@ export async function POST(request:Request){try{
   }
   if(action==='delete_post'){await availablePost(user,id);const result=await database.prepare('UPDATE posts SET deleted_at=? WHERE id=? AND author_id=?').bind(now,id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
   if(action==='message'){
-    const body=clean(input.body,2000,true);
+    const body=clean(input.body,2000,true);await requireAllowedText(body);
     // Story replies address the story's author through its post id.
     let recipientId=id;
     const storyPostId=typeof input.post_id==='string'?clean(input.post_id,100):'';
