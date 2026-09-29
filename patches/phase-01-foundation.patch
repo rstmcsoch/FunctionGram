@@ -1,0 +1,1058 @@
+From bd0bdbe3d398bc14e3f159189d465d64c920f5b6 Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 03:02:29 +0000
+Subject: [PATCH] feat(admin): implement phase one guarded foundation and
+ audited bootstrap
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ .env.example                  |   4 +
+ .gitattributes                |   1 +
+ app/api/admin/route.ts        |  10 ++
+ app/forbidden.tsx             |   4 +
+ app/rstmcadmin/layout.tsx     |  12 ++
+ app/rstmcadmin/page.tsx       |  25 ++++
+ app/unauthorized.tsx          |   4 +
+ eslint.config.mjs             |   9 ++
+ lib/admin/audit.ts            |  15 +++
+ lib/admin/config.ts           |  19 ++++
+ lib/admin/core.ts             |  85 ++++++++++++++
+ lib/admin/guard.ts            |  27 +++++
+ lib/admin/route.ts            |  23 ++++
+ lib/admin/settings.ts         |  20 ++++
+ lib/admin/validation.ts       |  28 +++++
+ lib/auth.ts                   |   3 +
+ lib/postgres-schema.ts        |  44 +++++++
+ lib/postgres.ts               |  24 ++--
+ lib/serialized-pool.ts        |  32 ++++++
+ next.config.ts                |  12 ++
+ patches/ADMIN_PROGRESS.md     |  54 ++++++++-
+ scripts/admin-browser.mjs     |  31 +++++
+ scripts/admin-check.mts       |  69 +++++++++++
+ tests/admin.test.ts           | 208 ++++++++++++++++++++++++++++++++++
+ tests/carousel-viewer.test.ts |   9 +-
+ 25 files changed, 760 insertions(+), 12 deletions(-)
+ create mode 100644 .gitattributes
+ create mode 100644 app/api/admin/route.ts
+ create mode 100644 app/forbidden.tsx
+ create mode 100644 app/rstmcadmin/layout.tsx
+ create mode 100644 app/rstmcadmin/page.tsx
+ create mode 100644 app/unauthorized.tsx
+ create mode 100644 lib/admin/audit.ts
+ create mode 100644 lib/admin/config.ts
+ create mode 100644 lib/admin/core.ts
+ create mode 100644 lib/admin/guard.ts
+ create mode 100644 lib/admin/route.ts
+ create mode 100644 lib/admin/settings.ts
+ create mode 100644 lib/admin/validation.ts
+ create mode 100644 lib/serialized-pool.ts
+ create mode 100644 scripts/admin-browser.mjs
+ create mode 100644 scripts/admin-check.mts
+ create mode 100644 tests/admin.test.ts
+
+diff --git a/.env.example b/.env.example
+index b88957b..915624a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -11,3 +11,7 @@ AUTH_TRUSTED_ORIGINS=
+ BREVO_API_KEY=
+ BREVO_SENDER_EMAIL=
+ BREVO_SENDER_NAME=RSTMC
++
++# Optional, server-only. Verified existing account to promote ONCE to admin.
++# Unset disables bootstrap. Remove after promotion; never put a password here.
++ADMIN_BOOTSTRAP_EMAIL=
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..82a9f29
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++patches/*.patch -diff linguist-generated
+diff --git a/app/api/admin/route.ts b/app/api/admin/route.ts
+new file mode 100644
+index 0000000..aac9912
+--- /dev/null
++++ b/app/api/admin/route.ts
+@@ -0,0 +1,10 @@
++import { adminRoute } from '@/lib/admin/route';
++
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++export const GET = adminRoute(async request => {
++  if (new URL(request.url).searchParams.get('ping') !== '1') {
++    return Response.json({ error: 'Unknown admin action.' }, { status: 400 });
++  }
++  return Response.json({ ok: true });
++});
+diff --git a/app/forbidden.tsx b/app/forbidden.tsx
+new file mode 100644
+index 0000000..8e305e2
+--- /dev/null
++++ b/app/forbidden.tsx
+@@ -0,0 +1,4 @@
++import Link from 'next/link';
++export default function Forbidden() {
++  return <main className="setup-page"><section className="setup-card"><h1>Access denied</h1><p>Administrator access is required. Your account does not have permission to view this page.</p><Link className="inline-flex min-h-11 items-center underline" href="/">Return to RSTMC</Link></section></main>;
++}
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+new file mode 100644
+index 0000000..fdead88
+--- /dev/null
++++ b/app/rstmcadmin/layout.tsx
+@@ -0,0 +1,12 @@
++import type { Metadata } from 'next';
++import { requireAdminPage } from '@/lib/admin/guard';
++
++export const metadata: Metadata = {
++  title: 'RSTMC — Administration',
++  robots: { index: false, follow: false },
++};
++export const dynamic = 'force-dynamic';
++export default async function AdminLayout({ children }: { children: React.ReactNode }) {
++  await requireAdminPage();
++  return <main className="setup-page"><section className="setup-card">{children}</section></main>;
++}
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+new file mode 100644
+index 0000000..1bf9579
+--- /dev/null
++++ b/app/rstmcadmin/page.tsx
+@@ -0,0 +1,25 @@
++import Link from 'next/link';
++import { requireAdminPage } from '@/lib/admin/guard';
++import { getPool } from '@/lib/postgres';
++import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++
++export default async function AdminHome() {
++  const actor = await requireAdminPage();
++  const db = await getPool();
++  const migrations = await db.query('SELECT version FROM functiongram_migrations ORDER BY version');
++  const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
++  return <>
++    <span className="brand">RSTMC<span>.</span></span>
++    <p className="eyebrow">Administration · Foundation</p>
++    <h1>Admin control room</h1>
++    <p style={{ overflowWrap: 'anywhere' }}>You are signed in as <strong>{actor.email}</strong> ({actor.role}).</p>
++    <h2 className="mt-6 text-lg font-semibold">System status</h2>
++    <ul className="my-4 space-y-2">
++      <li>Applied migrations: {migrations.rows.map(row => row.version).join(', ')}</li>
++      <li>Stored settings: {Number(settings.count)}</li>
++      <li>Access is checked on the server for every request.</li>
++    </ul>
++    <p>User management and editing tools arrive in later phases. Two-factor enforcement is planned for Phase 9.</p>
++    <Link className="mt-6 inline-flex min-h-11 items-center underline focus-visible:outline-2" href={ADMIN_BASE_PATH}>Refresh system status</Link>
++  </>;
++}
+diff --git a/app/unauthorized.tsx b/app/unauthorized.tsx
+new file mode 100644
+index 0000000..4e67457
+--- /dev/null
++++ b/app/unauthorized.tsx
+@@ -0,0 +1,4 @@
++import Link from 'next/link';
++export default function Unauthorized() {
++  return <main className="setup-page"><section className="setup-card"><h1>Sign in to continue</h1><p>Sign in to RSTMC with your verified admin account, then return to this address.</p><Link className="inline-flex min-h-11 items-center underline" href="/">Open RSTMC to sign in</Link></section></main>;
++}
+diff --git a/eslint.config.mjs b/eslint.config.mjs
+index 1c56c01..4bdfe09 100644
+--- a/eslint.config.mjs
++++ b/eslint.config.mjs
+@@ -5,6 +5,15 @@ import nextTs from "eslint-config-next/typescript";
+ const eslintConfig = defineConfig([
+   ...nextVitals,
+   ...nextTs,
++  {
++    files: ["app/api/admin/**/route.ts"],
++    rules: {
++      "no-restricted-syntax": ["error",
++        { selector: "ExportNamedDeclaration > FunctionDeclaration", message: "Admin handlers must be exported through adminRoute()." },
++        { selector: "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[id.name=/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/]:not([init.callee.name='adminRoute'])", message: "Admin handlers must use adminRoute() for authorization and CSRF." },
++      ],
++    },
++  },
+   // Override default ignores of eslint-config-next.
+   globalIgnores([
+     // Default ignores of eslint-config-next:
+diff --git a/lib/admin/audit.ts b/lib/admin/audit.ts
+new file mode 100644
+index 0000000..adac2e7
+--- /dev/null
++++ b/lib/admin/audit.ts
+@@ -0,0 +1,15 @@
++import 'server-only';
++import { getPool, type QueryExecutor } from '../postgres';
++import { insertAudit, type AuditEvent } from './core';
++import { requireAdmin } from './guard';
++import type { AdminActor } from './config';
++
++// Pass the same transaction executor as the mutation, never a separate pool.
++export function recordAudit(db: QueryExecutor, actor: AdminActor, event: AuditEvent) {
++  return insertAudit(db, actor, event);
++}
++export async function listAudit(limit = 50, request?: Request) {
++  await requireAdmin(request);
++  const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
++  return (await (await getPool()).query('SELECT * FROM admin_audit_log ORDER BY created_at DESC,id DESC LIMIT $1', [bounded])).rows;
++}
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+new file mode 100644
+index 0000000..db22b81
+--- /dev/null
++++ b/lib/admin/config.ts
+@@ -0,0 +1,19 @@
++// Route directory must match this constant; changing paths requires a redeploy.
++export const ADMIN_BASE_PATH = '/rstmcadmin';
++export const ADMIN_BOOTSTRAP_ENV = 'ADMIN_BOOTSTRAP_EMAIL';
++export const ADMIN_ROLES = ['admin', 'owner'] as const;
++export type AdminRole = typeof ADMIN_ROLES[number];
++export type AdminActor = { userId: string; email: string; role: AdminRole };
++
++// Foundation registry only. Later phases wire these into the public app.
++// No secrets, bootstrap state, role policy or audit-disable switch belongs here.
++export const SETTINGS_DEFAULTS = {
++  'brand.name': 'RSTMC.',
++  'brand.logoUrlLight': '',
++  'theme.primary': '#eb456e',
++  'theme.defaultTheme': 'system',
++  'upload.maxFileMb': 20,
++  'upload.dailyQuotaMb': 250,
++};
++export type Settings = typeof SETTINGS_DEFAULTS;
++export type SettingKey = keyof Settings;
+diff --git a/lib/admin/core.ts b/lib/admin/core.ts
+new file mode 100644
+index 0000000..6b813cf
+--- /dev/null
++++ b/lib/admin/core.ts
+@@ -0,0 +1,85 @@
++// Database primitives are separated from Next request/cache adapters so tests
++// execute the real SQL. Never expose these as actions or import into client UI.
++import { randomUUID } from 'node:crypto';
++import type { PoolLike, QueryExecutor } from '../postgres';
++import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
++import { AdminError, validateSetting } from './validation';
++
++export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) => Promise<T>): Promise<T> {
++  const db = await pool.connect();
++  try {
++    await db.query('BEGIN');
++    const result = await work(db);
++    await db.query('COMMIT');
++    return result;
++  } catch (error) { await db.query('ROLLBACK'); throw error; }
++  finally { db.release(); }
++}
++
++export async function authorizeAdmin(db: QueryExecutor, userId: string | null, ownerOnly = false): Promise<AdminActor> {
++  if (!userId) throw new AdminError('Sign in to continue.', 401);
++  // Read current state, not claims or cached role/email from a session cookie.
++  const { rows: [user] } = await db.query('SELECT id, email, role, banned, "emailVerified" FROM "user" WHERE id=$1', [userId]);
++  if (!user || user.emailVerified !== true || user.banned !== false || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
++    throw new AdminError('Administrator access required.', 403);
++  }
++  return { userId: user.id, email: user.email, role: user.role };
++}
++
++export type AuditEvent = {
++  action: string; targetType: string; targetId: string;
++  before?: unknown; after?: unknown; reason?: string;
++};
++export async function insertAudit(db: QueryExecutor, actor: AdminActor, event: AuditEvent) {
++  const encode = (value: unknown) => value === undefined ? null : JSON.stringify(value);
++  await db.query(`INSERT INTO admin_audit_log
++    (id,actor_id,actor_email,action,target_type,target_id,"before","after",reason,created_at)
++    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
++  [randomUUID(), actor.userId, actor.email, event.action, event.targetType, event.targetId, encode(event.before), encode(event.after), event.reason ?? null, Date.now()]);
++}
++
++/** A durable singleton, locked across deployments. Never delete the marker on
++ * demotion/account deletion; rotating the env email cannot reopen bootstrap. */
++export async function bootstrapAdmin(pool: PoolLike, userId: string, verifiedSessionEmail: string, configuredEmail?: string) {
++  const email = configuredEmail?.trim().toLowerCase();
++  if (!email || !email.includes('@') || verifiedSessionEmail.toLowerCase() !== email) return;
++  await transaction(pool, async db => {
++    await db.query('SELECT pg_advisory_xact_lock(67291005)');
++    if ((await db.query('SELECT id FROM admin_bootstrap WHERE id=1')).rows.length) return;
++    // An operator who recovered/promoted an admin manually must not be replaced.
++    if ((await db.query(`SELECT id FROM "user" WHERE role IN ('admin','owner') LIMIT 1`)).rows.length) return;
++    const { rows: [user] } = await db.query('SELECT id,email,role,banned,"emailVerified" FROM "user" WHERE id=$1 FOR UPDATE', [userId]);
++    if (!user || user.email.toLowerCase() !== email || !user.emailVerified || user.banned || user.role !== 'user') return;
++    await db.query('INSERT INTO admin_bootstrap(id,user_id,completed_at) VALUES(1,$1,$2)', [userId, Date.now()]);
++    await db.query('UPDATE "user" SET role=\'admin\', "updatedAt"=now() WHERE id=$1', [userId]);
++    await insertAudit(db, { userId, email: user.email, role: 'admin' }, {
++      action: 'admin.bootstrap', targetType: 'user', targetId: userId,
++      before: { role: 'user' }, after: { role: 'admin' },
++    });
++  });
++}
++
++export async function loadSettings(db: QueryExecutor): Promise<Settings> {
++  const result: Record<string, unknown> = { ...SETTINGS_DEFAULTS };
++  const { rows } = await db.query('SELECT key,value FROM app_settings WHERE key = ANY($1::text[])', [Object.keys(SETTINGS_DEFAULTS)]);
++  for (const row of rows) {
++    try { result[row.key] = validateSetting(row.key, JSON.parse(row.value)); }
++    catch { /* Corrupt/legacy values fail safely to a validated default. */ }
++  }
++  return result as Settings;
++}
++
++export async function saveSetting(pool: PoolLike, userId: string, key: string, input: unknown) {
++  const value = validateSetting(key, input);
++  await transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, userId);
++    // Includes the absent-row case, so concurrent first writes have correct before values.
++    await db.query('SELECT pg_advisory_xact_lock(67291006)');
++    const { rows: [row] } = await db.query('SELECT value FROM app_settings WHERE key=$1', [key]);
++    const before = row ? JSON.parse(row.value) : SETTINGS_DEFAULTS[key as SettingKey];
++    await db.query(`INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES($1,$2,$3,$4)
++      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at,updated_by=EXCLUDED.updated_by`,
++    [key, JSON.stringify(value), Date.now(), actor.userId]);
++    await insertAudit(db, actor, { action: 'settings.write', targetType: 'setting', targetId: key, before, after: value });
++  });
++}
+diff --git a/lib/admin/guard.ts b/lib/admin/guard.ts
+new file mode 100644
+index 0000000..a5c10a6
+--- /dev/null
++++ b/lib/admin/guard.ts
+@@ -0,0 +1,27 @@
++import 'server-only';
++import { forbidden, unauthorized } from 'next/navigation';
++import { getAppUser } from '../auth';
++import { getPool } from '../postgres';
++import { authorizeAdmin } from './core';
++import { AdminError } from './validation';
++
++export async function requireAdmin(request?: Request) {
++  const user = await getAppUser(request?.headers);
++  return authorizeAdmin(await getPool(), user?.userId ?? null);
++}
++export async function requireOwner(request?: Request) {
++  const actor = await requireAdmin(request);
++  return authorizeAdmin(await getPool(), actor.userId, true);
++}
++export async function isAdmin(request?: Request) {
++  try { await requireAdmin(request); return true; }
++  catch (error) { if (error instanceof AdminError) return false; throw error; }
++}
++export async function requireAdminPage() {
++  try { return await requireAdmin(); }
++  catch (error) {
++    if (error instanceof AdminError && error.status === 401) unauthorized();
++    if (error instanceof AdminError && error.status === 403) forbidden();
++    throw error;
++  }
++}
+diff --git a/lib/admin/route.ts b/lib/admin/route.ts
+new file mode 100644
+index 0000000..03923ff
+--- /dev/null
++++ b/lib/admin/route.ts
+@@ -0,0 +1,23 @@
++import 'server-only';
++import { AppError, sameOrigin } from '../server';
++import { requireAdmin } from './guard';
++import { AdminError } from './validation';
++import type { AdminActor } from './config';
++
++export function adminRoute(handler: (request: Request, actor: AdminActor) => Promise<Response>) {
++  return async (request: Request) => {
++    let response: Response;
++    try {
++      const actor = await requireAdmin(request);
++      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) sameOrigin(request);
++      response = await handler(request, actor);
++    } catch (error) {
++      const known = error instanceof AdminError || error instanceof AppError;
++      if (!known) console.error('Admin request failed'); // Never log credentials/data.
++      response = Response.json({ error: known ? error.message : 'Admin service unavailable.' }, { status: known ? error.status : 500 });
++    }
++    response.headers.set('Cache-Control', 'private, no-store');
++    response.headers.set('X-Robots-Tag', 'noindex, nofollow');
++    return response;
++  };
++}
+diff --git a/lib/admin/settings.ts b/lib/admin/settings.ts
+new file mode 100644
+index 0000000..4089d0a
+--- /dev/null
++++ b/lib/admin/settings.ts
+@@ -0,0 +1,20 @@
++import 'server-only';
++import { unstable_cache, revalidateTag } from 'next/cache';
++import { ensureSchema, getPool } from '../postgres';
++import { loadSettings, saveSetting } from './core';
++import { sameOrigin } from '../server';
++import { requireAdmin } from './guard';
++
++export const readSettings = unstable_cache(async () => {
++  await ensureSchema();
++  return loadSettings(await getPool());
++}, ['admin-settings-v1'], { tags: ['settings'] });
++
++// Server internal helper only: no public write endpoint in Phase 1.
++// Require the originating request so callers cannot accidentally omit CSRF.
++export async function writeSetting(key: string, value: unknown, request: Request) {
++  const actor = await requireAdmin(request);
++  sameOrigin(request);
++  await saveSetting(await getPool(), actor.userId, key, value);
++  revalidateTag('settings', { expire: 0 });
++}
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+new file mode 100644
+index 0000000..588d823
+--- /dev/null
++++ b/lib/admin/validation.ts
+@@ -0,0 +1,28 @@
++import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
++
++export class AdminError extends Error {
++  constructor(message: string, public status = 400) { super(message); }
++}
++
++export function validateSetting(key: string, value: unknown): Settings[SettingKey] {
++  if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
++  let valid = false;
++  switch (key as SettingKey) {
++    case 'brand.name': valid = typeof value === 'string' && value.trim().length > 0 && value.length <= 80 && !/[\x00-\x1f]/.test(value); break;
++    case 'brand.logoUrlLight': {
++      if (typeof value !== 'string' || value.length > 2048) break;
++      if (value === '') { valid = true; break; }
++      try {
++        const url = new URL(value);
++        valid = url.protocol === 'https:' && !url.username && !url.password;
++      } catch { valid = /^\/(?!\/)[a-zA-Z0-9/_-]+(?:\.[a-zA-Z0-9]+)?$/.test(value); }
++      break;
++    }
++    case 'theme.primary': valid = typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value); break;
++    case 'theme.defaultTheme': valid = ['system', 'light', 'dark'].includes(value as string); break;
++    case 'upload.maxFileMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100; break;
++    case 'upload.dailyQuotaMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10000; break;
++  }
++  if (!valid) throw new AdminError('Invalid setting value.');
++  return value as Settings[SettingKey];
++}
+diff --git a/lib/auth.ts b/lib/auth.ts
+index 6f43433..1470c2f 100644
+--- a/lib/auth.ts
++++ b/lib/auth.ts
+@@ -2,6 +2,8 @@ import { betterAuth } from 'better-auth';
+ import { headers } from 'next/headers';
+ import { after } from 'next/server';
+ import { ensureSchema, getPool } from './postgres';
++import { bootstrapAdmin } from './admin/core';
++import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
+ import { authConfiguration } from './auth-config';
+ import {
+   claimTransactionalEmail, claimVerificationEmail, createVerificationEmailSender,
+@@ -87,5 +89,6 @@ export async function getAppUser(requestHeaders?: Headers) {
+   await ensureSchema();
+   const session=await (await getAuth()).api.getSession({headers:requestHeaders??await headers()});
+   if(!session?.user.emailVerified) return null;
++  await bootstrapAdmin(await getPool(), session.user.id, session.user.email, process.env[ADMIN_BOOTSTRAP_ENV]);
+   return {userId:session.user.id,email:session.user.email,fullName:session.user.name,displayName:session.user.name};
+ }
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index 92e85eb..db2d132 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -60,3 +60,47 @@ export const accountUpgradeStatements: string[] = [
+   "ALTER TABLE \"messages\" ADD COLUMN IF NOT EXISTS \"post_id\" text REFERENCES \"posts\"(\"id\") ON DELETE SET NULL",
+   "CREATE INDEX IF NOT EXISTS \"idx_messages_post\" ON \"messages\" (\"post_id\")"
+ ];
++
++// Version 5: additive admin foundation; no public moderation behavior changes yet.
++export const adminUpgradeStatements: string[] = [
++  "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS role           text    NOT NULL DEFAULT 'user'",
++  "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS banned         boolean NOT NULL DEFAULT false",
++  "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS \"banReason\"    text",
++  "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS \"banExpires\"   timestamptz",
++  "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS \"twoFactorEnabled\" boolean NOT NULL DEFAULT false",
++  "ALTER TABLE session ADD COLUMN IF NOT EXISTS \"impersonatedBy\" text",
++  "CREATE INDEX IF NOT EXISTS user_role_idx ON \"user\"(role)",
++  "CREATE TABLE IF NOT EXISTS \"twoFactor\" (\n  id text PRIMARY KEY,\n  secret text NOT NULL,\n  \"backupCodes\" text NOT NULL,\n  \"userId\" text NOT NULL REFERENCES \"user\"(id) ON DELETE CASCADE,\n  verified boolean NOT NULL DEFAULT false,\n  \"failedVerificationCount\" integer NOT NULL DEFAULT 0,\n  \"lockedUntil\" timestamptz\n)",
++  "CREATE INDEX IF NOT EXISTS two_factor_user_id_idx ON \"twoFactor\"(\"userId\")",
++  "CREATE TABLE IF NOT EXISTS app_settings (\n  key text PRIMARY KEY, value text NOT NULL, updated_at bigint NOT NULL, updated_by text\n)",
++  "CREATE TABLE IF NOT EXISTS admin_audit_log (\n  id text PRIMARY KEY, actor_id text NOT NULL, actor_email text NOT NULL,\n  action text NOT NULL, target_type text, target_id text,\n  before text, after text, reason text, ip text, user_agent text, created_at bigint NOT NULL\n)",
++  "CREATE INDEX IF NOT EXISTS audit_created_idx ON admin_audit_log(created_at DESC)",
++  "CREATE INDEX IF NOT EXISTS audit_actor_idx   ON admin_audit_log(actor_id, created_at DESC)",
++  "CREATE INDEX IF NOT EXISTS audit_target_idx  ON admin_audit_log(target_type, target_id)",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS hidden_at bigint",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS hidden_by text",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS hidden_reason text",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS deleted_at bigint",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS pinned_at bigint",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS base_comments integer NOT NULL DEFAULT 0",
++  "ALTER TABLE posts    ADD COLUMN IF NOT EXISTS base_views    integer NOT NULL DEFAULT 0",
++  "ALTER TABLE comments ADD COLUMN IF NOT EXISTS hidden_at bigint",
++  "ALTER TABLE comments ADD COLUMN IF NOT EXISTS hidden_by text",
++  "ALTER TABLE comments ADD COLUMN IF NOT EXISTS deleted_at bigint",
++  "ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at bigint",
++  "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at bigint",
++  "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verified   integer NOT NULL DEFAULT 0",
++  "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_followers integer",
++  "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_following integer",
++  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS status     text NOT NULL DEFAULT 'new'",
++  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS handled_by text",
++  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS handled_at bigint",
++  "ALTER TABLE reports ADD COLUMN IF NOT EXISTS notes      text",
++  "CREATE INDEX IF NOT EXISTS reports_status_idx ON reports(status, created_at DESC)",
++  "CREATE INDEX IF NOT EXISTS reports_target_idx ON reports(target_type, target_id)",
++  "CREATE TABLE IF NOT EXISTS site_pages (\n  id text PRIMARY KEY, slug text NOT NULL UNIQUE, title text NOT NULL, body text NOT NULL DEFAULT '',\n  published boolean NOT NULL DEFAULT false, seo_title text, seo_description text, og_image text,\n  show_in_footer boolean NOT NULL DEFAULT false, footer_order integer NOT NULL DEFAULT 0,\n  created_at bigint NOT NULL, updated_at bigint NOT NULL, updated_by text\n)",
++  "CREATE TABLE IF NOT EXISTS announcements (\n  id text PRIMARY KEY, kind text NOT NULL DEFAULT 'banner',        \n  title text, body text NOT NULL, href text, tone text NOT NULL DEFAULT 'info',\n  starts_at bigint, ends_at bigint, dismissible boolean NOT NULL DEFAULT true,\n  audience text NOT NULL DEFAULT 'all', published boolean NOT NULL DEFAULT false,\n  created_at bigint NOT NULL, created_by text\n)",
++  "CREATE TABLE IF NOT EXISTS post_views (\n  post_id text NOT NULL REFERENCES posts(id) ON DELETE CASCADE,\n  viewer_id text NOT NULL, created_at bigint NOT NULL, PRIMARY KEY(post_id, viewer_id)\n)",
++  "CREATE INDEX IF NOT EXISTS post_views_post_idx ON post_views(post_id)",
++  "CREATE TABLE IF NOT EXISTS admin_bootstrap (id integer PRIMARY KEY CHECK (id = 1), user_id text NOT NULL, completed_at bigint NOT NULL)"
++];
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index 18fdec3..b886d84 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -1,7 +1,8 @@
+ import path from 'node:path';
+ import { Pool, types, type QueryResultRow } from 'pg';
++import { serializedPool } from './serialized-pool';
+ import { postgresQuery } from './sql';
+-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements } from './postgres-schema';
++import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements } from './postgres-schema';
+ 
+ types.setTypeParser(20, value => Number(value));
+ types.setTypeParser(1700, value => Number(value));
+@@ -20,6 +21,7 @@ const migrations = [
+   { version: 2, statements: socialUpgradeStatements },
+   { version: 3, statements: aspectUpgradeStatements },
+   { version: 4, statements: accountUpgradeStatements },
++  { version: 5, statements: adminUpgradeStatements },
+ ];
+ 
+ let pool: Pool | undefined;
+@@ -74,10 +76,7 @@ async function createLocalPool(): Promise<PoolLike> {
+     const isRead = /^\s*(SELECT|WITH|VALUES|TABLE|SHOW)\b/i.test(text);
+     return { rows: result.rows as QueryResultRow[], rowCount: isRead ? result.rows.length : result.affectedRows ?? result.rows.length };
+   };
+-  return {
+-    query,
+-    async connect() { return { query, release() {} }; },
+-  };
++  return serializedPool({ query });
+ }
+ 
+ async function getLocalPool(): Promise<PoolLike> {
+@@ -113,8 +112,17 @@ export async function ensureSchema() {
+   if (!ready) ready = (async () => {
+     if (localDevDatabase()) {
+       const database = await getLocalPool();
+-      for (const migration of migrations)
+-        for (const statement of migration.statements) await database.query(statement);
++      const client = await database.connect();
++      try {
++        await client.query('BEGIN');
++        await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
++        for (const migration of migrations) {
++          for (const statement of migration.statements) await client.query(statement);
++          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
++        }
++        await client.query('COMMIT');
++      } catch (error) { await client.query('ROLLBACK'); throw error; }
++      finally { client.release(); }
+       return;
+     }
+     const client = await (await getPool()).connect();
+@@ -122,7 +130,7 @@ export async function ensureSchema() {
+       await client.query('BEGIN');
+       await client.query('SELECT pg_advisory_xact_lock(67291004)');
+       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements]] as const) {
++      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements]] as const) {
+         const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
+         if (!applied.rowCount) {
+           for (const statement of statements) await client.query(statement);
+diff --git a/lib/serialized-pool.ts b/lib/serialized-pool.ts
+new file mode 100644
+index 0000000..60374a0
+--- /dev/null
++++ b/lib/serialized-pool.ts
+@@ -0,0 +1,32 @@
++import type { PoolLike, QueryExecutor } from './postgres';
++
++/** PGlite has one connection. Reserve it until release, including against
++ * standalone pool queries, so no request can join another request's transaction. */
++export function serializedPool(executor: QueryExecutor): PoolLike {
++  let tail = Promise.resolve();
++  async function acquire() {
++    const previous = tail;
++    let unlock!: () => void;
++    tail = new Promise<void>(resolve => { unlock = resolve; });
++    await previous;
++    return unlock;
++  }
++  return {
++    async query(text, values) {
++      const release = await acquire();
++      try { return await executor.query(text, values); }
++      finally { release(); }
++    },
++    async connect() {
++      const unlock = await acquire();
++      let released = false;
++      return {
++        query(text, values) {
++          if (released) throw new Error('Database connection already released.');
++          return executor.query(text, values);
++        },
++        release() { if (!released) { released = true; unlock(); } },
++      };
++    },
++  };
++}
+diff --git a/next.config.ts b/next.config.ts
+index c34005d..04ae105 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,9 +1,21 @@
+ import type { NextConfig } from "next";
+ 
++import { ADMIN_BASE_PATH } from "./lib/admin/config";
++
+ const nextConfig: NextConfig = {
+   // The embedded dev database must run unbundled (its filesystem layer reads
+   // its own wasm assets at runtime). It is only used by `next dev` without a
+   // DATABASE_URL; production deployments never touch it.
++  experimental: { authInterrupts: true },
++  async headers() {
++    return [ADMIN_BASE_PATH + '/:path*', '/api/admin/:path*'].map(source => ({
++      source,
++      headers: [
++        { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
++        { key: 'Cache-Control', value: 'private, no-store' },
++      ],
++    }));
++  },
+   serverExternalPackages: ["@electric-sql/pglite"],
+ };
+ 
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 42a1684..7591a7c 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -9,7 +9,7 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
+ | Phase | Name | Status | Artifact |
+ | --- | --- | --- | --- |
+ | 0 | Discovery | Done; access defaults and bootstrap role confirmed | This report (notes-only exception in §7) |
+-| 1 | Foundation | Not started | — |
++| 1 | Foundation | Done locally; deployment activation pending | `phase-01-foundation.patch` |
+ | 2–12 | Users through handover | Not started | — |
+ 
+ No application code, environment files, secrets, or production data changed in discovery.
+@@ -70,3 +70,55 @@ Phase 0 intentionally has no application patch, as permitted by §7. Phase 1 and
+ - Bootstrap role must be `admin`, not `owner`, as explicitly selected. Owner-only actions will therefore require a separate explicit owner promotion later.
+ - A handle is not an authentication email. `@rstmcadmin` must not become a shared credential, password, or automatic username-based privilege grant. Bootstrap remains tied to the verified email configured privately as `ADMIN_BOOTSTRAP_EMAIL`. The actual email has not been supplied/configured by this session.
+ - Phase 1 is still not implemented. Proceed with email-based, disabled-until-configured bootstrap; no default password and no separate credential store.
++
++
++## Phase 1 — Foundation (2026-09-29)
++
++### Delivered
++
++- Additive migration 5 exported as `adminUpgradeStatements` and registered in BOTH migration paths: roles/bans/2FA-ready schema, settings, audit, moderation fields, report workflow fields, CMS/announcements, view tracking, and a private singleton bootstrap marker.
++- Local migrations now record versions 1–5. A serialized PGlite pool reserves its sole connection across transactions and standalone queries, preventing requests from accidentally joining another request's transaction.
++- Config, typed setting allowlist/validation, cached settings reads, immediate tag invalidation after writes, atomic setting+audit transactions, bounded audit reads, admin/owner guards, shared guarded/CSRF-checked route wrapper and an ESLint rule for raw admin handlers.
++- Protected server-rendered shell at `/rstmcadmin`; protected `GET /api/admin?ping=1`. Both layout and page check authorization. No write HTTP endpoint is exposed in this phase.
++- Guest sign-in-required page with HTTP 401, actual HTTP 403 for signed-in non-admins, noindex metadata/headers, no-store production responses.
++- The configured existing verified email is promoted to `admin` on its first authenticated app request. No username-based promotion, default account creation or default password. Promotion and its audit entry are atomic. The singleton survives demotion/deletion and environment-email rotation. An existing admin/owner prevents initial bootstrap.
++- `scripts/admin-check.mts` provides reproducible isolated fixture seeding and HTTP authorization checks. `scripts/admin-browser.mjs` provides optional headless viewport/theme checks.
++
++### Verified on the final locked dependency tree
++
++- `npm ci --no-audit --no-fund`: passed; package manifests/lockfile unchanged.
++- `npm run lint`: passed (0 errors, the same 7 pre-existing image warnings).
++- `ADMIN_TEST_DATABASE_URL=<disposable-local-postgres> npm run test:vercel`: **38/38 passed, no skips**. Without that optional URL, 36 pass and 2 managed-Postgres checks skip by design. Never point it at production.
++- `npm run build`: passed (webpack and TypeScript).
++- `npm run typecheck`: passed.
++- Migration tests: fresh/populated PGlite, idempotent repeat, better-auth admin/two-factor plugin column compatibility; PostgreSQL 18 migration from 1–4 to 5; actual managed `ensureSchema()` runner verified ledger `[1,2,3,4,5]`.
++- Bootstrap concurrency tested with both serialized PGlite and multiple real PostgreSQL connections. Replay, missing env, wrong email, unverified identity, bans, existing owner, demotion, deletion and changed email covered.
++- Settings tests: defaults, invalid colors/URLs/limits/unknown keys, denied non-admin writes, serialized before/after history, atomic rollback on audit failure, malformed stored-value fallback. Cache adapter's tag/invalidation contract is asserted; end-to-end settings UI/cache behavior remains for the phase that exposes settings editing.
++- Live HTTP matrix on BOTH dev/PGlite and production-build/PostgreSQL: guest 401; ordinary user 403; admin 200; banned admin 403; unverified/expired/revoked/forged session 401, independently for page and API. No denied panel markup or test secret in responses. Robots headers verified. Unsupported writes, including foreign-Origin requests, return 405 (no mutation endpoint yet); existing social CSRF regression tests pass.
++- Headless Chromium: widths 320/360/390/430/768/1024, light and dark, no horizontal overflow, keyboard-reachable link with visible focus and >=44px height. Theme is applied after hydration for the test. No public UI behavior was changed.
++- `git diff --check`: passed. Independent patch apply-check recorded below after packaging.
++
++### Decisions/deviations
++
++- This checkout retained the Phase 0 report but not the earlier reported commits; the report was preserved in local commit `1dccaa7` before Phase 1. Trust the actual repository history.
++- The guide's local ledger assumption was incorrect; Phase 1 adds it without changing production migration semantics.
++- Next.js `experimental.authInterrupts` is enabled to return genuine 401/403 page responses using `unauthorized()` / `forbidden()`, rather than a 200 error screen. Verified against the production build as well as dev.
++- Ban expiry enforcement, short admin sessions, 2FA enforcement and role-management actions remain later phases. For now **any banned admin is denied**, even when banExpires is in the past; this fails closed. 2FA columns/tables are prepared, not enabled.
++- Six typed starter settings are storage foundations only; they do not change public branding or upload behavior until the relevant later phases. No secrets or bootstrap state are exposed through settings.
++- Bootstrap role stays `admin` as explicitly requested. Owner-only functionality later needs explicit owner promotion; requireOwner already denies ordinary admins.
++- `ADMIN_BASE_PATH` is defined once. The App Router directory must match it; changing the constant alone cannot rename a filesystem route. Path changes require a coordinated directory change/redeploy, not a live database setting.
++- Fixed an existing carousel test fixture with missing required Person/Post fields and boolean values where numeric reaction flags are required, so the current checkout passes strict type checking. No production component changed for this fix.
++- PostgreSQL and Chromium tooling/data were isolated under ignored `.local/`; temporary browser installs were removed with `npm ci`. No binaries, test database, screenshots, auth cookies, or runtime credentials enter the patch.
++- No Neon/Vercel deployment verification has been performed. Local real-Postgres verification is not a claim about the production deployment.
++
++### Activation by the owner (no password needed in chat)
++
++1. Deploy the reviewed code with the existing working database/auth/email configuration.
++2. In Vercel, set server-only `ADMIN_BOOTSTRAP_EMAIL` to the email of your existing verified account, then redeploy. Leave it blank to keep bootstrap disabled. `@rstmcadmin` alone is not an email or credential.
++3. Sign in normally and open `/rstmcadmin`; the first eligible authenticated request promotes the account once. Check the displayed email/role.
++4. Remove `ADMIN_BOOTSTRAP_EMAIL` after confirming access, then redeploy. Changing it later does not reset bootstrap. Never delete the private bootstrap marker to rotate an administrator.
++5. Do not treat this foundation as the finished hardened admin panel: 2FA enforcement and advanced session controls are planned for Phase 9.
++
++### Next phase
++
++Phase 2 only: dashboard/users table and guarded, validated, audited user actions. Read the guide first; maintain the per-page guard in addition to the layout and use adminRoute for every API method. Do not enable better-auth admin mutation endpoints without matching authorization/auditing. Preserve Phase 1's patch; produce a separate Phase 2 patch.
+diff --git a/scripts/admin-browser.mjs b/scripts/admin-browser.mjs
+new file mode 100644
+index 0000000..9511398
+--- /dev/null
++++ b/scripts/admin-browser.mjs
+@@ -0,0 +1,31 @@
++// Optional browser QA: install playwright-core and @sparticuz/chromium without changing the lockfile.
++// Run after scripts/admin-check.mts seed and starting the isolated dev server.
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import { chromium as playwright } from 'playwright-core';
++import chromium from '@sparticuz/chromium';
++const cookies = JSON.parse(fs.readFileSync('.local/admin-check.json', 'utf8'));
++const browser = await playwright.launch({ executablePath: await chromium.executablePath(), args: chromium.args.filter(arg => arg !== '--single-process'), headless: true });
++try {
++ for (const width of [320,360,390,430,768,1024]) for (const theme of ['light','dark']) {
++  const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
++  const [name,...value] = cookies.admin.split('=');
++  await context.addCookies([{name,value:value.join('='),domain:'localhost',path:'/'}]);
++  const page = await context.newPage();
++  const response = await page.goto('http://localhost:3000/rstmcadmin');
++  assert.equal(response.status(),200);
++  await page.getByRole('heading',{name:'Admin control room'}).waitFor();
++  await page.waitForLoadState('networkidle');
++  await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
++  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth), `overflow ${width} ${theme}`);
++  const link = page.getByRole('link', {name:'Refresh system status'});
++  assert.ok((await link.boundingBox()).height >=44);
++  for (let i = 0; i < 5 && !(await link.evaluate(e=>document.activeElement===e)); i++) await page.keyboard.press('Tab');
++  assert.equal(await link.evaluate(e=>document.activeElement===e),true);
++  assert.ok(await link.evaluate(e=>getComputedStyle(e).outlineStyle !== 'none'));
++  assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
++  if(width===390) await page.screenshot({path:`.local/admin-${theme}.png`,fullPage:true});
++  await context.close();
++  console.log(`Admin browser passed: ${width}px ${theme}`);
++ }
++} finally { await browser.close(); }
+diff --git a/scripts/admin-check.mts b/scripts/admin-check.mts
+new file mode 100644
+index 0000000..e97107c
+--- /dev/null
++++ b/scripts/admin-check.mts
+@@ -0,0 +1,69 @@
++/** Local-only HTTP regression runner.
++ * 1. node --import tsx scripts/admin-check.mts seed
++ * 2. Start next dev with the printed test environment (no .env.local edits).
++ * 3. node --import tsx scripts/admin-check.mts check
++ * Never run the seed against a managed database; it only opens .local/admin-check-db.
++ */
++import assert from 'node:assert/strict';
++import { createHmac, randomBytes } from 'node:crypto';
++import { mkdir, readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { PGlite } from '@electric-sql/pglite';
++import * as schema from '../lib/postgres-schema';
++import { ADMIN_BASE_PATH } from '../lib/admin/config';
++
++const directory = path.resolve('.local/admin-check-db');
++const fixturePath = path.resolve('.local/admin-check.json');
++const secret = 'phase-one-local-test-secret-not-for-deployment-2026';
++const origin = process.env.ADMIN_TEST_ORIGIN || 'http://localhost:3000';
++if (process.argv[2] === 'seed') {
++  await mkdir(path.dirname(directory), { recursive: true });
++  const db = new PGlite(directory);
++  const cookies: Record<string, string> = {};
++  try {
++    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements]) await db.exec(sql);
++    for (const [id, role, verified, banned] of [
++      ['regular', 'user', true, false], ['admin', 'admin', true, false],
++      ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
++      ['expired', 'admin', true, false], ['revoked', 'admin', true, false],
++    ] as const) {
++      await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)
++        ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,"emailVerified"=EXCLUDED."emailVerified",banned=EXCLUDED.banned`,
++      [id, `${id}@example.test`, role, verified, banned]);
++      const token = randomBytes(32).toString('hex');
++      if (id !== 'revoked') await db.query('INSERT INTO session(id,token,"userId","expiresAt") VALUES($1,$1,$2,$3)', [token, id, new Date(Date.now() + (id === 'expired' ? -3600000 : 86400000))]);
++      cookies[id] = 'better-auth.session_token=' + encodeURIComponent(`${token}.${createHmac('sha256', secret).update(token).digest('base64')}`);
++    }
++    await writeFile(fixturePath, JSON.stringify(cookies), { mode: 0o600 });
++  } finally { await db.close(); }
++  console.log(`Seeded isolated fixtures. Start dev with DATABASE_URL= POSTGRES_URL= ADMIN_BOOTSTRAP_EMAIL= BREVO_API_KEY=local-test-not-a-real-key BREVO_SENDER_EMAIL=noreply@example.test BETTER_AUTH_SECRET=${secret} BETTER_AUTH_URL=${origin} FUNCTIONGRAM_PGLITE_DIR=${directory}`);
++} else if (process.argv[2] === 'check') {
++  const cookies = JSON.parse(await readFile(fixturePath, 'utf8')) as Record<string, string>;
++  // Better Auth prefixes its session cookie in production.
++  if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
++  for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
++    for (const route of [ADMIN_BASE_PATH, '/api/admin?ping=1']) {
++      const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
++      const body = await response.text();
++      assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
++      assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow');
++      // Next dev overrides page Cache-Control with no-cache, must-revalidate.
++      assert.match(response.headers.get('cache-control') || '', route === ADMIN_BASE_PATH ? /no-store|no-cache/ : /no-store/);
++      if (who !== 'admin') assert.ok(!body.includes('Admin control room'), 'Denied response must not contain panel markup');
++      else if (route === ADMIN_BASE_PATH) {
++        assert.match(body, /Admin control room/);
++        assert.match(body, /1, 2, 3, 4, 5/);
++        assert.match(body, /noindex/);
++      }
++      assert.ok(!body.includes(secret), 'No server secret in responses');
++      console.log(`${who}: ${route} → ${response.status}`);
++    }
++  }
++  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
++    const response = await fetch(origin + '/api/admin', { method, headers: { cookie: cookies.admin, origin: 'https://foreign.example.test' } });
++    assert.equal(response.status, 405, 'Phase 1 exposes no write endpoint, including cross-origin requests');
++  }
++  console.log('Admin HTTP checks passed. No production data or real accounts used.');
++} else {
++  throw new Error('Use seed or check. Stop the dev server before re-seeding PGlite.');
++}
+diff --git a/tests/admin.test.ts b/tests/admin.test.ts
+new file mode 100644
+index 0000000..8d8ad77
+--- /dev/null
++++ b/tests/admin.test.ts
+@@ -0,0 +1,208 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { readFileSync } from 'node:fs';
++import { PGlite } from '@electric-sql/pglite';
++import { Pool } from 'pg';
++import { getAuthTables } from 'better-auth/db';
++import { admin, twoFactor } from 'better-auth/plugins';
++import * as schema from '../lib/postgres-schema';
++import { serializedPool } from '../lib/serialized-pool';
++import type { PoolLike } from '../lib/postgres';
++import { authorizeAdmin, bootstrapAdmin, insertAudit, loadSettings, saveSetting, transaction } from '../lib/admin/core';
++import { SETTINGS_DEFAULTS } from '../lib/admin/config';
++import { validateSetting } from '../lib/admin/validation';
++
++const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
++async function fixture() {
++  const db = new PGlite();
++  for (const sql of [...old, ...schema.adminUpgradeStatements]) await db.exec(sql);
++  const pool = serializedPool({ async query(sql, values) {
++    const result = await db.query(sql, values);
++    return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
++  } });
++  return { db, pool };
++}
++async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = true, banned = false) {
++  await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
++}
++
++test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
++  const db = new PGlite();
++  try {
++    for (const sql of old) await db.exec(sql);
++    await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
++    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements]) await db.exec(sql);
++    const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
++    assert.deepEqual(existing, { role: 'user', banned: false });
++    const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
++    for (const table of Object.values(tables)) {
++      const { rows } = await db.query<{ column_name: string }>('SELECT column_name FROM information_schema.columns WHERE table_name=$1', [table.modelName]);
++      const columns = new Set(rows.map(row => row.column_name));
++      for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
++    }
++    const source = readFileSync('lib/postgres.ts', 'utf8');
++    assert.match(source, /version: 5, statements: adminUpgradeStatements/);
++    assert.match(source, /\[5, adminUpgradeStatements\]/);
++  } finally { await db.close(); }
++});
++
++test('guard denies guests, users, missing/blank roles, unverified/banned admins; role changes apply immediately', async () => {
++  const { db, pool } = await fixture();
++  try {
++    await assert.rejects(authorizeAdmin(pool, null), { status: 401 });
++    await assert.rejects(authorizeAdmin(pool, 'missing'), { status: 403 });
++    for (const role of ['user', '', 'moderator', 'admin,owner']) {
++      await user(pool, `role-${role}`, role);
++      await assert.rejects(authorizeAdmin(pool, `role-${role}`), { status: 403 });
++    }
++    await user(pool, 'unverified', 'admin', false);
++    await user(pool, 'banned', 'admin', true, true);
++    for (const id of ['unverified', 'banned']) await assert.rejects(authorizeAdmin(pool, id), { status: 403 });
++    await user(pool);
++    assert.equal((await authorizeAdmin(pool, 'admin')).role, 'admin');
++    await assert.rejects(authorizeAdmin(pool, 'admin', true), { status: 403 });
++    await pool.query('UPDATE "user" SET role=\'owner\' WHERE id=\'admin\'');
++    assert.equal((await authorizeAdmin(pool, 'admin', true)).role, 'owner');
++    await pool.query('UPDATE "user" SET role=\'user\' WHERE id=\'admin\'');
++    await assert.rejects(authorizeAdmin(pool, 'admin'), { status: 403 });
++  } finally { await db.close(); }
++});
++
++test('bootstrap requires configured verified email, is concurrent-safe, audited once and inert after demotion/email rotation/deletion', async () => {
++  const { db, pool } = await fixture();
++  try {
++    await user(pool, 'first', 'user', false);
++    await bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test');
++    assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 0);
++    await pool.query('UPDATE "user" SET "emailVerified"=true WHERE id=\'first\'');
++    await bootstrapAdmin(pool, 'first', 'first@example.test');
++    await bootstrapAdmin(pool, 'first', 'first@example.test', 'other@example.test');
++    await bootstrapAdmin(pool, 'first', 'spoof@example.test', 'first@example.test');
++    assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 0);
++    await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', ' FIRST@example.test ')));
++    assert.equal((await authorizeAdmin(pool, 'first')).role, 'admin');
++    assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length, 1);
++    await pool.query('UPDATE "user" SET role=\'user\' WHERE id=\'first\'');
++    await bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test');
++    await assert.rejects(authorizeAdmin(pool, 'first'), { status: 403 });
++    await user(pool, 'second', 'user');
++    await bootstrapAdmin(pool, 'second', 'second@example.test', 'second@example.test');
++    await pool.query('DELETE FROM "user" WHERE id=\'first\'');
++    await bootstrapAdmin(pool, 'second', 'second@example.test', 'second@example.test');
++    await assert.rejects(authorizeAdmin(pool, 'second'), { status: 403 });
++    assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length, 1);
++  } finally { await db.close(); }
++});
++
++test('bootstrap never promotes banned accounts or adds an admin beside an existing owner', async () => {
++  const { db, pool } = await fixture();
++  try {
++    await user(pool, 'candidate', 'user', true, true);
++    await bootstrapAdmin(pool, 'candidate', 'candidate@example.test', 'candidate@example.test');
++    assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 0);
++    await pool.query('UPDATE "user" SET banned=false');
++    await user(pool, 'owner', 'owner');
++    await bootstrapAdmin(pool, 'candidate', 'candidate@example.test', 'candidate@example.test');
++    await assert.rejects(authorizeAdmin(pool, 'candidate'), { status: 403 });
++  } finally { await db.close(); }
++});
++
++test('settings default, validate, authorize, serialize before/after and roll back when audit fails', async () => {
++  const { db, pool } = await fixture();
++  try {
++    assert.deepEqual(await loadSettings(pool), SETTINGS_DEFAULTS);
++    await user(pool);
++    await user(pool, 'ordinary', 'user');
++    await assert.rejects(saveSetting(pool, 'ordinary', 'brand.name', 'No'), { status: 403 });
++    await Promise.all(['First', 'Second'].map(value => saveSetting(pool, 'admin', 'brand.name', value)));
++    assert.equal((await loadSettings(pool))['brand.name'], 'Second');
++    const logs = (await pool.query('SELECT "before","after",actor_id,action FROM admin_audit_log ORDER BY created_at')).rows;
++    assert.equal(logs.length, 2);
++    assert.equal(logs[0].before, JSON.stringify('RSTMC.'));
++    assert.equal(logs[1].before, JSON.stringify('First'));
++    assert.equal(logs[1].after, JSON.stringify('Second'));
++    assert.equal(logs[1].actor_id, 'admin');
++    // Trigger simulates an audit-storage failure. Neither setting nor audit may partially commit.
++    await db.exec(`CREATE FUNCTION reject_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'audit unavailable'; END $$;
++      CREATE TRIGGER reject_audit BEFORE INSERT ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_audit()`);
++    await assert.rejects(saveSetting(pool, 'admin', 'brand.name', 'Should rollback'));
++    assert.equal((await loadSettings(pool))['brand.name'], 'Second');
++    await db.exec('DROP TRIGGER reject_audit ON admin_audit_log');
++    await transaction(pool, tx => insertAudit(tx, { userId: 'admin', email: 'admin@example.test', role: 'admin' }, { action: 'test.write', targetType: 'test', targetId: '1' }));
++    assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length, 3);
++    await pool.query('UPDATE app_settings SET value=\'not json\' WHERE key=\'brand.name\'');
++    assert.equal((await loadSettings(pool))['brand.name'], SETTINGS_DEFAULTS['brand.name']);
++    const adapter = readFileSync('lib/admin/settings.ts', 'utf8');
++    assert.match(adapter, /tags: \['settings'\]/);
++    assert.match(adapter, /revalidateTag\('settings', \{ expire: 0 \}\)/);
++  } finally { await db.close(); }
++});
++
++test('setting allowlist rejects unsafe colors, URLs, sizes, unknown keys and secrets', () => {
++  for (const [key, value] of [
++    ['theme.primary', '</style><script>'], ['theme.primary', '#fff; color:red'],
++    ['brand.logoUrlLight', 'javascript:alert(1)'], ['brand.logoUrlLight', '//evil.test/x'],
++    ['brand.logoUrlLight', 'https://user:pass@example.test'], ['brand.logoUrlLight', '/\\evil'],
++    ['upload.maxFileMb', 0], ['upload.maxFileMb', 101], ['upload.maxFileMb', NaN],
++    ['upload.dailyQuotaMb', '250'], ['brand.name', ''], ['__proto__', {}],
++    ['BETTER_AUTH_SECRET', 'secret'], ['system.auditEnabled', false],
++  ] as [string, unknown][]) assert.throws(() => validateSetting(key, value), { status: 400 });
++  assert.equal(validateSetting('theme.primary', '#aabbcc'), '#aabbcc');
++  assert.equal(validateSetting('brand.logoUrlLight', '/api/media/key'), '/api/media/key');
++});
++
++test('PGlite standalone queries cannot join an open transaction', async () => {
++  const { db, pool } = await fixture();
++  try {
++    const client = await pool.connect();
++    await client.query('BEGIN');
++    await client.query('INSERT INTO app_settings VALUES(\'brand.name\',\'"uncommitted"\',0,NULL)');
++    let finished = false;
++    const read = pool.query('SELECT * FROM app_settings').then(result => { finished = true; return result; });
++    await new Promise(resolve => setTimeout(resolve, 20));
++    assert.equal(finished, false);
++    await client.query('ROLLBACK');
++    client.release();
++    assert.equal((await read).rows.length, 0);
++    client.release(); // harmless twice
++  } finally { await db.close(); }
++});
++
++// Set ONLY to a disposable PostgreSQL database. Never use a production URL.
++test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 5', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
++  const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL });
++  const client = await pool.connect();
++  try {
++    await client.query('BEGIN');
++    await client.query('CREATE SCHEMA admin_phase_one_test');
++    await client.query('SET LOCAL search_path TO admin_phase_one_test');
++    for (const sql of old) await client.query(sql);
++    for (let i = 0; i < 2; i++) for (const sql of schema.adminUpgradeStatements) await client.query(sql);
++    assert.equal(Number((await client.query('SELECT COUNT(*) FROM app_settings')).rows[0].count), 0);
++  } finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
++});
++
++test('managed PostgreSQL serializes concurrent bootstrap and settings transactions across connections', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
++  const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
++  try {
++    await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
++    for (const sql of [...old, ...schema.adminUpgradeStatements]) await pool.query(sql);
++    await user(pool, 'first', 'user');
++    await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
++    assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);
++    assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length, 1);
++    await Promise.all(['A', 'B', 'C'].map(value => saveSetting(pool, 'first', 'brand.name', value)));
++    const rows = (await pool.query('SELECT "before","after" FROM admin_audit_log WHERE action=\'settings.write\' ORDER BY created_at,id')).rows;
++    assert.equal(rows.length, 3);
++    // Transactions may acquire their advisory lock in any order; their before
++    // values must still form one history without a lost update.
++    const remaining = [...rows];
++    let current = JSON.stringify(SETTINGS_DEFAULTS['brand.name']);
++    while (remaining.length) {
++      const index = remaining.findIndex(row => row.before === current);
++      assert.notEqual(index, -1);
++      current = remaining.splice(index, 1)[0].after;
++    }
++    assert.equal(JSON.stringify((await loadSettings(pool))['brand.name']), current);
++  } finally { await pool.query('DROP SCHEMA IF EXISTS admin_phase_one_concurrency CASCADE'); await pool.end(); }
++});
+diff --git a/tests/carousel-viewer.test.ts b/tests/carousel-viewer.test.ts
+index ae7367d..cdd5b33 100644
+--- a/tests/carousel-viewer.test.ts
++++ b/tests/carousel-viewer.test.ts
+@@ -43,15 +43,18 @@ test('PostMedia renders carousel for multi-photo posts and single frame for sing
+   const multiPost: Post = {
+     id: 'post_multi',
+     author_id: 'user_1',
+-    author: { id: 'user_1', username: 'photographer', name: 'Photographer', avatar: '' },
++    author: { id: 'user_1', username: 'photographer', name: 'Photographer', avatar: '', bio: '', is_demo: 0, followers: 0, following: 0, post_count: 0, followed: 0 },
+     media: ['/media/japan.jpg', '/media/architecture.jpg'],
+     media_type: 'image',
+     caption: 'City exploration #travel',
+     location: 'Kyoto',
+     category: 'Travel',
+     likes: 42,
+-    liked: false,
+-    saved: false,
++    liked: 0,
++    saved: 0,
++    seen: 0,
++    kind: 'post',
++    expires_at: null,
+     comment_count: 5,
+     created_at: Date.now(),
+     aspects: [1.5, 1.5],
+-- 
+2.39.5
+

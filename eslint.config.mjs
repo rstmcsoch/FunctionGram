@@ -5,6 +5,15 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    files: ["app/api/admin/**/route.ts"],
+    rules: {
+      "no-restricted-syntax": ["error",
+        { selector: "ExportNamedDeclaration > FunctionDeclaration", message: "Admin handlers must be exported through adminRoute()." },
+        { selector: "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[id.name=/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/]:not([init.callee.name='adminRoute'])", message: "Admin handlers must use adminRoute() for authorization and CSRF." },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
