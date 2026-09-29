@@ -21,9 +21,9 @@ if (process.argv[2] === 'seed') {
   const db = new PGlite(directory);
   const cookies: Record<string, string> = {};
   try {
-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements]) await db.exec(sql);
+    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements]) await db.exec(sql);
     for (const [id, role, verified, banned] of [
-      ['regular', 'user', true, false], ['admin', 'admin', true, false],
+      ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
       ['expired', 'admin', true, false], ['revoked', 'admin', true, false],
     ] as const) {
@@ -42,17 +42,17 @@ if (process.argv[2] === 'seed') {
   // Better Auth prefixes its session cookie in production.
   if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
   for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
-    for (const route of [ADMIN_BASE_PATH, '/api/admin?ping=1']) {
+    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular']) {
       const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
       const body = await response.text();
       assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
       assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow');
       // Next dev overrides page Cache-Control with no-cache, must-revalidate.
-      assert.match(response.headers.get('cache-control') || '', route === ADMIN_BASE_PATH ? /no-store|no-cache/ : /no-store/);
-      if (who !== 'admin') assert.ok(!body.includes('Admin control room'), 'Denied response must not contain panel markup');
+      assert.match(response.headers.get('cache-control') || '', route.startsWith(ADMIN_BASE_PATH) ? /no-store|no-cache/ : /no-store/);
+      if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
       else if (route === ADMIN_BASE_PATH) {
-        assert.match(body, /Admin control room/);
-        assert.match(body, /1, 2, 3, 4, 5/);
+        assert.match(body, /A pulse on your community./);
+        assert.match(body, /1, 2, 3, 4, 5, 6/);
         assert.match(body, /noindex/);
       }
       assert.ok(!body.includes(secret), 'No server secret in responses');
@@ -61,8 +61,27 @@ if (process.argv[2] === 'seed') {
   }
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
     const response = await fetch(origin + '/api/admin', { method, headers: { cookie: cookies.admin, origin: 'https://foreign.example.test' } });
-    assert.equal(response.status, 405, 'Phase 1 exposes no write endpoint, including cross-origin requests');
+    assert.equal(response.status, method === 'POST' ? 403 : 405, 'Foreign-origin POST is denied; unsupported methods remain unavailable');
   }
+  for (const who of ['guest','regular']) {
+    const response = await fetch(origin + '/api/admin', { method: 'POST', headers: { cookie: cookies[who] || '', origin, 'content-type': 'application/json' }, body: JSON.stringify({action:'verify',id:'regular',confirmation:'regular@example.test'}) });
+    assert.equal(response.status,who === 'guest' ? 401 : 403);
+  }
+  const action = (name: string, extra = {}) => fetch(origin + '/api/admin', {method:'POST',headers:{cookie:cookies.admin,origin,'content-type':'application/json'},body:JSON.stringify({action:name,id:'regular',confirmation:'regular@example.test',reason:'HTTP regression test',...extra})});
+  assert.equal((await action('promote')).status,403,'Only owner grants roles');
+  assert.equal((await action('ban',{confirmation:'wrong'})).status,400);
+  assert.equal((await action('ban')).status,200);
+  assert.equal((await fetch(origin + '/api/admin?resource=users',{headers:{cookie:cookies.regular}})).status,401,'Ban revokes active sessions');
+  assert.equal((await action('unban')).status,200);
+  assert.equal((await action('delete')).status,200);
+  assert.equal((await action('restore')).status,200);
+  assert.equal((await action('verify')).status,200);
+  const csv = await action('exportUsers',{limit:200}); assert.equal(csv.status,200); assert.match(csv.headers.get('content-type') || '',/text\/csv/);
+  assert.equal((await fetch(origin + '/api/admin?resource=users&limit=201',{headers:{cookie:cookies.admin}})).status,400);
+  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test'})});
+  assert.equal((await ownerAction('promote')).status,200);
+  assert.equal((await action('ban')).status,403,'Admins cannot act on another administrator');
+  assert.equal((await ownerAction('demote')).status,200);
   console.log('Admin HTTP checks passed. No production data or real accounts used.');
 } else {
   throw new Error('Use seed or check. Stop the dev server before re-seeding PGlite.');
