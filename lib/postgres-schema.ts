@@ -121,3 +121,29 @@ export const adminContentUpgradeStatements: string[] = [
   'CREATE INDEX IF NOT EXISTS idx_posts_deleted ON posts(deleted_at) WHERE deleted_at IS NOT NULL',
   'CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_at DESC,id)',
 ];
+
+// Version 8: media inspection, reservation leases and restorable storage inventory.
+export const mediaUpgradeStatements = [
+ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ready' CHECK(status IN ('ready','quarantined','trash','purging'))",
+ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT ''",
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS deleted_at bigint',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS width integer',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS height integer',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS duration double precision',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_size integer',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_mime text',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_blob_url text',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_retained_bytes integer NOT NULL DEFAULT 0',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS verified boolean NOT NULL DEFAULT true',
+ 'ALTER TABLE assets ADD COLUMN IF NOT EXISTS storage_owner text',
+ 'UPDATE assets SET storage_owner=owner_id WHERE storage_owner IS NULL',
+ 'ALTER TABLE assets ALTER COLUMN owner_id DROP NOT NULL',
+ 'ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_owner_id_fkey',
+ 'ALTER TABLE assets ADD CONSTRAINT assets_owner_id_fkey FOREIGN KEY(owner_id) REFERENCES profiles(id) ON DELETE SET NULL',
+ 'ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS processing_at bigint',
+ 'ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS completed_at bigint',
+ 'UPDATE upload_claims c SET completed=true,completed_at=c.created_at FROM assets a WHERE a.key=c.key AND c.completed=false',
+ 'CREATE INDEX IF NOT EXISTS idx_assets_storage_status ON assets(status,created_at DESC,key)',
+ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS trash_origin text NOT NULL DEFAULT 'ready'",
+ 'CREATE INDEX IF NOT EXISTS idx_upload_claims_quota ON upload_claims(owner_id,completed,created_at)',
+];

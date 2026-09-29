@@ -12,8 +12,8 @@ import { PGlite } from '@electric-sql/pglite';
 import * as schema from '../lib/postgres-schema';
 import { ADMIN_BASE_PATH } from '../lib/admin/config';
 
-const directory = path.resolve('.local/admin-check-db');
-const fixturePath = path.resolve('.local/admin-check.json');
+const directory = path.resolve(process.env.ADMIN_CHECK_DB||'.local/admin-check-db');
+const fixturePath = path.resolve(process.env.ADMIN_CHECK_FIXTURE||'.local/admin-check.json');
 const secret = 'phase-one-local-test-secret-not-for-deployment-2026';
 const origin = process.env.ADMIN_TEST_ORIGIN || 'http://localhost:3000';
 if (process.argv[2] === 'seed') {
@@ -21,7 +21,7 @@ if (process.argv[2] === 'seed') {
   const db = new PGlite(directory);
   const cookies: Record<string, string> = {};
   try {
-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements]) await db.exec(sql);
+    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
     for (const [id, role, verified, banned] of [
       ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],

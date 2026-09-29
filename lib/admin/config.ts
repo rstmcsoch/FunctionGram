@@ -11,6 +11,7 @@ export const SETTINGS_DEFAULTS = {
   'appearance.config': '',
   'features.config': '',
   'labels.config': '',
+  'media.config': '',
   'content.reelMaxSeconds': 0,
   'content.storyHours': 24,
   'content.reelsEnabled': true,

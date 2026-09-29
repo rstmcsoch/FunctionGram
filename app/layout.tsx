@@ -1,3 +1,5 @@
+import {MediaProvider} from '@/components/social/media-policy';
+import {publicMedia} from '@/lib/public-media';
 import {getLabels,getTranslator} from '@/lib/public-labels';
 import {LabelsProvider} from '@/components/social/labels';
 import type { Metadata } from 'next';
@@ -12,5 +14,5 @@ export default async function RootLayout({children}:{children:React.ReactNode}) 
  const a=await publicAppearance();
  // Static executable code; only the validated theme enum appears in a data attribute.
  const themeScript=`(function(){var d=document.documentElement,t;try{t=localStorage.getItem('rstmc-theme')}catch(e){}if(t!=='dark'&&t!=='light'){t=d.dataset.defaultTheme;if(t==='system')t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}d.dataset.theme=t})();`;
- return <html lang="en" suppressHydrationWarning data-default-theme={a.defaultTheme} data-theme={a.defaultTheme==='system'?undefined:a.defaultTheme}><head><style id="appearance-tokens" dangerouslySetInnerHTML={{__html:appearanceCss(a)}}/><script dangerouslySetInnerHTML={{__html:themeScript}}/></head><body className="antialiased"><LabelsProvider labels={await getLabels()}>{children}</LabelsProvider></body></html>;
+ return <html lang="en" suppressHydrationWarning data-default-theme={a.defaultTheme} data-theme={a.defaultTheme==='system'?undefined:a.defaultTheme}><head><style id="appearance-tokens" dangerouslySetInnerHTML={{__html:appearanceCss(a)}}/><script dangerouslySetInnerHTML={{__html:themeScript}}/></head><body className="antialiased"><LabelsProvider labels={await getLabels()}><MediaProvider config={await publicMedia()}>{children}</MediaProvider></LabelsProvider></body></html>;
 }

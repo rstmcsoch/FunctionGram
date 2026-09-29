@@ -42,7 +42,7 @@ test('appearance body has an explicit bounded size without raising the existing 
 });
 test('appearance save authorizes, verifies image ownership, audits atomically, and retains approved branding across admins',async()=>{
  const db=new PGlite();try{
- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements])await db.exec(sql);
+ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements])await db.exec(sql);
  const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return{rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
  for(const [id,role]of [['admin','admin'],['other','admin'],['user','user']]){await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified")VALUES($1,$1,$2,$3,true)',[id,id+'@test.example',role]);await pool.query('INSERT INTO profiles(id,username,name,created_at)VALUES($1,$1,$1,1)',[id]);}
  await assert.rejects(saveAppearance(pool,'user',copy()),{status:403});

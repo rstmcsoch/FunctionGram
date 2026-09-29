@@ -1,3 +1,4 @@
+import {AdminError} from './admin/validation';
 import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
 import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
 import {displayCounterColumns} from './counters';
@@ -9,7 +10,7 @@ import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialDat
 
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
 export function db(){return database();}
-export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
+export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError||error instanceof AdminError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
 export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
 
 // Origins the deployment explicitly trusts (custom domains, preview domains).

@@ -1,38 +1,24 @@
+import {promises as fs} from 'node:fs';
+import {AppError,identity,requestHeadersWithHost,sameOrigin,fail,json} from '@/lib/server';
+import {getPool,localDevDatabase} from '@/lib/postgres';
+import {reserveUpload,finishUpload,uploadKeyPattern} from '@/lib/uploads';
+import {readMediaConfig} from '@/lib/media-policy';
+import {readBounded} from '@/lib/media-processing';
+import {MIB} from '@/lib/media-config';
 import {requireUpload} from '@/lib/feature-policy';
-import { promises as fs } from 'node:fs';
-import { AppError, db, identity, requestHeadersWithHost, sameOrigin, fail, json } from '@/lib/server';
-import { localDevDatabase } from '@/lib/postgres';
-import { detectMediaType, mediaTypes } from '@/lib/media-type';
-
-// Development-only upload endpoint for the local preview: stores files on
-// local disk instead of Vercel Blob. Production (any deployment with a real
-// DATABASE_URL) always answers 404 and uses the regular client upload flow.
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-const keyPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-
-export async function POST(request: Request) {
-  try {
-    if (!localDevDatabase()) throw new AppError('Not found.', 404);
-    sameOrigin(request);
-    const user = (await identity(requestHeadersWithHost(request), true))!;
-    await requireUpload(user);
-    const form = await request.formData();
-    const key = String(form.get('key') || '');
-    const file = form.get('file');
-    if (!keyPattern.test(key)) throw new AppError('Invalid upload name.');
-    if (!(file instanceof File)) throw new AppError('Choose a photo or video.');
-    if (file.size > 20 * 1024 * 1024) throw new AppError('Choose a file smaller than 20 MB.');
-    if (!mediaTypes.includes(file.type)) throw new AppError('Choose a supported photo or video type.');
-    const bytes = Buffer.from(await file.arrayBuffer());
-    if (detectMediaType(bytes.subarray(0, 16)) !== file.type) throw new AppError('The file contents do not match its photo or video type.');
-    await fs.mkdir('.local/uploads', { recursive: true });
-    await fs.writeFile('.local/uploads/' + key, bytes);
-    await db().batch([
-      db().prepare('INSERT OR IGNORE INTO assets (key,owner_id,mime,size,created_at,blob_url) VALUES (?,?,?,?,?,?)').bind(key, user, file.type, file.size, Date.now(), 'local'),
-      db().prepare('INSERT OR IGNORE INTO upload_claims (key,owner_id,expected_size,mime,created_at,completed) VALUES (?,?,?,?,?,true)').bind(key, user, file.size, file.type, Date.now()),
-    ]);
-    return json({ url: '/api/media/' + key, type: file.type });
-  } catch (error) { return fail(error); }
-}
+export const runtime='nodejs';
+export const dynamic='force-dynamic';
+export const maxDuration=60;
+export async function POST(request:Request){try{
+ if(!localDevDatabase())throw new AppError('Not found.',404);
+ sameOrigin(request);const owner=(await identity(requestHeadersWithHost(request),true))!;await requireUpload(owner);
+ const config=await readMediaConfig(await getPool());if(!config.enabled)throw new AppError('Uploads are currently disabled.',403);if(!request.body)throw new AppError('Choose a photo or video.');
+ const bytes=await readBounded(request.body,config.maxFileMb*MIB+65536);
+ const form=await new Response(new Uint8Array(bytes),{headers:{'content-type':request.headers.get('content-type')||''}}).formData();
+ const key=String(form.get('key')||''),file=form.get('file');
+ if(!uploadKeyPattern.test(key)||!(file instanceof File))throw new AppError('Choose a photo or video.');
+ await reserveUpload(key,owner,JSON.stringify({size:file.size,type:file.type}));
+ await fs.mkdir('.local/upload-staging',{recursive:true});
+ try{await fs.writeFile('.local/upload-staging/'+key,Buffer.from(await file.arrayBuffer()),{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;throw new AppError('Please start a new upload.',409);}
+ return json(await finishUpload(key,owner));
+}catch(error){return fail(error);}}

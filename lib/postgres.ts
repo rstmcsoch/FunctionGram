@@ -2,7 +2,7 @@ import path from 'node:path';
 import { Pool, types, type QueryResultRow } from 'pg';
 import { serializedPool } from './serialized-pool';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -16,7 +16,7 @@ export interface PoolLike extends QueryExecutor {
   connect(): Promise<QueryExecutor & { release(): void }>;
 }
 
-const migrations = [
+export const DATABASE_MIGRATIONS = [
   { version: 1, statements: schemaStatements },
   { version: 2, statements: socialUpgradeStatements },
   { version: 3, statements: aspectUpgradeStatements },
@@ -24,6 +24,7 @@ const migrations = [
   { version: 5, statements: adminUpgradeStatements },
   { version: 6, statements: adminUsersUpgradeStatements },
   { version: 7, statements: adminContentUpgradeStatements },
+  { version: 8, statements: mediaUpgradeStatements },
 ];
 
 let pool: Pool | undefined;
@@ -118,7 +119,7 @@ export async function ensureSchema() {
       try {
         await client.query('BEGIN');
         await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-        for (const migration of migrations) {
+        for (const migration of DATABASE_MIGRATIONS) {
           for (const statement of migration.statements) await client.query(statement);
           await client.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
         }
@@ -132,11 +133,11 @@ export async function ensureSchema() {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(67291004)');
       await client.query('CREATE TABLE IF NOT EXISTS functiongram_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-      for (const [version, statements] of [[1, schemaStatements], [2, socialUpgradeStatements], [3, aspectUpgradeStatements], [4, accountUpgradeStatements], [5, adminUpgradeStatements], [6, adminUsersUpgradeStatements], [7, adminContentUpgradeStatements]] as const) {
-        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[version]);
+      for (const migration of DATABASE_MIGRATIONS) {
+        const applied=await client.query('SELECT version FROM functiongram_migrations WHERE version=$1',[migration.version]);
         if (!applied.rowCount) {
-          for (const statement of statements) await client.query(statement);
-          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[version]);
+          for (const statement of migration.statements) await client.query(statement);
+          await client.query('INSERT INTO functiongram_migrations(version) VALUES($1)',[migration.version]);
         }
       }
       await client.query('COMMIT');

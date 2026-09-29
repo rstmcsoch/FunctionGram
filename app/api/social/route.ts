@@ -1,3 +1,5 @@
+import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
+import {MIB} from '@/lib/media-config';
 import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
 import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
 import { checkReelDuration } from '@/lib/reel-duration';
@@ -7,6 +9,7 @@ import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
 import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
+export const maxDuration=60;
 export const dynamic='force-dynamic';
 
 // Cursor pagination for comments and messages. Cursors encode the last row's
@@ -27,6 +30,7 @@ export async function GET(request:Request){try{
   const headers=requestHeadersWithHost(request);
   const policyViewer=await identity(headers);const policy=await featurePolicy(policyViewer);requirePublic(policy,policyViewer);
   for(const [key,feature]of Object.entries(QUERY_FEATURES))if(query.has(key))requireFeature(policy,feature);
+  if(query.has('upload-policy')){requireFeature(policy,'uploads');return json(await readMediaConfig(await getPool()));}
   if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);return json({features:policy.flags,notifications:notifs.results,unreadMessages:unread?.count||0});}
   if(query.has('comments')){
     const postId=clean(query.get('comments'),100,true);
@@ -162,29 +166,31 @@ export async function POST(request:Request){try{
     const username=clean(input.username,30,true).toLowerCase();if(!/^[a-z0-9_][a-z0-9_.]{2,29}$/.test(username))throw new AppError('Use 3–30 letters, numbers, dots, or underscores for your username.');
     const name=clean(input.name,60,true),bio=clean(input.bio,150),avatar=clean(input.avatar,200),website=clean(input.website||'',200);
     if(website){let url:URL;try{url=new URL(website);}catch{throw new AppError('Enter a complete website URL, starting with https://.');}if(!['https:','http:'].includes(url.protocol)||!url.hostname||url.username||url.password)throw new AppError('Enter a valid http(s) website URL.');}
-    if(avatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
+    const currentAvatar=(await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>())?.avatar;
+    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
     const taken=await database.prepare('SELECT id FROM profiles WHERE username=? AND id!=?').bind(username,user).first();if(taken)throw new AppError('That username is taken. Try another.',409);
-    await database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user).run();return json({ok:true});
+    const update=database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user);
+    if(avatar&&avatar!==currentAvatar)await commitMediaUse(await getPool(),[avatar],[user],await readMediaConfig(await getPool()),[update]);else await update.run();return json({ok:true});
   }
   if(action==='create_post'){
-    const contentSettings=await loadSettings(await getPool());
+    const contentSettings=await loadSettings(await getPool());const mediaPolicy=await readMediaConfig(await getPool());
     const kind=clean(input.kind,10,true);if(!['post','reel','story'].includes(kind))throw new AppError('Choose a post, story, or reel.');
     if(kind==='reel'&&!contentSettings['content.reelsEnabled'])throw new AppError('Reels are currently paused.',403);
     const caption=clean(input.caption,2200),location=clean(input.location,100);const media=input.media;
-    if(!Array.isArray(media)||media.length<1||media.length>6||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Add up to 6 photos or one video.');
+    if(!Array.isArray(media)||media.length<1||media.length>mediaPolicy.maxMedia||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Check the current media-per-post limit.');
     const options=mediaOptions(input.media_options,media.length);
     const tags=input.tagged_users??[];if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
     for(const tagged of tags){if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');}
     const category=clean(input.category||'For you',50);if(!categories.includes(category))throw new AppError('Choose a valid category.');
-    const types:string[]=[];for(const url of media){const asset=await database.prepare('SELECT mime FROM assets WHERE key=? AND owner_id=?').bind(url.replace('/api/media/',''),user).first<{mime:string}>();if(!asset)throw new AppError('One of your uploads is unavailable. Please upload it again.');types.push(asset.mime);}
-    const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. A photo post can include up to 6 images.');
-    if(kind==='reel')await checkReelDuration(await getPool(),media,contentSettings['content.reelMaxSeconds']);
+    const assets=await checkAssets(await getPool(),media,[user],mediaPolicy);const types=assets.map(asset=>String(asset.mime));
+    const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. Photo posts must contain only images.');
+    if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?contentSettings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(await getPool(),media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
     // Optional per-item aspect ratios (width/height) let the feed render media
     // at its true size without cropping or layout shift.
     const ratios=aspectRatios(input.aspects,media.length);
     const postId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO posts (id,author_id,media,media_options,tagged_users,media_type,kind,caption,location,category,base_likes,created_at,expires_at,aspects) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)').bind(postId,user,JSON.stringify(media),JSON.stringify(options),JSON.stringify(tags),video?'video':'image',kind,caption,location,category,now,kind==='story'?now+contentSettings['content.storyHours']*3600000:null,ratios?JSON.stringify(ratios):null)];
     for(const tagged of tags){if(policy.flags.notifications&&tagged!==user)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind('tag:'+tagged+':'+postId,tagged,user,'tag',postId,now));}
-    await database.batch(stmts);return json({id:postId});
+    await commitMediaUse(await getPool(),media,[user],mediaPolicy,stmts);return json({id:postId});
   }
   if(action==='update_post'){
     const post=await availablePost(user,id);

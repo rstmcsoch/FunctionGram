@@ -1,5 +1,6 @@
 "use client";
 import {useLabels} from "./labels";
+import {MIB,type MediaConfig} from "@/lib/media-config";
 import {defaultTranslator,type Translator} from "@/lib/admin/labels";
 
 import { useState, useEffect, type ReactNode } from "react";
@@ -83,34 +84,23 @@ async function videoSize(file: File): Promise<number | null> {
   });
 }
 export async function upload(file: File, t: Translator = defaultTranslator): Promise<UploadResult> {
-  let output = file; let aspect: number | null = null;
-  if (file.type.startsWith("image/") && file.type !== "image/gif") {
-    const bitmap = await createImageBitmap(file);
-    aspect = bitmap.width / bitmap.height || null;
-    const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error(t("common.your_browser_could_not_process_this_photo"));
-    context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error(t("common.could_not_process_photo"))), "image/jpeg", .88));
-    output = new File([blob], "photo.jpg", { type: "image/jpeg" });
-  } else if (file.type.startsWith("image/")) aspect = await imageSize(file);
-  else if (file.type.startsWith("video/")) aspect = await videoSize(file);
-  if (output.size > 20 * 1024 * 1024) throw new Error(t("common.choose_a_file_smaller_than_20_mb"));
+  const config=await request<MediaConfig>("/api/social?upload-policy=1",undefined,t);
+  if(!config.enabled)throw new Error(t('media.disabled'));
+  if(!config.allowedTypes.includes(file.type))throw new Error(t('media.typeDisabled'));
+  if(file.size>config.maxFileMb*MIB)throw new Error(t('media.tooLarge',{max:config.maxFileMb}));
+  const output=file;
+  const aspect=file.type.startsWith('image/')?await imageSize(file):await videoSize(file);
   if (devMode) {
     const form = new FormData();
     form.append("key", crypto.randomUUID());
     form.append("file", output);
-    const result = await request<{ url: string; type: string }>("/api/dev-upload", form, t);
-    return { ...result, aspect };
+    const result = await request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t);
+    return { ...result, aspect:result.aspect??aspect };
   }
   const key = crypto.randomUUID();
   await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
-  const completed = await request<{ url: string; type: string }>("/api/upload/complete", { key }, t);
-  return { ...completed, aspect };
+  const completed = await request<{ url: string; type: string; aspect?:number|null }>("/api/upload/complete", { key }, t);
+  return { ...completed, aspect:completed.aspect??aspect };
 }
 
 /* --------------------------------- avatars --------------------------------- */

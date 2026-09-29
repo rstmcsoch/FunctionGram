@@ -1,4 +1,5 @@
 'use client';
+import {useMediaPolicy} from '@/components/social/media-policy';
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -45,6 +46,7 @@ export function ContentTable({items,resource,trash}:{items:Record<string,unknown
 function safeMedia(value:string) {return /^\/api\/media\/[a-f0-9-]{36}$/.test(value)||/^\/media\/[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp|gif|mp4|webm)$/.test(value);}
 export function ContentEditor({item,resource}:{item:Record<string,unknown>;resource:ContentResource}) {
   const router=useRouter();const post=resource==='posts';
+  const mediaPolicy=useMediaPolicy();
   const [caption,setCaption]=useState(String(post?item.caption:item.body)),[location,setLocation]=useState(String(item.location||'')),[kind,setKind]=useState(String(item.kind||'post')),[category,setCategory]=useState(String(item.category||'For you'));
   const [media,setMedia]=useState<string[]>(post?JSON.parse(String(item.media)):[]),[tags,setTags]=useState(post?(JSON.parse(String(item.tagged_users)) as string[]).join(', '):''),[aspects,setAspects]=useState(String(item.aspects||'null'));
   const [expires,setExpires]=useState(item.expires_at?new Date(Number(item.expires_at)).toISOString().slice(0,16):'');
@@ -75,7 +77,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
         {safeMedia(url)&&(item.media_type==='video'||kind==='reel'?<video src={url} controls preload="metadata" aria-label={'Preview media '+(index+1)} />:<Image unoptimized width={800} height={800} src={url} alt={'Content preview '+(index+1)} />)}
         <code>{url}</code><div className="admin-action-grid"><button type="button" className="admin-button" disabled={index===0} onClick={()=>{const next=[...media];[next[index-1],next[index]]=[next[index],next[index-1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index-1],values[index]]=[values[index],values[index-1]];return JSON.stringify(values);}}catch{}return current;});}}>Move up</button><button type="button" className="admin-button" disabled={index===media.length-1} onClick={()=>{const next=[...media];[next[index+1],next[index]]=[next[index],next[index+1]];setMedia(next);setAspects(current=>{try{const values=JSON.parse(current);if(Array.isArray(values)){[values[index+1],values[index]]=[values[index],values[index+1]];return JSON.stringify(values);}}catch{}return current;});}}>Move down</button><button type="button" className="admin-button" onClick={()=>{setMedia(media.filter((_,i)=>i!==index));setAspects('null');}}>Remove</button></div>
       </div>)}</fieldset>
-      <label>Verified upload URL<input value={newMedia} onChange={event=>setNewMedia(event.target.value)} placeholder="/api/media/…" /></label><button type="button" className="admin-button" disabled={!newMedia||media.length>=6} onClick={()=>{setMedia([...media,newMedia.trim()]);setNewMedia('');setAspects('null');}}>Add media</button>
+      <label>Verified upload URL<input value={newMedia} onChange={event=>setNewMedia(event.target.value)} placeholder="/api/media/…" /></label><button type="button" className="admin-button" disabled={!newMedia||media.length>=mediaPolicy.maxMedia} onClick={()=>{setMedia([...media,newMedia.trim()]);setNewMedia('');setAspects('null');}}>Add media</button>
       <label>Aspect ratios (JSON array, or null to clear)<input value={aspects} onChange={event=>setAspects(event.target.value)} /></label><button type="button" className="admin-button" disabled={pending||!media.length} onClick={regenerate}>Regenerate aspects from media</button>
     </>}
     <label>Type content ID to confirm: <code>{String(item.id)}</code><input aria-label="Edit confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>

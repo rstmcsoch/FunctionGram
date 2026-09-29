@@ -45,7 +45,7 @@ npm ci
 npm run dev
 ```
 
-Set `BETTER_AUTH_URL=http://localhost:3000` for local development. Use a separate development database and Blob store. Files upload directly from the browser to Blob with a short-lived token scoped to one immutable UUID, MIME type and exact size. The server authorizes the user, reserves quota, checks uploaded magic bytes and records ownership before the file can be attached to a post. This supports the 20 MB app limit without sending large videos through a Vercel Function request body.
+Set `BETTER_AUTH_URL=http://localhost:3000` for local development. Use a separate development database and Blob store. Files upload directly from the browser to Blob with a short-lived token scoped to one immutable UUID, MIME type and exact size. The server authorizes the user, reserves quota, verifies and processes the uploaded bytes, and records ownership before the file can be attached to a post. The default limit is 20 MiB, configurable up to 100 MiB in **Admin → Media**, without sending the browser’s large video request body through a Vercel Function. Images are orientation-corrected, resized and re-encoded server-side; animated GIFs retain animation. The same panel manages storage inventory, quarantine, restorable trash and owner-only permanent purge. Earlier feature switches remain independent gates.
 
 ## Verification
 

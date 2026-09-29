@@ -11,7 +11,7 @@ import {saveSetting} from '../lib/admin/core';
 
 async function fixture() {
  const db=new PGlite();
- const all=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements];
+ const all=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements];
  for(const sql of all)await db.exec(sql);
  for(const sql of schema.adminContentUpgradeStatements)await db.exec(sql);
  const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
@@ -120,7 +120,7 @@ test('managed PostgreSQL migration 7 preserves content and serializes overlappin
   await pool.query(`INSERT INTO profiles(id,username,name,created_at) VALUES('admin','admin','Admin',1)`);
   await pool.query(`INSERT INTO posts(id,author_id,media,caption,created_at) VALUES('p1','admin','[]','Preserved',1),('p2','admin','[]','Preserved',2)`);
   await pool.query(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','admin','Preserved comment',1)`);
-  for(let i=0;i<2;i++)for(const sql of schema.adminContentUpgradeStatements)await pool.query(sql);
+  for(let i=0;i<2;i++)for(const sql of [...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements])await pool.query(sql);
   assert.equal((await contentDetail(pool,'posts','p1')).caption,'Preserved');assert.equal((await contentDetail(pool,'comments','c1')).body,'Preserved comment');
   await Promise.all([['p1','p2'],['p2','p1']].map(ids=>moderateContent(pool,'admin',{resource:'posts',operation:'hide',ids,reason:'overlapping bulk',confirmation:'CONFIRM 2'})));
   assert.equal((await listContent(pool,contentFilters({status:'hidden'}))).total,2);

@@ -1,3 +1,5 @@
+import {readMediaConfig,checkAssets,MEDIA_LOCK} from '../media-policy';
+import {MIB} from '../media-config';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
 import { AdminError } from './validation';
@@ -59,18 +61,19 @@ const CATEGORIES=['For you','Travel','Nature','Photography','Architecture','Life
 async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknown>,input:Record<string,unknown>) {
   const caption=text(input.caption??row.caption,2200),location=text(input.location??row.location,100),category=text(input.category??row.category,50),kind=text(input.kind??row.kind,10);
   if(!CATEGORIES.includes(category)||!['post','reel','story'].includes(kind))throw new AdminError('Invalid category or content kind.');
-  const original=JSON.parse(String(row.media)) as string[];const media=input.media??original;
-  if(!Array.isArray(media)||media.length<1||media.length>6||new Set(media).size!==media.length||media.some(url=>typeof url!=='string'||url.length>250))throw new AdminError('Choose 1–6 unique media items.');
+  const mediaPolicy=await readMediaConfig(db);const original=JSON.parse(String(row.media)) as string[];const media=input.media??original;
+  if(!Array.isArray(media)||media.length<1||media.length>Math.max(mediaPolicy.maxMedia,original.length)||new Set(media).size!==media.length||media.some(url=>typeof url!=='string'||url.length>250))throw new AdminError('Choose unique media items within the current limit.');
+  if(media.some(url=>!original.includes(url))&&media.length>mediaPolicy.maxMedia)throw new AdminError('Check the current media-per-post limit.');
   const types:string[]=[];
   for(const url of media) {
     if(original.includes(url)){types.push(row.media_type==='video'?'video/':'image/');continue;}
     if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('New media must come from verified uploads, not external URLs.');
-    const {rows:[asset]}=await db.query('SELECT mime FROM assets WHERE key=$1 AND owner_id IN ($2,$3)',[url.slice(11),actorId,row.author_id]);
+    const [asset]=await checkAssets(db,[url],[actorId,String(row.author_id)],mediaPolicy);
     if(!asset||!['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'].includes(asset.mime))throw new AdminError('Use a verified upload owned by you or the author.');
     types.push(asset.mime);
   }
   const video=types.some(type=>type.startsWith('video/'));
-  if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts up to six images.');
+  if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts only images.');
   const tags=input.tagged_users??JSON.parse(String(row.tagged_users));
   if(!Array.isArray(tags)||tags.length>10||new Set(tags).size!==tags.length||tags.some(id=>typeof id!=='string'||id.length>100))throw new AdminError('Tag up to 10 accounts.');
   if(tags.length&&(await db.query('SELECT id FROM profiles WHERE id=ANY($1::text[]) AND deleted_at IS NULL',[tags])).rows.length!==tags.length)throw new AdminError('A tagged profile is unavailable.');
@@ -80,7 +83,7 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
   if(aspects!==null&&(!Array.isArray(aspects)||aspects.length!==media.length||aspects.some(r=>typeof r!=='number'||!Number.isFinite(r)||r<0.2||r>5)))throw new AdminError('Provide one valid aspect ratio (0.2–5) per item, or clear all.');
   if(Array.isArray(aspects)&&!aspects.length)aspects=null;
   const settings=await loadSettings(db);
-  if(kind==='reel')await checkReelDuration(db,media,settings['content.reelMaxSeconds']);
+  if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
   const expires=input.expires_at===undefined?(kind==='story'&&row.kind!=='story'?Date.now()+settings['content.storyHours']*3600000:row.expires_at):input.expires_at;
   if(expires!==null&&(typeof expires!=='number'||!Number.isSafeInteger(expires)||expires<0||expires>8640000000000000))throw new AdminError('Invalid expiry.');
   return {caption,location,category,kind,media:JSON.stringify(media),media_options:JSON.stringify(options),aspects:aspects?JSON.stringify(aspects):null,tagged_users:JSON.stringify(tags),media_type:video?'video':'image',expires_at:expires};
@@ -105,6 +108,8 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   }
   return transaction(pool,async db=>{
     const actor=await authorizeAdmin(db,actorId,action==='purge');
+    if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
+    if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
     // Always lock in ID order to avoid deadlocks between overlapping bulk selections.
     const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[ids]);
     if(rows.length!==ids.length)throw new AdminError('An item no longer exists. Nothing was changed.',404);

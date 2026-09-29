@@ -168,7 +168,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
               </span>
               {unread > 0
                 ? <i className="unread-badge" aria-label={unread + " unread"}>{unread}</i>
-                : last && <time>{timeAgo(last.created_at, t)}</time>}
+                : last && <time suppressHydrationWarning>{timeAgo(last.created_at, t)}</time>}
             </button>
           );
         })}
