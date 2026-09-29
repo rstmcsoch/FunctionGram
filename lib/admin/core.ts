@@ -1,5 +1,6 @@
 // Database primitives are separated from Next request/cache adapters so tests
 // execute the real SQL. Never expose these as actions or import into client UI.
+import { accountEnabled } from '../account-policy';
 import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
@@ -19,8 +20,8 @@ export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) =
 export async function authorizeAdmin(db: QueryExecutor, userId: string | null, ownerOnly = false): Promise<AdminActor> {
   if (!userId) throw new AdminError('Sign in to continue.', 401);
   // Read current state, not claims or cached role/email from a session cookie.
-  const { rows: [user] } = await db.query('SELECT id, email, role, banned, "emailVerified" FROM "user" WHERE id=$1', [userId]);
-  if (!user || user.emailVerified !== true || user.banned !== false || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
+  const { rows: [user] } = await db.query('SELECT id, email, role, banned, "banExpires", deleted_at, "emailVerified" FROM "user" WHERE id=$1', [userId]);
+  if (!user || user.emailVerified !== true || !accountEnabled(user) || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
     throw new AdminError('Administrator access required.', 403);
   }
   return { userId: user.id, email: user.email, role: user.role };
@@ -48,8 +49,8 @@ export async function bootstrapAdmin(pool: PoolLike, userId: string, verifiedSes
     if ((await db.query('SELECT id FROM admin_bootstrap WHERE id=1')).rows.length) return;
     // An operator who recovered/promoted an admin manually must not be replaced.
     if ((await db.query(`SELECT id FROM "user" WHERE role IN ('admin','owner') LIMIT 1`)).rows.length) return;
-    const { rows: [user] } = await db.query('SELECT id,email,role,banned,"emailVerified" FROM "user" WHERE id=$1 FOR UPDATE', [userId]);
-    if (!user || user.email.toLowerCase() !== email || !user.emailVerified || user.banned || user.role !== 'user') return;
+    const { rows: [user] } = await db.query('SELECT id,email,role,banned,"banExpires",deleted_at,"emailVerified" FROM "user" WHERE id=$1 FOR UPDATE', [userId]);
+    if (!user || user.email.toLowerCase() !== email || !user.emailVerified || !accountEnabled(user) || user.role !== 'user') return;
     await db.query('INSERT INTO admin_bootstrap(id,user_id,completed_at) VALUES(1,$1,$2)', [userId, Date.now()]);
     await db.query('UPDATE "user" SET role=\'admin\', "updatedAt"=now() WHERE id=$1', [userId]);
     await insertAudit(db, { userId, email: user.email, role: 'admin' }, {
