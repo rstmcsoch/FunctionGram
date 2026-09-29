@@ -48,6 +48,7 @@ test('bounded search/detail/dashboard queries exclude secrets and calculate corr
     const detail = await userDetail(pool,'target'); assert.equal(Number(detail.counts.sessions),1); assert.ok(!JSON.stringify(detail).includes('secret-token'));
     const stats = await dashboard(pool); assert.equal(Number(stats.users),4); assert.equal(Number(stats.storage_bytes),1024);
     await assert.rejects(userDetail(pool,'missing'),{status:404});
+    // More than a page of real rows, never loaded all at once.
     await pool.query(`INSERT INTO "user"(id,name,email) SELECT 'extra'||n,'Extra','extra'||n||'@example.test' FROM generate_series(1,205) n`);
     assert.equal((await listUsers(pool,userFilters({limit:200}))).users.length,200);
     assert.equal((await listUsers(pool,userFilters({limit:200,page:2}))).users.length,9);
