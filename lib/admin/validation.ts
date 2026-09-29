@@ -1,3 +1,4 @@
+import {validateLabels,MAX_LABEL_BYTES} from './labels';
 import { validateFeatures } from '../features';
 import { validateAppearance } from '../appearance';
 import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
@@ -10,6 +11,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
   let valid = false;
   switch (key as SettingKey) {
+    case 'labels.config': {
+      if(typeof value!=='string'||new TextEncoder().encode(value).length>MAX_LABEL_BYTES)throw new AdminError('Invalid label configuration.');
+      if(value==='')return '';
+      try{return JSON.stringify(validateLabels(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid labels.');}
+    }
     case 'features.config': {
       if(typeof value!=='string'||value.length>8000)throw new AdminError('Invalid features configuration.');
       if(value==='')return '';

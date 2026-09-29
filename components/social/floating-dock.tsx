@@ -1,4 +1,6 @@
 "use client";
+import {useLabels} from "./labels";
+
 import { memo, useCallback, useEffect, useRef } from "react";
 import { navIcons } from "./appearance";
 import type { NavItem } from "@/lib/appearance";
@@ -25,6 +27,7 @@ type FloatingDockProps = {
 };
 
 export const FloatingDock = memo(function FloatingDock({ items, active, me, onSelect, covered = false }: FloatingDockProps) {
+  const t=useLabels();
   const { ref, hidden, show, hide } = useDockVisibility();
   const list = useRef<HTMLDivElement>(null);
   const indicator = useRef<HTMLSpanElement>(null);
@@ -77,7 +80,7 @@ export const FloatingDock = memo(function FloatingDock({ items, active, me, onSe
     >
       {/* The wrapper only centres; the pill only ever transforms on the Y
           axis, so the auto-hide animation can never affect its position. */}
-      <nav className="dock" aria-label="Bottom navigation">
+      <nav className="dock" aria-label={t("floating_dock.bottom_navigation")}>
         <div className="dock-list" ref={list} data-dock-ready="true">
           <span className="dock-indicator" ref={indicator} aria-hidden="true" />
           {items.map(item => {

@@ -1,4 +1,7 @@
 "use client";
+import {useLabels} from "./labels";
+import {defaultTranslator,type Translator} from "@/lib/admin/labels";
+
 import { useState, useEffect, type ReactNode } from "react";
 import { LoaderCircle, Camera, ChevronLeft, ChevronRight, Heart } from "lucide-react";
 import useEmblaCarousel from "embla-carousel-react";
@@ -32,15 +35,15 @@ export function toggleStoredTheme(current:'light'|'dark') {
 
 /* --------------------------------- helpers --------------------------------- */
 
-export function timeAgo(time: number) {
+export function timeAgo(time: number, t: Translator = defaultTranslator) {
   const mins = Math.max(0, Math.floor((Date.now() - time) / 60000));
-  return mins < 1 ? "just now" : mins < 60 ? mins + "m" : mins < 1440 ? Math.floor(mins / 60) + "h" : mins < 10080 ? Math.floor(mins / 1440) + "d" : Math.floor(mins / 10080) + "w";
+  return mins < 1 ? t("common.just_now") : mins < 60 ? mins + t("common.m") : mins < 1440 ? Math.floor(mins / 60) + t("common.h") : mins < 10080 ? Math.floor(mins / 1440) + t("common.d") : Math.floor(mins / 10080) + t("common.w");
 }
 export function count(n: number) {
   return new Intl.NumberFormat("en", { notation: n >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(n);
 }
 export class RequestError extends Error { constructor(message: string, public readonly status: number) { super(message); } }
-export async function request<T = unknown>(url: string, body?: unknown): Promise<T> {
+export async function request<T = unknown>(url: string, body?: unknown, t: Translator = defaultTranslator): Promise<T> {
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(url, {
     method: body ? "POST" : "GET",
@@ -49,8 +52,8 @@ export async function request<T = unknown>(url: string, body?: unknown): Promise
     cache: "no-store",
   });
   let data;
-  try { data = await response.json(); } catch { throw new Error("Unable to connect. Please try again."); }
-  if (!response.ok) throw new RequestError((data as { error?: string }).error || "Your change could not be saved. Please try again.", response.status);
+  try { data = await response.json(); } catch { throw new Error(t("auth_form.unable_to_connect_please_try_again")); }
+  if (!response.ok) throw new RequestError(t.text((data as { error?: string }).error || "") || t("common.your_change_could_not_be_saved_please_try_again"), response.status);
   return data as T;
 }
 
@@ -79,7 +82,7 @@ async function videoSize(file: File): Promise<number | null> {
     video.src = url;
   });
 }
-export async function upload(file: File): Promise<UploadResult> {
+export async function upload(file: File, t: Translator = defaultTranslator): Promise<UploadResult> {
   let output = file; let aspect: number | null = null;
   if (file.type.startsWith("image/") && file.type !== "image/gif") {
     const bitmap = await createImageBitmap(file);
@@ -88,41 +91,42 @@ export async function upload(file: File): Promise<UploadResult> {
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Your browser could not process this photo.");
+    if (!context) throw new Error(t("common.your_browser_could_not_process_this_photo"));
     context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("Could not process photo.")), "image/jpeg", .88));
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error(t("common.could_not_process_photo"))), "image/jpeg", .88));
     output = new File([blob], "photo.jpg", { type: "image/jpeg" });
   } else if (file.type.startsWith("image/")) aspect = await imageSize(file);
   else if (file.type.startsWith("video/")) aspect = await videoSize(file);
-  if (output.size > 20 * 1024 * 1024) throw new Error("Choose a file smaller than 20 MB.");
+  if (output.size > 20 * 1024 * 1024) throw new Error(t("common.choose_a_file_smaller_than_20_mb"));
   if (devMode) {
     const form = new FormData();
     form.append("key", crypto.randomUUID());
     form.append("file", output);
-    const result = await request<{ url: string; type: string }>("/api/dev-upload", form);
+    const result = await request<{ url: string; type: string }>("/api/dev-upload", form, t);
     return { ...result, aspect };
   }
   const key = crypto.randomUUID();
   await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
-  const completed = await request<{ url: string; type: string }>("/api/upload/complete", { key });
+  const completed = await request<{ url: string; type: string }>("/api/upload/complete", { key }, t);
   return { ...completed, aspect };
 }
 
 /* --------------------------------- avatars --------------------------------- */
 
 export function Avatar({ person, size = 42, ring = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; onClick?: () => void; className?: string }) {
+  const t=useLabels();
   const [broken, setBroken] = useState(false);
   const content = (
     <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size }}>
       {person?.avatar && !broken
         ? <img src={person.avatar} alt="" width={size} height={size} loading="lazy" onError={() => setBroken(true)} />
-        : <span className="avatar-initial">{(person?.name || "R").slice(0, 1).toUpperCase()}</span>}
+        : <span className="avatar-initial">{(person?.name || t("common.avatarFallback")).slice(0, 1).toUpperCase()}</span>}
     </span>
   );
   return onClick ? (
-    <button aria-label={"Open " + (person?.username || "your profile")} onClick={onClick} className="avatar-button">{content}</button>
+    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button">{content}</button>
   ) : content;
 }
 
@@ -165,7 +169,8 @@ export function Empty({ icon, heading, body, action }: { icon?: ReactNode; headi
   );
 }
 export function Busy({ className = "", size = 20 }: { className?: string; size?: number }) {
-  return <LoaderCircle className={"spin " + className} size={size} aria-label="Loading" />;
+  const t=useLabels();
+  return <LoaderCircle className={"spin " + className} size={size} aria-label={t("state.loading")} />;
 }
 export function SkeletonLine({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
   return <span className={"skeleton " + className} style={style} aria-hidden="true" />;
@@ -211,6 +216,7 @@ export function MediaFrame({
 }: {
   src: string; mediaType: "image" | "video"; aspect: number | null; fit?: "cover" | "contain"; alt: string; className?: string; maxHeight?: number; eager?: boolean; onDoubleClick?: () => void; videoProps?: React.VideoHTMLAttributes<HTMLVideoElement>; children?: ReactNode;
 }) {
+  const t=useLabels();
   // The stored aspect wins; a measured value only fills in when the post has
   // none (older posts), so no state syncing between renders is needed.
   const [measured, setMeasured] = useState<number | null>(null);
@@ -229,7 +235,7 @@ export function MediaFrame({
     <div className={"media-frame " + (fit === "contain" ? "media-contain " : "") + className} style={style} onDoubleClick={onDoubleClick}>
       <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async" draggable={false}
         onLoad={event => { if (!ratio) { const image = event.currentTarget; if (image.naturalWidth && image.naturalHeight) setMeasured(image.naturalWidth / image.naturalHeight); } }}
-        onError={event => { event.currentTarget.alt = "This photo could not be loaded."; }} />
+        onError={event => { event.currentTarget.alt = t("common.this_photo_could_not_be_loaded"); }} />
       {children}
     </div>
   );
@@ -240,6 +246,7 @@ export function MediaFrame({
 export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
   items: string[]; aspects?: number[] | null; render: (item: string, index: number, eager: boolean) => ReactNode; onDoubleClick?: () => void; ariaLabel: string;
 }) {
+  const t=useLabels();
   const [emblaRef, embla] = useEmblaCarousel({
     loop: false,
     watchDrag: true,
@@ -303,7 +310,7 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
               aria-hidden={position !== index}
               role="group"
               aria-roledescription="slide"
-              aria-label={`${position + 1} of ${items.length}`}
+              aria-label={t("common.position",{number:position+1,total:items.length})}
             >
               {render(item, position, Math.abs(position - index) <= 1)}
             </div>
@@ -312,11 +319,11 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
       </div>
       {items.length > 1 && (
         <>
-          <span className="image-number">{index + 1}/{items.length}</span>
+          <span className="image-number">{index + 1}{t("common.symbol")}{items.length}</span>
           <button
             type="button"
             className="carousel-back icon-button"
-            aria-label="Previous photo"
+            aria-label={t("common.previous_photo")}
             disabled={!canScrollPrev}
             onClick={(e) => {
               e.stopPropagation();
@@ -328,7 +335,7 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
           <button
             type="button"
             className="carousel-next icon-button"
-            aria-label="Next photo"
+            aria-label={t("common.next_photo")}
             disabled={!canScrollNext}
             onClick={(e) => {
               e.stopPropagation();
@@ -337,14 +344,14 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
           >
             <ChevronRight size={18} />
           </button>
-          <div className="carousel-dots" role="tablist" aria-label="Photo navigation">
+          <div className="carousel-dots" role="tablist" aria-label={t("common.photo_navigation")}>
             {items.map((_, position) => (
               <button
                 type="button"
                 key={position}
                 role="tab"
                 aria-selected={position === index}
-                aria-label={`Go to photo ${position + 1}`}
+                aria-label={t("common.goToPhoto",{number:position+1})}
                 className={"carousel-dot " + (position === index ? "active" : "")}
                 onClick={(e) => {
                   e.stopPropagation();

@@ -322,3 +322,56 @@ Implemented after the preserved Phase 4 application baseline (`a0a3aab`). No rem
 5. The root `FunctionGram-Phase-5-Flags-Counters.patch` is an identical downloadable copy. Apply only one copy.
 
 **Next phase:** Phase 6 is not authorized; awaiting the user's request.
+
+## Phase 6 — Labels: rename public copy
+
+Applied from the repository’s `phase06.patch` after the complete Phase 5 baseline. No Phase 7 work.
+
+### Delivered
+
+- **591 registered English-first keys** in `lib/admin/label-defaults.ts`, with validation, resolution and interpolation in `lib/admin/labels.ts`. Defaults retain the previous copy. Plain text only; React escapes markup rather than evaluating HTML.
+- `/rstmcadmin/labels` has search over keys/defaults/current values, inline editing, per-key reset, explicitly confirmed reset-all, JSON import/export and a separate publish step. Forty fields per page keep the editor bounded. Imports replace the draft, not the live configuration; validation failures preserve the existing draft/live values. Exports contain a full effective snapshot, suitable for editing and reimporting. Publishing stores only overrides.
+- Public component migration: app, dock, appearance accessibility labels, views, reels, messages, stories, create/edit, settings, post cards/viewer, common controls, authentication/recovery, maintenance sign-in, public page/error states and metadata. Registry keys are stable; category IDs, API actions, route/hash targets, storage keys and other protocol values are deliberately not translated.
+- `LabelsProvider` receives server-resolved overrides from the root layout. Server pages and metadata use the same registry via `getTranslator()`. The existing tagged settings cache avoids an extra database query for each label lookup. Publishing invalidates settings and the root layout; the next public request contains the new copy in its initial HTML, without waiting for a client fetch.
+- Admin page and API independently require a fresh verified active admin/owner. Writes use the common same-origin and byte-limited route guard; settings authorization, mutation and audit share a transaction. No schema migration, dependency or environment variable added.
+
+### Semantics and boundaries
+
+- Start with English. The flat registry and placeholder interpolation allow a later locale layer without changing the UI's keys. This phase does not add language negotiation, automatic translation or a multilingual pluralization engine.
+- Values must be nonempty text, at most 2,000 characters each and 192 KiB total serialized overrides. Unknown keys, non-string values and control characters are rejected. Keep every original `{placeholder}` occurrence intact; interpolation is nonrecursive. Newline text is permitted. Dynamic account/content values are interpolated, never interpreted as HTML.
+- Explicit `nav.*` label overrides win over Appearance labels for built-in targets. Resetting restores the Appearance value. Branding, custom nav labels, banners/footer content and maintenance title/message remain editable through their existing Appearance/Features controls; they are not overwritten by arbitrary text matching.
+- `nav.reels` additionally renames the word Reels/reels/reel in **unmodified default copy**, including empty states. Explicitly customized copy remains exactly as written. Reels sidebar/dock/header/heading and hash-view document title resolve the same configured name. Browsers do not send URL fragments to the server, so the root metadata is SSR-rendered while section-specific document titles update on hash navigation/hydration.
+- Pure request/upload/time helpers receive the current translator explicitly; there is no mutable process-global label state. Known application error text resolves through the registry. External provider/runtime messages and user-generated names, captions, message bodies, custom media descriptions, timestamps and numeric values are dynamic data, not rewritten by labels.
+- Existing open tabs require a reload after publishing. Server HTML and hydration use one snapshot; this is not a push/realtime localization service. With missing deployment configuration or unreadable stored labels, safe defaults remain available.
+
+### Patch-author verification (historical)
+
+- Typecheck, lint and production build passed. Lint has 0 errors and the existing 7 image warnings.
+- Automated suite: **72 tests; 69 passed, 0 failed/cancelled, 3 optional managed-PostgreSQL tests skipped** because no isolated PostgreSQL URL was supplied.
+- New tests cover defaults, isolated translators, JSON roundtrip/reset, rejected keys/types/control characters/size/placeholder errors, literal HTML escaping, SSR override rendering, nav precedence, Reels copy/title consistency, audited authorized saves and rollback on audit failure.
+- The AST-based source scan in `tests/labels.test.ts` checks every migrated public component/page for remaining literal JSX text, static copy props and literal label templates. No violations. Unlike a plain grep, it excludes technical identifiers and actual content data. Category/filter IDs intentionally remain stable and their rendered labels resolve through the registry.
+- `scripts/labels-check.mts`: live dev HTTP role matrix (guest/member/unverified/banned/revoked/expired/admin), same-origin checks, payload/validation failures, SSR nav/auth/metadata, literal-markup escaping, cache invalidation and defaults reset all passed using an isolated synthetic database.
+- `scripts/labels-browser.mjs`: Chromium at **320/390/430/768/1024px**, light/dark (10 combinations), public/admin layouts, no horizontal overflow, 44px editor controls, keyboard focus, no public page errors, actual search/edit/publish, no premature draft publishing, initial HTML, renamed nav/dock/heading/title, JSON export/import and invalid-import preservation, per-key/all resets, and translated category labels retaining original API IDs all passed.
+- Phase 5 HTTP and Chromium regressions were rerun and passed, including feature gates, direct hashes, maintenance confirmation, guest screen and admin bypass. All QA settings were restored.
+- No production database, real email, storage objects, deployment settings or secrets modified. Tooling, fixtures and logs remain outside the application patch.
+
+### Apply and operate
+
+1. Apply `phase06.patch` **after Phases 1–5**. Run `git apply --check` first, then `git apply`, followed by the normal install, typecheck, lint, tests and build.
+2. Sign in through the existing admin login and open **Labels** in `/rstmcadmin`. Search by key or text; change fields; choose **Publish labels** to apply and audit.
+3. For a coordinated Reels rename, edit **nav.reels**. For a specific sentence, edit that sentence's key. Preserve placeholders such as `{site}` and `{number}`.
+4. Export JSON for backup. Import a flat key/value JSON object to stage a replacement draft; omitted keys fall back to defaults after publishing. Use per-key reset or type **RESET** for reset-all, then publish.
+5. Reload public tabs to see changes. The source patch is retained as `phase06.patch`; it is already applied in this checkout. Do not apply it again.
+
+**Next phase:** Phase 7 is not authorized; awaiting the user's request.
+
+### Integration verification — 2026-09-29
+
+- Repaired the source patch’s missing final newline; all 38 file diffs applied without conflicts or omitted hunks.
+- Fixed full JSON backup reimport near the 192 KiB overrides limit: file parsing allows bounded space for the default registry/pretty printing while stored overrides retain the original limit. Added regression coverage for successful large roundtrips and rejected oversize imports/overrides.
+- `npm run lint`: zero errors, seven existing image warnings.
+- `npm run typecheck` and `npm run build`: passed.
+- `npm run test:vercel`: 73 tests, 70 passed, 3 optional managed-PostgreSQL tests skipped, zero failures.
+- `scripts/labels-check.mts`: passed against isolated local PGlite fixtures, including role guards, CSRF, byte limits, validation, SSR, escaping, cache invalidation and reset. Original settings restored.
+- Browser QA was attempted but Chromium could not launch because this sandbox lacks `libnspr4.so`; installing system dependencies was blocked by unavailable Debian package mirrors. The patch-author browser results above were not independently reproduced in this integration session.
+- No production services or credentials modified. Local fixtures, tools and logs are excluded from Git.

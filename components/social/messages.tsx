@@ -1,4 +1,6 @@
 "use client";
+import {useLabels} from "./labels";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Send, Search, SquarePen, ArrowLeft, Bookmark, Smile, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +12,7 @@ type OutgoingMessage = Message & { pending?: boolean };
 export function Messages({ me, people, initialRecipient, onProfile }: {
   me: Person; people: Person[]; initialRecipient: string | null; onProfile: (id: string) => void;
 }) {
+  const t=useLabels();
   const [recipient, setRecipient] = useState(initialRecipient || me.id);
   const [query, setQuery] = useState("");
   const [body, setBody] = useState("");
@@ -37,14 +40,14 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     const version = ++sequence.current;
     return Promise.all([
       // The API pages newest-first; flip to chronological order for display.
-      request<{ items: Message[]; next_cursor: string | null }>("/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50"),
-      request<Message[]>("/api/social?inbox=1"),
+      request<{ items: Message[]; next_cursor: string | null }>("/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50", undefined, t),
+      request<Message[]>("/api/social?inbox=1", undefined, t),
     ]).then(async ([page, all]) => {
       if (version !== sequence.current) return;
       setMessages([...page.items].reverse()); setOlderCursor(page.next_cursor); setInbox(all); setError(""); setLoading(false);
-      await request("/api/social", { action: "read_messages", id: recipient });
+      await request("/api/social", { action: "read_messages", id: recipient }, t);
     }).catch(e => { if (version === sequence.current) { setError((e as Error).message); setLoading(false); } })
-  }, [recipient]);
+  }, [recipient, t]);
 
   useEffect(() => {
     let active = true;
@@ -60,11 +63,11 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     const term = query.trim();
     if (term.length < 2) return;
     let active = true;
-    void request<Person[]>("/api/social?messages_search=" + encodeURIComponent(term))
+    void request<Person[]>("/api/social?messages_search=" + encodeURIComponent(term), undefined, t)
       .then(items => { if (active) setSearchHits(items); })
       .catch(() => { /* transient: the name filter keeps working */ });
     return () => { active = false; };
-  }, [query]);
+  }, [query, t]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages.length]);
 
@@ -72,7 +75,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     if (!olderCursor || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const page = await request<{ items: Message[]; next_cursor: string | null }>("/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50&cursor=" + encodeURIComponent(olderCursor));
+      const page = await request<{ items: Message[]; next_cursor: string | null }>("/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50&cursor=" + encodeURIComponent(olderCursor), undefined, t);
       const older = [...page.items].reverse().filter(item => !messages.some(existing => existing.id === item.id));
       setMessages(current => [...older, ...current]);
       setOlderCursor(page.next_cursor);
@@ -84,7 +87,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const removeMessage = async (message: Message) => {
     setMessages(current => current.filter(item => item.id !== message.id));
     setInbox(current => current.filter(item => item.id !== message.id));
-    try { await request("/api/social", { action: "delete_message", id: message.id }); }
+    try { await request("/api/social", { action: "delete_message", id: message.id }, t); }
     catch (e) {
       setMessages(current => [message, ...current.filter(item => item.id !== message.id)]);
       toast.error((e as Error).message);
@@ -98,7 +101,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     setMessages(value => [...value, optimistic]);
     setBody(""); setBusy(true);
     try {
-      const created = await request<{ id: string }>("/api/social", { action: "message", id: recipient, body: text });
+      const created = await request<{ id: string }>("/api/social", { action: "message", id: recipient, body: text }, t);
       setMessages(value => value.map(m => m.id === optimistic.id ? { ...m, id: created.id, pending: false } : m));
       setInbox(value => [...value, { ...optimistic, id: created.id, pending: false }]);
     } catch (e) {
@@ -122,18 +125,18 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     <div className={"messages-layout " + (mobileChat ? "show-chat" : "")}>
       <aside className="conversation-list">
         <header>
-          <h1>Messages</h1>
-          <span className="unread-total" aria-label={count(inbox.filter(m => m.recipient_id === me.id && !m.read_at).length) + " unread messages"}>
+          <h1>{t("nav.messages")}</h1>
+          <span className="unread-total" aria-label={count(inbox.filter(m => m.recipient_id === me.id && !m.read_at).length) + t("messages.unread_messages")}>
             {count(inbox.filter(m => m.recipient_id === me.id && !m.read_at).length)}
           </span>
-          <IconButton label="Find someone to message" onClick={() => queryInput.current?.focus()}><SquarePen size={22} /></IconButton>
+          <IconButton label={t("messages.find_someone_to_message")} onClick={() => queryInput.current?.focus()}><SquarePen size={22} /></IconButton>
         </header>
         <label className="search-field">
           <Search size={18} />
-          <input ref={queryInput} placeholder="Search people" aria-label="Search conversations" value={query} onChange={e => setQuery(e.target.value)} />
+          <input ref={queryInput} placeholder={t("messages.search_people")} aria-label={t("messages.search_conversations")} value={query} onChange={e => setQuery(e.target.value)} />
         </label>
         {query.trim().length >= 2 && serverHits.length > 0 && (<>
-          <h3>In conversations</h3>
+          <h3>{t("messages.in_conversations")}</h3>
           {serverHits.map(p => (
             <button key={"hit:" + p.id} className={"conversation " + (recipient === p.id ? "selected" : "")}
               onClick={() => {
@@ -145,7 +148,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
             </button>
           ))}
         </>)}
-        <h3>Your conversations</h3>
+        <h3>{t("messages.your_conversations")}</h3>
         {contacts.map(p => {
           const last = inbox.find(m => p.id === me.id ? m.sender_id === me.id && m.recipient_id === me.id : m.sender_id === p.id || m.recipient_id === p.id);
           const unread = unreadFor(p.id);
@@ -160,26 +163,26 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
               }}>
               <Avatar person={p} size={48} />
               <span>
-                <strong>{p.id === me.id ? "Saved messages" : p.username}</strong>
-                <small>{last ? last.body : p.id === me.id ? "Notes, links, and little reminders" : "Start a conversation"}</small>
+                <strong>{p.id === me.id ? t("app.saved_messages") : p.username}</strong>
+                <small>{last ? last.body : p.id === me.id ? t("messages.notes_links_and_little_reminders") : t("messages.start_a_conversation")}</small>
               </span>
               {unread > 0
                 ? <i className="unread-badge" aria-label={unread + " unread"}>{unread}</i>
-                : last && <time>{timeAgo(last.created_at)}</time>}
+                : last && <time>{timeAgo(last.created_at, t)}</time>}
             </button>
           );
         })}
-        {!contacts.length && <p className="no-results">No members found.</p>}
-        <p className="messages-note">Messages are available between real members. Sample profiles don’t receive messages.</p>
+        {!contacts.length && <p className="no-results">{t("messages.no_members_found")}</p>}
+        <p className="messages-note">{t("messages.messages_are_available_between_real_members_sample_profiles_don_t")}</p>
       </aside>
 
       <section className="chat-panel">
         <header>
-          <IconButton className="chat-back" label="Back to conversations" onClick={() => setMobileChat(false)}><ArrowLeft /></IconButton>
+          <IconButton className="chat-back" label={t("messages.back_to_conversations")} onClick={() => setMobileChat(false)}><ArrowLeft /></IconButton>
           <Avatar person={person} size={40} />
           <button onClick={() => onProfile(person.id)}>
-            <strong>{person.id === me.id ? "Saved messages" : person.username}</strong>
-            <span>{person.id === me.id ? "Only you can see these messages" : person.name}</span>
+            <strong>{person.id === me.id ? t("app.saved_messages") : person.username}</strong>
+            <span>{person.id === me.id ? t("messages.only_you_can_see_these_messages") : person.name}</span>
           </button>
         </header>
         <div className="chat-content">
@@ -188,30 +191,30 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           ) : messages.length ? (<>
             <div ref={top} />
             {olderCursor
-              ? <button className="load-older" onClick={() => void loadOlder()} disabled={loadingOlder} aria-label="Load earlier messages">{loadingOlder ? <Busy size={14} /> : "Load earlier messages"}</button>
-              : messages.length >= 50 && <p className="thread-start muted">Start of this conversation</p>}
+              ? <button className="load-older" onClick={() => void loadOlder()} disabled={loadingOlder} aria-label={t("messages.load_earlier_messages")}>{loadingOlder ? <Busy size={14} /> : t("messages.load_earlier_messages")}</button>
+              : messages.length >= 50 && <p className="thread-start muted">{t("messages.start_of_this_conversation")}</p>}
             {messages.map(m => (
               <div key={m.id} className={"message-row " + (m.sender_id === me.id ? "outgoing" : "incoming") + (m.pending ? " sending" : "")}>
                 <p>{m.body.split(/(https?:\/\/[^\s]+)/g).map((text, index) =>
                   /^https?:\/\//.test(text) ? <a key={index} href={text} target="_blank" rel="noreferrer" className="message-link">{text}</a> : text)}</p>
                 <span className="message-row-foot">
-                  <time title={new Date(m.created_at).toLocaleString()}>{m.pending ? "Sending…" : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                  {!m.pending && <button className="message-delete" aria-label="Delete message" title="Delete" onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
+                  <time title={new Date(m.created_at).toLocaleString()}>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                  {!m.pending && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
                 </span>
               </div>
             ))}
           </>) : (
             <Empty icon={person.id === me.id ? <Bookmark /> : <Send />}
-              heading={person.id === me.id ? "A little space for yourself" : "Say hello"}
-              body={person.id === me.id ? "Save a thought, a link, or a reminder. It’ll be here when you need it." : "Start your conversation with " + person.name + "."} />
+              heading={person.id === me.id ? t("messages.a_little_space_for_yourself") : t("messages.say_hello")}
+              body={person.id === me.id ? t("messages.save_a_thought_a_link_or_a_reminder_it_ll_be_here_when_you_need_i") : t("messages.start_your_conversation_with") + person.name + "."} />
           )}
-          {error && <div className="form-error" role="alert">{error}<button onClick={() => void load()} className="text-action">Retry</button></div>}
+          {error && <div className="form-error" role="alert">{error}<button onClick={() => void load()} className="text-action">{t("messages.retry")}</button></div>}
           <div ref={bottom} />
         </div>
         <form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
-          <IconButton label="Add a smile" onClick={() => { setBody(value => value + " 😊"); input.current?.focus(); }}><Smile size={22} /></IconButton>
-          <input ref={input} aria-label="Write a message" placeholder="Message…" value={body} maxLength={2000} onChange={e => setBody(e.target.value)} />
-          <button aria-label="Send message" className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
+          <IconButton label={t("messages.add_a_smile")} onClick={() => { setBody(value => value + " 😊"); input.current?.focus(); }}><Smile size={22} /></IconButton>
+          <input ref={input} aria-label={t("messages.write_a_message")} placeholder={t("messages.message")} value={body} maxLength={2000} onChange={e => setBody(e.target.value)} />
+          <button aria-label={t("messages.send_message")} className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
         </form>
       </section>
     </div>
