@@ -122,3 +122,9 @@ Phase 0 intentionally has no application patch, as permitted by §7. Phase 1 and
 ### Next phase
 
 Phase 2 only: dashboard/users table and guarded, validated, audited user actions. Read the guide first; maintain the per-page guard in addition to the layout and use adminRoute for every API method. Do not enable better-auth admin mutation endpoints without matching authorization/auditing. Preserve Phase 1's patch; produce a separate Phase 2 patch.
+
+### Packaging
+
+- Phase implementation commit: `bd0bdbe`.
+- `patches/phase-01-foundation.patch` generated with `git format-patch`; `git apply --check` passed against a scratch export of its parent (`1dccaa7`).
+- Phase 2 has not been started.
