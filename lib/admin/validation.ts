@@ -1,3 +1,4 @@
+import {validateModeration} from '../moderation-policy';
 import {validateMedia} from '../media-config';
 import {validateLabels,MAX_LABEL_BYTES} from './labels';
 import { validateFeatures } from '../features';
@@ -12,6 +13,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
   let valid = false;
   switch (key as SettingKey) {
+    case 'moderation.config': {
+      if(typeof value!=='string'||value.length>32000)throw new AdminError('Invalid moderation configuration.');
+      if(value==='')return '';
+      try{return JSON.stringify(validateModeration(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid moderation settings.');}
+    }
     case 'media.config': {
       if(typeof value!=='string'||value.length>4096)throw new AdminError('Invalid media configuration.');
       if(value==='')return '';

@@ -553,3 +553,23 @@ test('Phase 5 baseline/multiplier/jitter counts agree in all feeds, direct view 
   assert.equal((await pool.query('SELECT base_likes FROM posts WHERE id=$1',[id])).rows[0].base_likes,10);
  }finally{await saveSetting(pool,carol.id,'features.config','');await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
 });
+
+test('Phase 8 social acceptance: refreshed normal-user reports, blocked captions, private shadow-ban visibility',async()=>{
+  const pool=await getPool();
+  const {publishModerationSettings,reportQueue,setProfileModeration}=await import('../lib/admin/moderation');
+  const reported=await api(alice,{action:'report',target_type:'profile',target_id:bob.id,reason:'other',details:'Please review this account.'});assert.equal(reported.status,200);
+  const filters={status:'new',reason:'other',target:'profile',q:bob.id};const first=await reportQueue(pool,filters),refreshed=await reportQueue(pool,filters);assert.equal(first.total,1);assert.equal(refreshed.items[0].reporter_id,alice.id);assert.equal(refreshed.items[0].target_id,bob.id);
+  await pool.query("UPDATE \"user\" SET role='admin' WHERE id=$1",[carol.id]);
+  try{
+    await publishModerationSettings(pool,carol.id,{enabled:true,regexMode:false,blockedWords:['phase8blockedcaption'],blockedDomains:[]});
+    const blocked=await api(alice,{action:'create_post',kind:'post',caption:'A Phase8BlockedCaption test'});assert.equal(blocked.status,422,'blocked test captions are rejected by the real social write API');
+    await publishModerationSettings(pool,carol.id,{enabled:false,regexMode:false,blockedWords:[],blockedDomains:[]});
+    const asset=await grantAsset(bob.id),created=await api(bob,{action:'create_post',kind:'post',caption:'Shadow visibility test',media:['/api/media/'+asset]});assert.equal(created.status,200);
+    await setProfileModeration(pool,carol.id,{profileId:bob.id,shadowBanned:true,commentBanned:false,reason:'Acceptance test'});
+    const own=await api(bob),other=await api(alice);assert.ok(own.data.posts.some((post:{id:string})=>post.id===created.data.id),'shadow-banned author retains self-visibility');assert.ok(!other.data.posts.some((post:{id:string})=>post.id===created.data.id),'other viewers do not receive shadow-banned posts');
+  }finally{
+    await setProfileModeration(pool,carol.id,{profileId:bob.id,shadowBanned:false,commentBanned:false,reason:''}).catch(()=>{});
+    await publishModerationSettings(pool,carol.id,{enabled:false,regexMode:false,blockedWords:[],blockedDomains:[]}).catch(()=>{});
+    await pool.query("UPDATE \"user\" SET role='user' WHERE id=$1",[carol.id]);
+  }
+});

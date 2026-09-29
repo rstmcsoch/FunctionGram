@@ -10,8 +10,9 @@ export function visiblePost(p = 'p') {
 export function livePost(p = 'p') {
   return `(${visiblePost(p)}) AND (${p}.expires_at IS NULL OR ${p}.expires_at > extract(epoch FROM now())*1000)`;
 }
-// Caller binds the viewer three times, in this order: privacy, follow, block.
+// Caller binds the viewer four times, in this order: privacy, follow, block, shadow-ban self-visibility.
 export function readablePost(p = 'p', a = 'a') {
   return `(${livePost(p)}) AND (${a}.is_private=0 OR ${p}.author_id=? OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.followee_id=${p}.author_id))
-    AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=${p}.author_id)`;
+    AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=${p}.author_id)
+    AND (NOT COALESCE((SELECT shadow_banned FROM profile_moderation m WHERE m.profile_id=${p}.author_id),false) OR ${p}.author_id=?)`;
 }

@@ -147,3 +147,17 @@ export const mediaUpgradeStatements = [
  "ALTER TABLE assets ADD COLUMN IF NOT EXISTS trash_origin text NOT NULL DEFAULT 'ready'",
  'CREATE INDEX IF NOT EXISTS idx_upload_claims_quota ON upload_claims(owner_id,completed,created_at)',
 ];
+
+// Version 9: report workflow, private moderation flags and conservative filters.
+export const moderationUpgradeStatements=[
+ "ALTER TABLE reports ADD COLUMN IF NOT EXISTS assigned_to text",
+ "ALTER TABLE reports ADD COLUMN IF NOT EXISTS action_taken text",
+ "ALTER TABLE reports ADD COLUMN IF NOT EXISTS action_target_type text",
+ "ALTER TABLE reports ADD COLUMN IF NOT EXISTS action_target_id text",
+ "UPDATE reports SET status='new' WHERE status NOT IN ('new','triage','actioned','dismissed')",
+ "ALTER TABLE reports ALTER COLUMN status SET DEFAULT 'new'",
+ "CREATE INDEX IF NOT EXISTS reports_queue_idx ON reports(status,reason,target_type,created_at DESC,id)",
+ "CREATE INDEX IF NOT EXISTS reports_assigned_idx ON reports(assigned_to,status,created_at DESC)",
+ `CREATE TABLE IF NOT EXISTS profile_moderation(profile_id text PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,shadow_banned boolean NOT NULL DEFAULT false,comment_banned boolean NOT NULL DEFAULT false,shadow_reason text NOT NULL DEFAULT '',comment_reason text NOT NULL DEFAULT '',updated_at bigint NOT NULL,updated_by text NOT NULL)`,
+ `CREATE INDEX IF NOT EXISTS profile_moderation_shadow_idx ON profile_moderation(profile_id) WHERE shadow_banned=true`,
+];
