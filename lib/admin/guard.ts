@@ -1,12 +1,12 @@
 import 'server-only';
 import { forbidden, unauthorized } from 'next/navigation';
-import { getAppUser } from '../auth';
+import { getSessionIdentity } from '../auth';
 import { getPool } from '../postgres';
 import { authorizeAdmin } from './core';
 import { AdminError } from './validation';
 
 export async function requireAdmin(request?: Request) {
-  const user = await getAppUser(request?.headers);
+  const user = await getSessionIdentity(request?.headers);
   return authorizeAdmin(await getPool(), user?.userId ?? null);
 }
 export async function requireOwner(request?: Request) {
