@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
 const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
 async function fixture() {
   const db = new PGlite();
-  for (const sql of [...old, ...schema.adminUpgradeStatements]) await db.exec(sql);
+  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await db.exec(sql);
   const pool = serializedPool({ async query(sql, values) {
     const result = await db.query(sql, values);
     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
@@ -31,7 +31,7 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
   try {
     for (const sql of old) await db.exec(sql);
     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements]) await db.exec(sql);
+    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await db.exec(sql);
     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
     assert.deepEqual(existing, { role: 'user', banned: false });
     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
@@ -43,6 +43,8 @@ test('migration 5 is additive/idempotent on fresh and populated PGlite; plugin s
     const source = readFileSync('lib/postgres.ts', 'utf8');
     assert.match(source, /version: 5, statements: adminUpgradeStatements/);
     assert.match(source, /\[5, adminUpgradeStatements\]/);
+    assert.match(source, /version: 6, statements: adminUsersUpgradeStatements/);
+    assert.match(source, /\[6, adminUsersUpgradeStatements\]/);
   } finally { await db.close(); }
 });
 
@@ -186,7 +188,7 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
   try {
     await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
-    for (const sql of [...old, ...schema.adminUpgradeStatements]) await pool.query(sql);
+    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements]) await pool.query(sql);
     await user(pool, 'first', 'user');
     await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
     assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);
