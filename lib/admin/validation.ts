@@ -1,3 +1,4 @@
+import { validateFeatures } from '../features';
 import { validateAppearance } from '../appearance';
 import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
 
@@ -9,6 +10,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
   let valid = false;
   switch (key as SettingKey) {
+    case 'features.config': {
+      if(typeof value!=='string'||value.length>8000)throw new AdminError('Invalid features configuration.');
+      if(value==='')return '';
+      try{return JSON.stringify(validateFeatures(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid configuration.');}
+    }
     case 'appearance.config': {
       if(typeof value!=='string'||value.length>12000)throw new AdminError('Invalid appearance configuration.');
       if(value==='')return '';

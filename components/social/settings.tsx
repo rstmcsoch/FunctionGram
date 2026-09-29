@@ -1,4 +1,5 @@
 "use client";
+import {Feature,useFeatures} from "./features";
 import { useState, useEffect, type FormEvent } from "react";
 import { Shield, Plus, Trash2, Mail, Lock, Bookmark } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import type { Person, SavedCollection } from "@/lib/types";
 export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   me: Person; onClose: () => void; onSaved: () => Promise<void> | void; onSignOut: () => void;
 }) {
+  const flags=useFeatures();
   const [busy, setBusy] = useState("");
   const [privacy, setPrivacy] = useState<number>(me.is_private ? 1 : 0);
   const [collections, setCollections] = useState<SavedCollection[] | null>(null);
@@ -17,10 +19,11 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   useEffect(() => {
+    if(!flags.saves)return;
     let active = true;
     void request<SavedCollection[]>("/api/social?collections=1").then(items => { if (active) setCollections(items); }).catch(() => { if (active) setCollections([]); });
     return () => { active = false; };
-  }, []);
+  }, [flags.saves]);
 
   const togglePrivacy = async () => {
     const next = privacy ? 0 : 1;
@@ -84,7 +87,7 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
   return (
     <Modal open onClose={() => !busy && onClose()} title="Settings and privacy" description="Privacy, collections, and your account.">
       <div className="settings-sections">
-        <section className="settings-section">
+        <Feature name="privateAccounts"><section className="settings-section">
           <h3><Shield size={18} />Privacy</h3>
           <div className="settings-row">
             <div>
@@ -95,9 +98,9 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
               <span />
             </button>
           </div>
-        </section>
+        </section></Feature>
 
-        <section className="settings-section">
+        <Feature name="saves"><section className="settings-section">
           <h3><Bookmark size={18} />Collections</h3>
           <p className="settings-hint">Organize saved posts into groups of your own.</p>
           <form onSubmit={addCollection} className="collection-form">
@@ -117,7 +120,7 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
               ))}
             </ul>
           )}
-        </section>
+        </section></Feature>
 
         <section className="settings-section">
           <h3><Mail size={18} />Account email</h3>

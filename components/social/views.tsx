@@ -1,4 +1,5 @@
 "use client";
+import {Feature} from "./features";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Search, X, Users, Heart, Bookmark, Film, Grid3X3, UserRound, Camera, TrendingUp, Send, BadgeCheck, Flag, UserX, UserCheck, Lock } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,7 +41,7 @@ function GridTile({ post, onPost, natural = false }: { post: Post; onPost: (post
       {(post.media_type === "video" || post.media.length > 1) && (
         <span className="grid-media-icon">{post.media_type === "video" ? <Film size={20} /> : <Grid3X3 size={18} />}</span>
       )}
-      <span className="grid-hover"><Heart size={20} fill="white" />{count(post.likes)}<span>·</span>{post.comment_count} comments</span>
+      <span className="grid-hover"><Feature name="likes">{post.display_likes!==null&&<><Heart size={20} fill="white" />{count(post.display_likes??post.likes)}</>}</Feature><Feature name="comments">{post.display_comments!==null&&<span>{count(post.display_comments??post.comment_count)} comments</span>}</Feature></span>
     </button>
   );
 }
@@ -66,7 +67,7 @@ export function ProfileGrid({ id, tab, posts, onPost, onCreate, own }: {
       <Empty icon={tab === "saved" ? <Bookmark /> : <Camera />}
         heading={tab === "saved" ? "Keep a little inspiration" : own ? "Share your first moment" : "No posts yet"}
         body={tab === "saved" ? "Tap the bookmark on a post to keep it here." : own ? "Your photos and videos deserve a place here." : "Their next moment will appear here."}
-        action={own && <button className="primary-button" onClick={onCreate}>{tab === "saved" ? "Explore posts" : "Create a post"}</button>} />
+        action={own && <Feature name="uploads"><button className="primary-button" onClick={onCreate}>{tab === "saved" ? "Explore posts" : "Create a post"}</button></Feature>} />
     );
   }
   return <PostGrid posts={list} onPost={onPost} />;
@@ -94,18 +95,18 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
         <Tabs value={feedTab} onValueChange={setFeedTab}>
           <TabsList variant="line" className="feed-tabs">
             <TabsTrigger value="for-you">For you</TabsTrigger>
-            <TabsTrigger value="following">Following</TabsTrigger>
+            <Feature name="follow"><TabsTrigger value="following">Following</TabsTrigger></Feature>
           </TabsList>
         </Tabs>
-        <Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} />
+        <Feature name="stories"><Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} /></Feature>
         <div className="feed-posts">
           {visiblePosts.map(post => <PostCard key={post.id} post={post} actions={actions} />)}
           {!visiblePosts.length && (isFollowing && !following.loading
-            ? <Empty icon={<Users />} heading="Follow a few people" body="Their latest moments will appear here."
-                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
+            ? <Empty icon={<Users />} heading="Your following feed" body="Their latest moments will appear here."
+                action={<Feature name="search"><button className="primary-button" onClick={() => navigate("search")}>Find people</button></Feature>} />
             : !isFollowing && (
               <Empty icon={<Users />} heading="Make this feed yours" body="Follow a few people to see their latest moments here."
-                action={<button className="primary-button" onClick={() => navigate("search")}>Find people</button>} />
+                action={<Feature name="search"><button className="primary-button" onClick={() => navigate("search")}>Find people</button></Feature>} />
             ))}
           {isFollowing && following.loading && !visiblePosts.length && <div className="loading-row"><Busy /></div>}
           <div className="feed-end">
@@ -131,7 +132,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
           <>
             <div className="suggestions-heading">
               <h2>Suggested for you</h2>
-              <button onClick={() => navigate("search")}>See all</button>
+              <Feature name="search"><button onClick={() => navigate("search")}>See all</button></Feature>
             </div>
             {suggestions.map(person => (
               <div key={person.id} className="suggestion">
@@ -140,9 +141,9 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
                   <strong>{person.username}</strong>
                   <span>{person.is_demo ? "Suggested for you" : person.name}</span>
                 </button>
-                <button className="follow-button" onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                <Feature name="follow"><button className="follow-button" onClick={() => follow(person)} disabled={followPending.has(person.id)}>
                   {followPending.has(person.id) ? <Busy size={14} /> : "Follow"}
-                </button>
+                </button></Feature>
               </div>
             ))}
           </>
@@ -264,9 +265,9 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
                         </button>
                         {person.id === data.me?.id
                           ? <button className="follow-button" disabled>You</button>
-                          : <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                          : <Feature name="follow"><button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
                               {person.followed ? "Following" : "Follow"}
-                            </button>}
+                            </button></Feature>}
                       </div>
                     ))}
                   </div>
@@ -295,19 +296,19 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
                     <strong>{person.username}</strong>
                     <span>{person.name}</span>
                   </button>
-                  <button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
+                  <Feature name="follow"><button className={"follow-button " + (person.followed ? "following" : "")} onClick={() => follow(person)} disabled={followPending.has(person.id)}>
                     {person.followed ? "Following" : "Follow"}
-                  </button>
+                  </button></Feature>
                 </div>
               ))}
             </div>
           </>
         )}
       {!needle && (
-        <button className="explore-cta glass-card" onClick={() => navigate("explore")}>
+        <Feature name="explore"><button className="explore-cta glass-card" onClick={() => navigate("explore")}>
           <TrendingUp size={22} />
           <span><strong>Explore what’s new</strong><span>Photos and reels from across RSTMC.</span></span>
-        </button>
+        </button></Feature>
       )}
     </section>
   );
@@ -540,17 +541,17 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
             {own ? (
               <>
                 <button className="secondary-button" onClick={onEdit}>Edit profile</button>
-                <button className="secondary-button" onClick={onShare}><Send size={15} />Share</button>
+                <Feature name="shares"><button className="secondary-button" onClick={onShare}><Send size={15} />Share</button></Feature>
               </>
             ) : (
               <>
-                <button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending.has(profile.id) || !!profile.blocked}>
+                <Feature name="follow"><button className={"primary-button " + (profile.followed ? "following" : "")} onClick={() => follow(profile)} disabled={followPending.has(profile.id) || !!profile.blocked}>
                   {followPending.has(profile.id) ? <Busy size={14} /> : profile.followed ? "Following" : "Follow"}
-                </button>
-                <button className="secondary-button" onClick={() => onMessage(profile)} disabled={!!profile.blocked}>Message</button>
-                <button className="secondary-button icon-only" onClick={onShare} aria-label="Share profile"><Send size={15} /></button>
+                </button></Feature>
+                <Feature name="messages"><button className="secondary-button" onClick={() => onMessage(profile)} disabled={!!profile.blocked}>Message</button></Feature>
+                <Feature name="shares"><button className="secondary-button icon-only" onClick={onShare} aria-label="Share profile"><Send size={15} /></button></Feature>
                 <div className="profile-safety">
-                  <button className="icon-button" onClick={() => onReport(profile)} aria-label={"Report " + profile.username} title="Report"><Flag size={16} /></button>
+                  <Feature name="reports"><button className="icon-button" onClick={() => onReport(profile)} aria-label={"Report " + profile.username} title="Report"><Flag size={16} /></button></Feature>
                   <button className={"icon-button " + (profile.blocked ? "is-active" : "")} onClick={() => onBlock(profile)}
                     aria-label={profile.blocked ? "Unblock " + profile.username : "Block " + profile.username}
                     title={profile.blocked ? "Unblock" : "Block"}>
@@ -562,8 +563,8 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
           </div>
           <div className="profile-stats">
             <span><strong>{count(profile.post_count)}</strong> posts</span>
-            <button onClick={() => onRelations(profile, "followers")}><strong>{count(profile.followers)}</strong> followers</button>
-            <button onClick={() => onRelations(profile, "following")}><strong>{count(profile.following)}</strong> following</button>
+            <Feature name="follow"><button onClick={() => onRelations(profile, "followers")}><strong>{count(profile.followers)}</strong> followers</button></Feature>
+            <Feature name="follow"><button onClick={() => onRelations(profile, "following")}><strong>{count(profile.following)}</strong> following</button></Feature>
           </div>
           <strong className="profile-name">{profile.name}</strong>
           <p className="profile-bio">{profile.bio || "A little space to share your world."}</p>
@@ -574,8 +575,8 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList variant="line" className="profile-tabs">
           <TabsTrigger value="posts"><Grid3X3 size={17} />Posts</TabsTrigger>
-          <TabsTrigger value="reels"><Film size={17} />Reels</TabsTrigger>
-          {own && <TabsTrigger value="saved"><Bookmark size={17} />Saved</TabsTrigger>}
+          <Feature name="reels"><TabsTrigger value="reels"><Film size={17} />Reels</TabsTrigger></Feature>
+          {own && <Feature name="saves"><TabsTrigger value="saved"><Bookmark size={17} />Saved</TabsTrigger></Feature>}
         </TabsList>
       </Tabs>
       <ProfileGrid key={profile.id + ":" + tab} id={profile.id} tab={tab} posts={posts} onPost={openPost} onCreate={onCreate} own={own} />

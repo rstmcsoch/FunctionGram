@@ -13,7 +13,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 2 | Dashboard and users | Done locally; deployment pending | `phase-02-users.patch` |
 | 3 | Content control | Done locally; deployment pending | `phase-03-content.patch` |
 | 4 | Appearance | Done locally; deployment pending | `phase-04-appearance.patch` |
-| 5–12 | Feature flags through handover | Not started | — |
+| 5 | Feature flags, counters & maintenance | Applied to this branch; deployment pending | `FunctionGram-Phase-5-Flags-Counters.patch` |
+| 6–12 | Editable copy through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -228,3 +229,96 @@ Phase 2 only: dashboard/users table and guarded, validated, audited user actions
 ### Next phase
 
 Phase 3 — content control. Implement moderation-aware public queries across feed/profile/search/saved/direct links before exposing hide/delete content controls. Preserve both existing phase patches. Do not conflate this phase's account suspension/trash with hiding or purging content.
+
+## Phase 3 — Content control
+
+**Completed locally; user will apply/publish. No push or PR.** Independent application baseline: `ccef943` (preserved Phase 2 implementation and its downloadable patch copies). Phases 4–12 are not started.
+
+### Implemented
+
+- Individually server-guarded content list and detail pages at `/rstmcadmin/content`, linked from the admin navigation. Posts/reels/stories and global/per-post comments; text, author, kind, category, date, report, hidden, pinned and trash filters; 50-row pages and selections capped at 50. Comment report filtering explicitly means reports on their parent post because there is no comment-report schema yet.
+- Media previews, caption/location/category/kind/tag editing, verified media replacement/reordering, preserved per-item options/aspects, aspect regeneration from media, expiry set/clear, and recorded engagement counters. New media references must belong to a verified upload owned by the acting admin or author; arbitrary remote URLs are rejected. Counter manipulation remains Phase 5.
+- Bulk hide/unhide, pin/unpin, soft-delete and restore; story expire-now and promote-to-highlight. Highlight confirmation explicitly discloses clearing expiry. Hidden/trash states remain independent. Restore is available for 30 days; no automatic purge job runs. Trashed detail remains available as a disabled preview.
+- Typed confirmation on writes: exact content ID for one item or `CONFIRM N` for a bulk selection. A moderation reason is required for hiding. Permanent purge is single-item, **owner-only**, and requires prior trash; the default bootstrap **admin cannot purge or promote itself**.
+- Writes use the existing same-origin, byte-limited, fresh-role admin API guard. Content mutations lock rows in deterministic order and audit each changed item in the same transaction. Failures roll back the entire selection, including audit failures. Media/duration preflight runs outside the transaction; a changed row is rejected rather than overwritten.
+- Audited content settings: default story lifetime (24h, range 1–168), reels enabled (true), original-credit text (blank retains existing credit), and reel duration cap (0/unlimited, range 0–600 seconds). Duration is read server-side from registered MP4/WebM bytes with `music-metadata`, not trusted client input. Reads have a 20 MB ceiling; remote reads allow only HTTPS Vercel Blob hosts, no redirects, and a 10-second timeout.
+- Migration **7**, registered in local and managed paths, adds comment moderation reason and content/query indexes. Existing content/data is preserved. New package manifest/lock entries are included.
+
+### Public visibility and caching
+
+- Shared SQL guards exclude hidden/trashed posts, trashed authors, hidden/trashed comments and trashed comment authors. Feed, profile, explore, following, tagged, hashtag/search, reels, saved collections, direct post reads, comment previews/counts, story highlights/viewers and notifications respect moderation and expiry. Profile/follow counts no longer include trashed profiles/content.
+- Direct comment and interaction endpoints now enforce the same profile privacy/block policy as public reads, including when the viewer is the author or an admin. Shared-story message references are nulled when the post becomes unavailable; message bodies are retained.
+- Author post/comment deletion is soft-delete by default. Public API responses, including errors, are `private, no-store`.
+- Opening a post always fetches current availability rather than trusting the resident feed copy. Hidden direct links display “This post is no longer available”; unavailable comment reads replace a viewer with an unavailable state. Out-of-order viewer requests cannot reopen an old item after navigation. Restore is visible on the next read.
+- This is request-time enforcement, not a push/realtime moderation channel: pixels already displayed in another idle browser are not remotely erased. Previously known public Blob/bundled media URLs also remain accessible; purging content does **not** delete media objects from storage. Asset deletion/CDN policy belongs to the later media phase.
+
+### Deliberate settings semantics
+
+- Default lifetime applies to **new stories**, not retroactive rescheduling of existing stories. Admins can explicitly set/clear each item's expiry; converting a post to a story through the API uses the default when no expiry is supplied.
+- Reel duration caps apply to **new reels and admin edits of reels**. Existing reels are not automatically reprocessed or hidden when the cap changes. Unreadable duration fails closed when a cap is enabled. Zero skips probing and preserves previous behavior.
+- Pausing reels removes `kind=reel` from all public reads and rejects new reel creation. Ordinary video posts are still posts and no longer appear as reels. Navigation/compose feature flags remain Phase 5.
+- Moderation controls explicitly allow administrators to inspect private content in the guarded admin panel; there is no privacy bypass through the public API. Demo counters are displayed separately from real engagement and are not editable here.
+
+### Verification
+
+- `npm run typecheck`, `npm run lint`, `npm run build`: passed. Lint has 0 errors and the same 7 existing public-image warnings; no new warnings.
+- **54/54 tests passed, 0 skipped** with `ADMIN_TEST_DATABASE_URL` pointing only to an isolated local PostgreSQL 18.4 database. Without that optional URL, 51 pass and 3 managed-PostgreSQL tests skip.
+- Dedicated tests cover guards, typed confirmation, bulk limits, strict dates, bounded pagination, safe search, metadata/asset validation, per-item option/aspect preservation, comment edits, hide/delete/restore/purge policy, story expiry/highlight, rollback on audit failure, stale-edit rejection, actual video duration and cap enforcement, overlapping PostgreSQL row locks, and public visibility/privacy regressions.
+- The actual managed migration runner upgraded a 1–6 ledger to **1–7** and retained an existing post. Migration 7 was also replayed idempotently in isolated populated PGlite and PostgreSQL schemas.
+- Live HTTP checks against both dev/PGlite and a production build/local PostgreSQL verified independently guarded pages/APIs: guest/unverified/expired/revoked/forged sessions denied, users/banned admins denied, admin allowed, cross-origin writes denied, exact confirmations required, owner-only purge denied to bootstrap admin, real content edits/settings/hide/trash/restore visible immediately through public API reads.
+- Chromium checks against both dev and production at **320/360/390/430/768/1024**, light and dark: post/comment list/detail (48 page checks per mode), no document overflow, contained table scrolling, visible controls and checkbox hit targets >=44px, keyboard access, modal Escape/focus restoration, confirmation lock, real bulk hide/unhide, aspect regeneration/save, settings expansion, and a cached public direct-link hide/restore regression. No browser page errors.
+- `git diff --check`: passed. Databases, synthetic sessions, downloaded test tooling, logs and screenshots are excluded from the patch. No real email, production database, Blob store, `.env.local`, or deployment was modified.
+
+### Apply and operate
+
+1. Apply `phase-03-content.patch` to the Phase 2 application baseline; it is not a replacement for Phases 1 and 2. Run `git apply --check` first, then `git apply`, `npm ci`, and your usual validation/build. The existing migration runner applies migration 7 when the updated app starts.
+2. Sign in through the existing account login; open **Content** in `/rstmcadmin`. Select filters or open a post and follow **Manage comments on this post**.
+3. Select items for bulk moderation, or open detail for editing/story actions. Use **Trash** status for restoration; only an explicitly promoted owner sees permanent purge.
+4. **Story & reel controls** changes one validated setting per audited request. Use `true`/`false` for reels; `0` means unlimited duration; blank credit restores the normal original-credit label.
+5. The delivery includes identical root copies named `FunctionGram-Phase-3-Content.patch` and `FunctionGram-Phase-3-Content.patch.txt` for reliable attachment viewing/downloading. Use **one** patch copy, not all three.
+
+**Next authorized work:** none. Phase 4 (appearance) awaits the user's request.
+
+## Phase 5 — Feature flags, counters & maintenance
+
+Implemented after the preserved Phase 4 application baseline (`a0a3aab`). No remote push/PR and no Phase 6 work.
+
+### Controls and enforcement
+
+- `/rstmcadmin/features` provides all 18 flags with enable/disable and integer rollout percentages: Reels, Stories, Explore, Search, Messages, Notifications, Comments, Likes, Saves, Shares, Follow, Reports, Uploads, Signups, Guest browsing, Private accounts, Tagging and Post editing.
+- Assignments are stable per feature/account ID. Anonymous visitors and signup requests share one anonymous cohort; anonymous rollout is deliberately not a percentage of individual visitors. Defaults enable all features at 100%.
+- Navigation, dock/header, configured links, direct hashes and feature controls are gated; server reads/writes independently enforce policy. Disabled story/reel types are filtered from general feeds and message references. Notification/activity filtering respects independently disabled features. Upload registration/completion and dev helpers enforce policy. Signup is checked before Better Auth starts its transaction, avoiding nested-pool deadlocks.
+- Maintenance has configurable public title/message and requires typed `MAINTENANCE` confirmation. Guests and normal members see a styled sign-in-capable screen; public APIs return 503. Freshly verified, active admins/owners bypass maintenance only, never feature flags. Admin panel, authentication/recovery and sign-out remain accessible.
+- Existing private profiles remain private when private-account controls are disabled. Disabling uploads still permits profile text changes that retain the existing avatar; replacing it is denied. Disabled tagging preserves existing tags on otherwise permitted edits.
+- Admin page/API use independent fresh-role guards. Settings writes are same-origin, size-limited, validated and audited, with public cache invalidation. No new dependency or schema migration is needed.
+
+### Displayed counters
+
+- Global multiplier (0–100), integer jitter amplitude (0–1000), and hide-counts controls. Each post has an audited base-likes/base-comments/base-views editor in Content, with integer values 0–1 billion and typed post-ID confirmation. Trashed posts cannot be edited.
+- SQL computes `floor((real + baseline) * multiplier + stable jitter)`, clamped to 0–1 trillion. The jitter is deterministic per post/metric, not freshly randomized. Hidden display counts are null, not fake zeroes.
+- Visible comments and unique recorded `seen` reactions are the real comment/view inputs; views are not video play counts. Real engagement/state is retained separately. Feed, profile, discovery, direct viewer and mutation responses use canonical display fields; comment mutations refetch rather than incrementing a multiplied count locally.
+
+### Request-time limitations
+
+- Policy is read on new requests. Signed-in activity polling refreshes resolved flags, but there is no push channel to erase an idle tab's already displayed content or immediately replace it with maintenance. Reload existing tabs after publishing changes; anonymous tabs require reload.
+- Known public Blob/bundled media URLs remain accessible. Disabling uploads prevents new registration/completion, not retroactive revocation of issued storage URLs or cached bytes. Storage cleanup and CDN policy remain later-phase work.
+- The earlier content-level reels pause remains independent of the new feature flag. Admin maintenance bypass does not bypass private-content authorization in public APIs.
+
+### Validation
+
+- Typecheck, lint and production build passed. Lint: 0 errors, the 7 pre-existing image warnings.
+- Automated suite: 66 tests, 63 passed, 0 failed/cancelled, 3 optional managed-PostgreSQL tests skipped (no isolated PostgreSQL URL provided).
+- Added tests for registry validation/rollouts, SSR control omission, every feature family, signup denial, upload policy, maintenance/admin bypass, privacy preservation, bounded baseline editing and consistent/hidden counters across feeds and mutation responses.
+- `scripts/features-check.mts` passed against an isolated local dev database: guest/member/unverified/banned/revoked/expired/admin page/API guards, foreign-origin denial, validation, maintenance confirmation, SSR screen, admin bypass and disabled guest/reel API access.
+- `scripts/features-browser.mjs` passed in Chromium: public and admin pages at 320/390/768/1024px in light/dark themes, no horizontal overflow, disabled controls and seven direct hashes, all 18 editor entries, actual maintenance confirmation/save, mobile guest screen and admin bypass. No public browser page errors.
+- No production data, real email, storage objects, deployment environment or secrets changed. QA tooling/databases are ignored and excluded from the patch.
+
+### Apply and operate
+
+1. Apply `patches/phase-05-flags-counters.patch` **after Phases 1–4**, not instead of them. First run `git apply --check`, then `git apply`, then your normal install, tests and build.
+2. Sign in with the existing admin account and open **Features** in `/rstmcadmin`. Publish desired flags/rollouts, counter settings or maintenance text.
+3. For per-post baselines, open **Content → post → Displayed counters** and confirm the post ID.
+4. Reload existing public tabs to verify new settings. Keep an active verified admin account available when enabling maintenance or disabling guest browsing.
+5. The root `FunctionGram-Phase-5-Flags-Counters.patch` is an identical downloadable copy. Apply only one copy.
+
+**Next phase:** Phase 6 is not authorized; awaiting the user's request.

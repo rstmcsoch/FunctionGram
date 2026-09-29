@@ -1,4 +1,6 @@
 "use client";
+import {Feature,FeatureContext} from "./features";
+import {ALL_FEATURES,VIEW_FEATURES} from "@/lib/features";
 import { Brand, Banners, PublicFooter, navIcons } from './appearance';
 import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
@@ -26,8 +28,10 @@ import type { SocialData, Post, Person, Comment } from "@/lib/types";
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
 type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
-export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
+export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
   const [data, setData] = useState<SocialData>(initial || emptyData);
+  const flags=data.features||ALL_FEATURES;
+  const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,enabled:item.enabled&&(!feature||flags[feature])};})};
   const [loadError, setLoadError] = useState(!initial);
   const [view, setView] = useState<View>("home");
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -82,7 +86,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
         toast.error("This post is no longer available.");
       }
     } catch { if (postRequest.current === requestId) toast.error("Could not load this post."); }
-  }, []);
+  }, [setSelectedPost,setData,setFollowingFeed]);
 
 
   const refresh = useCallback(async () => {
@@ -95,7 +99,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   const patchPost = useCallback((id: string, update: (post: Post) => Post) => {
     setData(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
     setSelectedPost(current => (current?.id === id ? update(current) : current));
-  }, []);
+  }, [setData,setSelectedPost]);
 
   /* --------------------------------- navigation --------------------------------- */
 
@@ -111,7 +115,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
     const hash = target === "home" ? "#/" : "#/" + target + (id ? "/" + encodeURIComponent(id) : "");
     if (window.location.hash !== hash) window.history.pushState(null, "", hash);
     requestAnimationFrame(() => { window.scrollTo({ top: scrollMemory.current[toKey] ?? 0 }); });
-  }, [view, profileId]);
+  }, [view,profileId,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
 
   useEffect(() => {
     const update = () => {
@@ -157,7 +161,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
     const poll = async () => {
       if (active && timer) { clearTimeout(timer); timer = undefined; }
       try {
-        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages">>("/api/social?activity=1");
+        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1");
         if (!active) return;
         const newest = activity.notifications[0]?.created_at || 0;
         const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
@@ -180,7 +184,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
 
   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast("Creation is not available.");return;} if (!needsLogin()) setCreate(kind); };
 
   const setFollowPendingFor = (id: string, pending: boolean) => {
     setFollowPending(current => {
@@ -191,7 +195,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   };
 
   const follow = async (person: Person) => {
-    if (needsLogin() || followPending.has(person.id)) return;
+    if (!flags.follow || needsLogin() || followPending.has(person.id)) return;
     const active = !person.followed;
     setFollowPendingFor(person.id, true);
     setData(current => ({
@@ -214,6 +218,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   };
 
   const react = async (post: Post, kind: string, active: boolean) => {
+    if((kind==='like'&&!flags.likes)||(kind==='save'&&!flags.saves))return;
     if (needsLogin()) return;
     if (kind === "hidden") {
       if (!active) return;
@@ -242,8 +247,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
     try {
       // The response is the canonical post-reaction state; apply it instead of
       // trusting the optimistic arithmetic (base likes can change meanwhile).
-      const result = await request<{ liked: number; saved: number; seen: number; likes: number }>("/api/social", { action: "reaction", id: post.id, kind, active });
-      patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes }));
+      const result = await request<{ liked: number; saved: number; seen: number; likes: number;display_likes:number|null;display_comments:number|null;display_views:number|null }>("/api/social", { action: "reaction", id: post.id, kind, active });
+      patchPost(post.id, current => ({ ...current, liked: result.liked, saved: result.saved, seen: result.seen, likes: result.likes,display_likes:result.display_likes,display_comments:result.display_comments,display_views:result.display_views }));
     } catch (e) {
       patchPost(post.id, current => ({ ...current, ...snapshot }));
       toast.error((e as Error).message);
@@ -251,9 +256,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   };
 
   const submitComment = async (post: Post, body: string): Promise<Comment> => {
+    if(!flags.comments)throw new Error("Comments are unavailable.");
     if (needsLogin()) throw new Error("Sign in required");
     const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body });
-    patchPost(post.id, current => ({ ...current, comment_count: current.comment_count + 1 }));
+    const fresh=await request<Post[]>("/api/social?post="+encodeURIComponent(post.id));if(fresh[0])patchPost(post.id,()=>fresh[0]);
     return { id: created.id, post_id: post.id, author_id: data.me!.id, body, created_at: Date.now(), username: data.me!.username, avatar: data.me!.avatar };
   };
 
@@ -272,6 +278,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   };
 
   const copyLink = async (post: Post) => {
+    if(!flags.shares)return;
     const link = window.location.origin + "/#/post/" + encodeURIComponent(post.id);
     try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch { setSharePost(post); }
   };
@@ -281,10 +288,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
     openPost: post => { window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); void loadPost(post.id); },
     openProfile: id => navigate("profile", id),
     openTag: tag => navigate("tag", tag),
-    share: setSharePost,
+    share: post=>{if(flags.shares)setSharePost(post);},
     deletePost: setDeleteTarget,
     copyLink,
-    editPost: setEditingPost,
+    editPost: post=>{if(flags.postEditing)setEditingPost(post);},
     people: data.people,
     me: data.me,
   };
@@ -324,8 +331,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
   }, [viewerId]);
 
   useEffect(() => {
-    if (view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
-  }, [view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
+    if (flags.follow && view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
+  }, [flags.follow, view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
 
   // Blocking removes the follow in both directions on the server; the local
   // copy just reflects it for instant feedback.
@@ -354,7 +361,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
 
   /* ---------------------------------- derived ---------------------------------- */
 
-  const stories = data.posts.filter(post => post.kind === "story" && (!post.expires_at || post.expires_at > now));
+  const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
   const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
     && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
   const profile = data.people.find(person => person.id === (profileId || data.me?.id)) || null;
@@ -425,10 +432,10 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
 
   // Full-screen viewers and bottom sheets own the screen, so the floating dock
   // steps aside instead of floating over them.
-  const dockCovered = !!create || !!edit || story !== null || !!selectedPost || login || !!deleteTarget || about || !!relation;
+  const dockCovered = !!create || !!edit || (flags.stories && story !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation;
 
   return (
-    <div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
+    <FeatureContext value={flags}><div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       {sidebar}
       {mobileHeader}
@@ -440,11 +447,11 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
             <p>Share your moments on {appearance.name}</p>
             <div>
               <button className="secondary-button" onClick={() => openAuth("signin")}>Sign in</button>
-              <button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button>
+              <Feature name="signups"><button className="primary-button" onClick={() => openAuth("signup")}>Sign up</button></Feature>
             </div>
           </div>
         )}
-        {!targetEnabled(appearance,view)?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
+        {(!targetEnabled(appearance,view)||(VIEW_FEATURES[view]&&!flags[VIEW_FEATURES[view]]))?<Empty icon={<Info/>} heading="This section is not available" body="The site administrator has removed this navigation destination."/>:loadError ? (
           <Empty icon={<RefreshCw />} heading="Let’s try that again" body="We couldn’t connect to your feed. Please try again in a moment."
             action={<button className="primary-button" onClick={() => void refresh().catch(() => {})}>Reload feed</button>} />
         ) : (
@@ -490,8 +497,8 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
       </main>
       <FloatingDock items={appearance.nav.filter(item=>item.enabled&&item.dock)} active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 
-      {create && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
-      {editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
+      {flags.uploads && create && (create!=="reel"||flags.reels) && (create!=="story"||flags.stories) && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
+      {flags.postEditing && editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
       {story !== null && stories[story] && (
         <StoryViewer stories={stories} start={story} me={data.me} people={data.people} onClose={() => setStory(null)}
@@ -501,7 +508,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
           onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
-          onCommentCountChange={delta => patchPost(selectedPost.id, post => ({ ...post, comment_count: Math.max(0, post.comment_count + delta) }))} />
+          onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id)).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
       {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
@@ -525,7 +532,7 @@ export default function RstmcApp({ initial, appearance = DEFAULT_APPEARANCE }: {
       {reportTarget && <ReportDialog person={reportTarget} onClose={() => setReportTarget(null)} />}
       {relation && <Relations person={relation.person} kind={relation.kind} onClose={() => setRelation(null)} onProfile={id => { setRelation(null); navigate("profile", id); }} />}
       <Toaster position="bottom-center" closeButton />
-    </div>
+    </div></FeatureContext>
   );
 }
 

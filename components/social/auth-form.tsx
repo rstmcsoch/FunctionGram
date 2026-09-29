@@ -1,4 +1,5 @@
 'use client';
+import {Feature,useFeatures} from './features';
 import {forwardRef,useEffect,useState,type ComponentPropsWithoutRef,type FormEvent} from 'react';
 import {toast} from 'sonner';
 import Link from 'next/link';
@@ -61,7 +62,8 @@ export function ForgotPasswordForm({onDone,onBack}:{onDone:(message:string)=>voi
 }
 
 export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'signin'|'signup';initialNotice?:string}){
- const [register,setRegister]=useState(initialMode==='signup');
+ const flags=useFeatures();
+ const [wantsRegister,setRegister]=useState(initialMode==='signup');const register=wantsRegister&&flags.signups;
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const [pendingEmail,setPendingEmail]=useState<string|null>(null);
  const [forgot,setForgot]=useState(false);
@@ -98,7 +100,7 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
   {error&&<p role="alert">{error}</p>}
   <button type="submit" className="primary-button wide" disabled={busy}>{busy?'Please wait…':register?'Create account':'Sign in'}</button>
   {devMode&&<PreviewAccountButton/>}
-  <button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button>
+  <Feature name="signups"><button type="button" className="text-button" disabled={busy} onClick={()=>{setRegister(!register);setError('');}}>{register?'Already have an account? Sign in':'New here? Create an account'}</button></Feature>
  {!register&&<div className="auth-links">
   <button type="button" className="text-button" disabled={busy} onClick={()=>setForgot(true)}>Forgot your password?</button>
   <button type="button" className="text-button" disabled={busy} onClick={()=>setPendingEmail('')}>Resend verification email</button>

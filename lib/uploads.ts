@@ -1,9 +1,11 @@
+import {requireUpload} from './feature-policy';
 import {head,del} from '@vercel/blob';
 import {AppError,db} from './server';
 import {getPool} from './postgres';
 import {detectMediaType,mediaTypes} from './media-type';
 const keyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export async function reserveUpload(key:string,owner:string,payload:string|null){
+ await requireUpload(owner);
  if(!keyPattern.test(key))throw new AppError('Invalid upload name.');
  let input:{size:number;type:string};try{input=JSON.parse(payload||'');}catch{throw new AppError('Invalid upload.');}
  if(!Number.isSafeInteger(input.size)||input.size<1||input.size>20*1024*1024||!mediaTypes.includes(input.type))throw new AppError('Choose a supported photo or video smaller than 20 MB.');
@@ -25,6 +27,7 @@ export async function reserveUpload(key:string,owner:string,payload:string|null)
  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 export async function finishUpload(key:string,owner:string){
+ await requireUpload(owner);
  if(!keyPattern.test(key))throw new AppError('Invalid upload.');
  const claim=await db().prepare('SELECT * FROM upload_claims WHERE key=? AND owner_id=?').bind(key,owner).first<{expected_size:number;mime:string;created_at:number;completed:boolean}>();
  if(!claim)throw new AppError('Upload not found.',404);

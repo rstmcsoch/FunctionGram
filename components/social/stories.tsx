@@ -1,4 +1,5 @@
 "use client";
+import {Feature} from "./features";
 import { useState, useEffect, useRef, useCallback, useEffectEvent } from "react";
 import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX, MessageCircle, Eye, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -12,13 +13,13 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
   return (
     <div className="stories-wrapper">
       <div className="stories" ref={rail}>
-        <button className="story story-yours" onClick={onCreate}>
+        <Feature name="uploads"><button className="story story-yours" onClick={onCreate}>
           <span className="your-story">
             <Avatar person={me} size={66} />
             <span className="story-plus"><Plus size={15} /></span>
           </span>
           <span>Your story</span>
-        </button>
+        </button></Feature>
         {stories.map((post, index) => (
           <button className={"story " + (post.seen ? "story-seen" : "")} key={post.id} onClick={() => onOpen(index)}>
             <Avatar person={post.author} size={70} ring />
@@ -118,7 +119,7 @@ function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClo
               <span>{timeAgo(post.created_at)}</span>
               <div className="story-tools">
                 {isOwn && <IconButton label="View who saw this story" onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
-                {canReply && <IconButton label={replyTo ? "Close reply" : "Reply to this story"} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton>}
+                {canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? "Close reply" : "Reply to this story"} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}
                 <IconButton label={paused ? "Play story" : "Pause story"} onClick={() => setPaused(value => !value)}>
                   {paused ? <Play size={20} /> : <Pause size={20} />}
                 </IconButton>
