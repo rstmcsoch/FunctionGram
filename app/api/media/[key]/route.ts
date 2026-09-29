@@ -1,3 +1,5 @@
+import {localAssetPath} from '@/lib/media-storage';
+export const dynamic='force-dynamic';
 import { promises as fs } from 'node:fs';
 import { db, fail, AppError } from '@/lib/server';
 import { localDevDatabase } from '@/lib/postgres';
@@ -9,15 +11,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
     // Local preview: serve uploads from disk, including byte ranges so video
     // seeking works exactly like the Blob CDN does in production.
     if (localDevDatabase()) {
-      const asset = await db().prepare('SELECT mime FROM assets WHERE key=?').bind(key).first<{ mime: string }>();
+      const asset = await db().prepare("SELECT mime,blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string }>();
       if (!asset) throw new AppError('Media not found.', 404);
-      const path = '.local/uploads/' + key;
+      const path = localAssetPath(key,asset.blob_url);
       let size = 0;
       try { size = (await fs.stat(path)).size; } catch { throw new AppError('Media not found.', 404); }
       const headers: Record<string, string> = {
         'Content-Type': asset.mime,
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': 'private, no-store',
       };
       const range = request.headers.get('range');
       const match = range?.match(/bytes=(\d*)-(\d*)/);
@@ -38,9 +40,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
       const bytes = await fs.readFile(path);
       return new Response(new Uint8Array(bytes), { headers: { ...headers, 'Content-Length': String(size) } });
     }
-    const asset = await db().prepare('SELECT blob_url FROM assets WHERE key=?').bind(key).first<{ blob_url: string }>();
+    const asset = await db().prepare("SELECT blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string }>();
     if (!asset?.blob_url) throw new AppError('Media not found.', 404);
     // Blob's CDN serves the media, including byte ranges for video seeking.
-    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, max-age=300' } });
+    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, no-store' } });
   } catch (error) { return fail(error); }
 }

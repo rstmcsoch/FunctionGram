@@ -167,3 +167,31 @@ pruned in a follow-up.
 - The local preview uses a gitignored `.env.local` with dummy Brevo values and
   a local `BETTER_AUTH_URL`; production relies on the trusted-origin config
   described above — custom domains must be added to `AUTH_TRUSTED_ORIGINS`.
+
+## Phase 7 integration — 2026-09-29
+
+Applied all 47 file diffs from `patch07.patch`, retaining the complete Phase 1–6 application. The upload contained HTML `/dev/null` links and stripped context-line indentation. Reconstructed those against the matching original Git blobs: all 46 non-document files matched the patch's expected output hashes before fixes. Merged the progress-document hunk separately to preserve prior integration notes; no implementation hunks were omitted. The original upload remains unchanged for provenance and should not be applied again.
+
+### Integration fixes
+
+- Malformed stored `media.config` now fails closed through the actual settings loader instead of falling back to enabled legacy limits; both server and client snapshots receive a disabled policy.
+- Animated GIF dimensions now use per-frame height, not the vertically stacked animation height. A two-frame regression verifies aspect ratio, retained frames and timing.
+- The local upload store now cleans failed processed derivatives as well as staged source files. Repeated cleanup is safe, and complete path validation rejects traversal.
+
+### Independently verified in this checkout
+
+- `npm run typecheck`: passed.
+- `npm run lint`: zero errors; seven existing Next.js image warnings.
+- `npm run test:vercel`: **86 tests, 83 passed, 3 optional managed-PostgreSQL tests skipped, zero failures**.
+- `npm run build`: passed; includes `/rstmcadmin/media` and `/api/admin/media`.
+- `git diff --check`: passed.
+- `scripts/media-check.mts`: passed against isolated PGlite and local file storage, including real 40 MiB multipart transfer with a 50 MiB limit, oversize rejection, lowered-limit cached reuse denial, byte-range reads, server-side WebP resizing, duration/quota/disable enforcement, guards/CSRF, reference protection, quarantine/release, trash/restore and owner-only physical purge. Repeated after fixes; settings restored.
+- `scripts/labels-check.mts`, `scripts/features-check.mts`, and `scripts/admin-check.mts check`: passed against the same isolated fixture environment. No production accounts, databases, email or Blob objects were used.
+
+### Remaining deployment verification
+
+- `scripts/media-browser.mjs` was attempted but Chromium cannot launch without `libnspr4.so` / `libnss3.so`. System dependency installation failed because the sandbox cannot reach the Debian package mirrors. The patch-author viewport results in `patches/ADMIN_PROGRESS.md` are historical, not independently reproduced here.
+- No live Vercel Blob transfer or managed PostgreSQL connection was tested. On a configured Vercel preview, verify migration 8, one real 40 MiB Blob upload at a 50 MiB cap, oversize rejection, image processing, and deployment-plan support for the 60-second media routes before production rollout.
+- Public Blob URLs already known to clients cannot be recalled by application quarantine. App media URLs are blocked immediately; provider/CDN retention is separate.
+
+All generated database/upload fixtures and optional browser tooling remain ignored local files. Earlier phase features, roles, appearance, labels, feature flags and regression tests are retained.

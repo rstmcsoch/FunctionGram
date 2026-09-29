@@ -517,7 +517,7 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
             </span>
             <span className="notification-text">
               <span><strong>{first.username}</strong>{others > 0 ? <>{t("views.and")}{others}{t("views.other")}{others > 1 ? t("common.pluralSuffix") : ""}</> : null} {label}{t("stories.symbol")}</span>
-              <small>{timeAgo(group.created_at, t)}</small>
+              <small suppressHydrationWarning>{timeAgo(group.created_at, t)}</small>
             </span>
             {group.media
               ? <img src={JSON.parse(group.media)[0]} alt="" loading="lazy" />

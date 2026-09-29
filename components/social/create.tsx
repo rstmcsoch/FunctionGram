@@ -1,4 +1,5 @@
 "use client";
+import {useMediaPolicy} from "./media-policy";
 import {useLabels} from "./labels";
 
 import {Feature} from "./features";
@@ -19,6 +20,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
   kind: "post" | "story" | "reel"; me: Person; people: Person[]; onClose: () => void; onCreated: () => Promise<void>;
 }) {
   const t=useLabels();
+  const mediaPolicy=useMediaPolicy();
   const [kind, setKind] = useState(initialKind);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [files, setFiles] = useState<Draft[]>([]);
@@ -32,14 +34,14 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
 
-  const accept = kind === "reel" ? "video/mp4,video/webm" : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm";
+  const accept=mediaPolicy.allowedTypes.filter(type=>kind!=="reel"||type.startsWith("video/")).join(",");
   const isVideoDraft = (draft: Draft) => draft.type.startsWith("video/");
 
   const choose = async (selected: FileList | null) => {
     if (!selected?.length) return;
     setError("");
     const items = Array.from(selected);
-    if (items.length + files.length > 6) { setError(t("create.choose_up_to_6_photos_or_one_video")); return; }
+    if (items.length + files.length > mediaPolicy.maxMedia) { setError(t("media.maxItems",{max:mediaPolicy.maxMedia})); return; }
     if ((items.some(f => f.type.startsWith("video/")) && (items.length + files.length > 1)) || files.some(isVideoDraft)) {
       setError(t("create.videos_must_be_shared_on_their_own")); return;
     }
@@ -119,7 +121,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
             <strong>{busy || t("create.your_next_moment_starts_here")}</strong>
             <span>{t("create.choose")}{kind === "reel" ? t("create.a_video") : t("create.photos_or_a_video")}{t("create.to_share")}</span>
             <span className="primary-button">{busy ? <Busy /> : t("create.select_from_your_device")}</span>
-            <small>{t("create.drag_drop_works_too_jpg_png_webp_gif_mp4_or_webm_up_to_20_mb")}</small>
+            <small>{t("media.hint",{max:mediaPolicy.maxFileMb,quota:mediaPolicy.dailyQuotaMb,items:mediaPolicy.maxMedia,types:accept})}</small>
           </button>
         )}
 
@@ -141,7 +143,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
                   <span className="upload-position">{index + 1}</span>
                 </div>
               ))}
-              {kind === "post" && files.length < 6 && !files.some(isVideoDraft) && (
+              {kind === "post" && files.length < mediaPolicy.maxMedia && !files.some(isVideoDraft) && (
                 <button type="button" className="add-another" onClick={() => input.current?.click()} disabled={!!busy}><Plus />{t("create.add_photo")}</button>
               )}
             </div>

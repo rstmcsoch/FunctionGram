@@ -1,3 +1,4 @@
+import {validateMedia} from '../media-config';
 import {validateLabels,MAX_LABEL_BYTES} from './labels';
 import { validateFeatures } from '../features';
 import { validateAppearance } from '../appearance';
@@ -11,6 +12,11 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');
   let valid = false;
   switch (key as SettingKey) {
+    case 'media.config': {
+      if(typeof value!=='string'||value.length>4096)throw new AdminError('Invalid media configuration.');
+      if(value==='')return '';
+      try{return JSON.stringify(validateMedia(JSON.parse(value)));}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid media configuration.');}
+    }
     case 'labels.config': {
       if(typeof value!=='string'||new TextEncoder().encode(value).length>MAX_LABEL_BYTES)throw new AdminError('Invalid label configuration.');
       if(value==='')return '';

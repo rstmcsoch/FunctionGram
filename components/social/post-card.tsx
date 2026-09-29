@@ -180,7 +180,7 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
         <div className="post-user">
           <div>
             <button className="username" onClick={() => actions.openProfile(p.author_id)}>{p.author.username}</button>
-            <span className="post-time">{t("post_card.symbol_2")}{timeAgo(p.created_at, t)}</span>
+            <span className="post-time" suppressHydrationWarning>{t("post_card.symbol_2")}{timeAgo(p.created_at, t)}</span>
           </div>
           <span className="post-location">{p.location || p.author.name}</span>
         </div>
@@ -205,7 +205,7 @@ export function CommentRow({ comment, canDelete, onDelete, onProfile }: { commen
       <Avatar person={{ avatar: comment.avatar, username: comment.username }} size={33} onClick={() => onProfile(comment.author_id)} />
       <div>
         <p><button className="username" onClick={() => onProfile(comment.author_id)}>{comment.username}</button> {comment.body}</p>
-        <span>{timeAgo(comment.created_at, t)}</span>
+        <span suppressHydrationWarning>{timeAgo(comment.created_at, t)}</span>
       </div>
       {canDelete && (
         <IconButton label={t("post_card.delete_comment")} onClick={onDelete}>

@@ -1,6 +1,7 @@
 // Database primitives are separated from Next request/cache adapters so tests
 // execute the real SQL. Never expose these as actions or import into client UI.
 import { accountEnabled } from '../account-policy';
+import { DEFAULT_MEDIA } from '../media-config';
 import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
@@ -65,7 +66,12 @@ export async function loadSettings(db: QueryExecutor): Promise<Settings> {
   const { rows } = await db.query('SELECT key,value FROM app_settings WHERE key = ANY($1::text[])', [Object.keys(SETTINGS_DEFAULTS)]);
   for (const row of rows) {
     try { result[row.key] = validateSetting(row.key, JSON.parse(row.value)); }
-    catch { /* Corrupt/legacy values fail safely to a validated default. */ }
+    catch {
+      // A damaged media policy must not revert to the enabled legacy default.
+      // Both server and client snapshots must receive a disabled policy.
+      if (row.key === 'media.config') result[row.key] = JSON.stringify({ ...DEFAULT_MEDIA, enabled: false });
+      // Other corrupt/legacy settings retain their validated defaults.
+    }
   }
   return result as Settings;
 }
@@ -76,6 +82,13 @@ export async function saveSetting(pool: PoolLike, userId: string, key: string, i
     const actor = await authorizeAdmin(db, userId);
     // Includes the absent-row case, so concurrent first writes have correct before values.
     await db.query('SELECT pg_advisory_xact_lock(67291006)');
+    // Same ordering boundary as post/profile attachment and storage cleanup.
+    if(['appearance.config','brand.logoUrlLight','media.config','upload.maxFileMb','upload.dailyQuotaMb'].includes(key))await db.query('SELECT pg_advisory_xact_lock(67291008)');
+    if(key==='appearance.config'||key==='brand.logoUrlLight'){
+      const urls=String(value).match(/\/api\/media\/[a-f0-9-]{36}/g)||[];
+      for(const url of urls){const {rows:[asset]}=await db.query("SELECT key FROM assets WHERE key=$1 AND status='ready' AND verified=true",[url.slice(11)]);if(!asset)throw new AdminError('A branding asset is unavailable. Choose another image.');}
+    }
+
     const { rows: [row] } = await db.query('SELECT value FROM app_settings WHERE key=$1', [key]);
     const before = row ? JSON.parse(row.value) : SETTINGS_DEFAULTS[key as SettingKey];
     await db.query(`INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES($1,$2,$3,$4)

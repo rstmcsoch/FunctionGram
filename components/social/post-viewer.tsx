@@ -88,7 +88,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
                 <button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button>
                 {post.location && <span className="post-location">{post.location}</span>}
               </div>
-              <span className="post-time">{timeAgo(post.created_at, t)}</span>
+              <span className="post-time" suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
             </div>
             <div className="post-viewer-header-actions">
               <PostMenu post={post} actions={actions} />
@@ -107,7 +107,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
                   <button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button>
                   {post.location && <span className="post-location">{post.location}</span>}
                 </div>
-                <span className="post-time">{timeAgo(post.created_at, t)}</span>
+                <span className="post-time" suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
               </div>
               <PostMenu post={post} actions={actions} />
             </header>
@@ -117,7 +117,7 @@ export function PostViewer({ post, actions, onClose, onCommentCountChange }: {
                 <p><button className="username" onClick={() => { onClose(); actions.openProfile(post.author_id); }}>{post.author.username}</button> {post.caption
                   ? <Caption text={post.caption} people={actions.people} onProfile={id => { onClose(); actions.openProfile(id); }} onTag={tag => { onClose(); actions.openTag(tag); }} />
                   : <span className="muted">{post.location || t("post_viewer.shared_a_moment")}</span>}</p>
-                <span>{timeAgo(post.created_at, t)}</span>
+                <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
               </div>
               <Feature name="comments">{comments === null && !error && <div className="loading-row"><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "55%", height: 12 }} /><span className="skeleton skeleton-circle" /><span className="skeleton skeleton-bar" style={{ width: "40%", height: 12 }} /></div>}
               {comments?.map(comment => (

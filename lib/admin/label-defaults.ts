@@ -590,5 +590,10 @@ export const LABEL_DEFAULTS = {
   "page.open_rstmc_to_sign_in": "Open RSTMC to sign in",
   "page.access_denied": "Access denied",
   "page.administrator_access_is_required_your_account_does_not_have_permi": "Administrator access is required. Your account does not have permission to view this page.",
-  "page.return_to_rstmc": "Return to RSTMC"
+  "page.return_to_rstmc": "Return to RSTMC",
+  "media.disabled": "Uploads are currently disabled.",
+  "media.typeDisabled": "This media type is currently disabled.",
+  "media.tooLarge": "Choose a file smaller than {max} MB.",
+  "media.maxItems": "Choose up to {max} photos, or one video.",
+  "media.hint": "Drag & drop works too · {types} · Up to {max} MB per file · {quota} MB per day · {items} photos per post"
 } as const;

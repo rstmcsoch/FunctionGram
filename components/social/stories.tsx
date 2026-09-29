@@ -120,7 +120,7 @@ function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClo
             <header>
               <Avatar person={post.author} size={36} />
               <button onClick={() => { onClose(); onProfile(post.author_id); }}>{post.author.username}</button>
-              <span>{timeAgo(post.created_at, t)}</span>
+              <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
               <div className="story-tools">
                 {isOwn && <IconButton label={t("stories.view_who_saw_this_story")} onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
                 {canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? t("stories.close_reply") : t("stories.reply_to_this_story")} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}

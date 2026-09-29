@@ -1,4 +1,5 @@
 "use client";
+import {useMediaPolicy} from "./media-policy";
 import {useLabels} from "./labels";
 
 import {Feature,FeatureContext} from "./features";
@@ -34,7 +35,7 @@ type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "n
 export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
   const t=useLabels();
   const [data, setData] = useState<SocialData>(initial || emptyData);
-  const flags=data.features||ALL_FEATURES;
+  const mediaPolicy=useMediaPolicy();const resolvedFlags=data.features||ALL_FEATURES;const flags={...resolvedFlags,uploads:resolvedFlags.uploads&&mediaPolicy.enabled};
   const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,label:navigationLabel(t,target,item.label),enabled:item.enabled&&(!feature||flags[feature])};})};
   const [loadError, setLoadError] = useState(!initial);
   const [view, setView] = useState<View>("home");
