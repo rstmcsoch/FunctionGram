@@ -37,6 +37,7 @@ export function timeAgo(time: number) {
 export function count(n: number) {
   return new Intl.NumberFormat("en", { notation: n >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(n);
 }
+export class RequestError extends Error { constructor(message: string, public readonly status: number) { super(message); } }
 export async function request<T = unknown>(url: string, body?: unknown): Promise<T> {
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(url, {
@@ -47,7 +48,7 @@ export async function request<T = unknown>(url: string, body?: unknown): Promise
   });
   let data;
   try { data = await response.json(); } catch { throw new Error("Unable to connect. Please try again."); }
-  if (!response.ok) throw new Error((data as { error?: string }).error || "Your change could not be saved. Please try again.");
+  if (!response.ok) throw new RequestError((data as { error?: string }).error || "Your change could not be saved. Please try again.", response.status);
   return data as T;
 }
 

@@ -78,7 +78,7 @@ async function api(user: User | null, body?: Record<string, unknown> | null, que
       }))
     : await GET(new Request(origin + '/api/social' + query, { headers: { host, ...headers, ...(user ? { cookie: user.cookie } : {}) } }));
   const data = (await response.json().catch(() => null)) as any;
-  return { status: response.status, data };
+  return { status: response.status, data, headers: response.headers };
 }
 
 let alice: User, bob: User, carol: User;
@@ -398,4 +398,94 @@ test('hashtag discovery matches whole words case-insensitively and excludes stor
 
   await api(alice, { action: 'delete_post', id: post.data.id });
   await api(alice, { action: 'delete_post', id: story.data.id });
+});
+
+test('Phase 3 moderation removes posts from every public read surface and denies direct mutations',async()=>{
+ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ const key=await grantAsset(alice.id);
+ const made=await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'visibilityprobe #phase3',tagged_users:[bob.id]});
+ const id=made.data.id as string;
+ await api(bob,{action:'reaction',id,kind:'save',active:true});
+ await api(bob,{action:'follow',id:alice.id,active:true});
+ const collection=(await api(bob,{action:'create_collection',name:'Phase three'})).data.id;
+ await api(bob,{action:'save_to_collection',collection_id:collection,post_id:id});
+ const comment=(await api(bob,{action:'comment',id,body:'visibilitycomment'})).data.id;
+ const act=(operation:string,resource='posts',target=id)=>moderateContent(pool,carol.id,{operation,resource,ids:[target],confirmation:target,reason:'moderation regression'});
+ try {
+  assert.equal((await api(bob,null,'?post='+id)).data.length,1);
+  await act('hide');
+  for(const query of ['?post='+id,'?profile='+alice.id,'?saved=1','?tagged='+bob.id,'?explore=1','?offset=0']) {
+   const result=await api(bob,null,query);assert.equal(result.status,200);assert.ok(!result.data.some((p:{id:string})=>p.id===id),query);
+  }
+  assert.ok(!(await api(bob,null,'?following=1')).data.posts.some((p:{id:string})=>p.id===id));
+  assert.ok(!(await api(bob,null,'?search=visibilityprobe')).data.posts.length);
+  assert.ok(!(await api(bob,null,'?hashtag=phase3')).data.posts.length);
+  assert.ok(!(await api(bob,null,'?collections=1')).data.find((c:{id:string})=>c.id===collection).post_ids.includes(id));
+  assert.ok(!(await api(alice,null,'?activity=1')).data.notifications.some((n:{post_id:string})=>n.post_id===id));
+  assert.ok(!(await api(alice)).data.posts.some((p:{id:string})=>p.id===id),'bootstrap excludes hidden');
+  for(const viewer of [null,alice,bob,carol]){const result=await api(viewer,null,'?comments='+id);assert.equal(result.status,404,'even author/admin public comments deny hidden');assert.match(result.headers.get('cache-control')||'',/no-store/);}
+  for(const body of [{action:'reaction',id,kind:'like',active:true},{action:'comment',id,body:'blocked'},{action:'update_post',id,caption:'blocked'},{action:'save_to_collection',collection_id:collection,post_id:id},{action:'report',target_type:'post',target_id:id,reason:'spam'}])assert.equal((await api(alice,body)).status,404);
+  await act('unhide');assert.equal((await api(bob,null,'?post='+id)).data.length,1);
+  await act('hide','comments',comment);
+  const restored=(await api(bob,null,'?post='+id)).data[0];assert.equal(restored.comment_count,0);assert.equal(restored.comment_preview,null);
+  assert.equal((await api(bob,null,'?comments='+id)).data.items.length,0);
+  assert.ok(!(await api(alice,null,'?activity=1')).data.notifications.some((n:{id:string})=>n.id===comment));
+  await act('unhide','comments',comment);assert.equal((await api(bob,null,'?comments='+id)).data.items.length,1);
+  await act('delete');assert.equal((await api(alice,null,'?post='+id)).data.length,0);await act('restore');
+  assert.equal((await api(alice,null,'?post='+id)).data.length,1);
+ } finally {await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
+
+test('Phase 3 hides story highlights, viewer lists and message references; private comments cannot be read directly',async()=>{
+ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key],caption:'storyvisibility'})).data.id;
+ try{
+  await api(alice,{action:'highlight',id,active:true});
+  const reply=await api(bob,{action:'message',id:alice.id,post_id:id,body:'story message without copied caption'});assert.equal(reply.status,200);
+  await moderateContent(pool,carol.id,{operation:'hide',resource:'posts',ids:[id],confirmation:id,reason:'hide story'});
+  assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+  assert.equal((await api(alice,null,'?story-viewers='+id)).status,404);
+  const messages=(await api(bob,null,'?messages='+alice.id)).data.items;
+  assert.equal(messages.find((m:{id:string})=>m.id===reply.data.id).post_id,null);
+  const inbox=(await api(bob,null,'?inbox=1')).data;assert.equal(inbox.find((m:{id:string})=>m.id===reply.data.id).post_id,null);
+  assert.equal((await api(bob,{action:'message',id:alice.id,post_id:id,body:'blocked'})).status,404);
+  const privateId=(await api(alice,{action:'create_post',kind:'post',media:['/api/media/'+key],caption:'privatecomments'})).data.id;
+  await api(alice,{action:'set_privacy',private:true});
+  assert.equal((await api(null,null,'?comments='+privateId)).status,404);
+  assert.equal((await api(carol,null,'?comments='+privateId)).status,404,'admin has no public privacy bypass');
+ }finally{await api(alice,{action:'set_privacy',private:false});await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
+
+test('Phase 3 trash profile hides people and their content; story defaults and reel pause apply server-side',async()=>{
+ const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ try{
+  await pool.query('UPDATE profiles SET deleted_at=$1 WHERE id=$2',[Date.now(),bob.id]);
+  assert.equal((await api(null,null,'?person='+bob.id)).data,null);
+  assert.ok(!(await api(null,null,'?accounts='+bob.name)).data.some((p:{id:string})=>p.id===bob.id));
+  assert.equal((await api(null,null,'?profile='+bob.id)).data.length,0);
+  await pool.query('UPDATE profiles SET deleted_at=NULL WHERE id=$1',[bob.id]);
+  await saveSetting(pool,carol.id,'content.storyHours',2);
+  const key=await grantAsset(alice.id);const start=Date.now();const story=await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key]});assert.equal(story.status,200);
+  const row=(await pool.query('SELECT expires_at FROM posts WHERE id=$1',[story.data.id])).rows[0];assert.ok(Number(row.expires_at)>=start+7200000&&Number(row.expires_at)<Date.now()+7200001);
+  await saveSetting(pool,carol.id,'content.reelsEnabled',false);
+  assert.equal((await api(null,null,'?reels=1')).data.length,0);
+  const video=await grantAsset(alice.id,'video/mp4');assert.equal((await api(alice,{action:'create_post',kind:'reel',media:['/api/media/'+video]})).status,403);
+ }finally{await saveSetting(pool,carol.id,'content.storyHours',24);await saveSetting(pool,carol.id,'content.reelsEnabled',true);await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
+});
+
+test('expired highlights stay unavailable until explicit admin promotion clears expiry; hide still wins',async()=>{
+ const pool=await getPool();const {moderateContent}=await import('../lib/admin/content');
+ await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ const key=await grantAsset(alice.id);const id=(await api(alice,{action:'create_post',kind:'story',media:['/api/media/'+key]})).data.id;
+ const act=(operation:string)=>moderateContent(pool,carol.id,{resource:'posts',operation,ids:[id],confirmation:id,reason:'highlight regression'});
+ try{
+  await api(alice,{action:'highlight',id,active:true});await pool.query('UPDATE posts SET expires_at=1 WHERE id=$1',[id]);
+  assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+  await act('expire');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+  await act('highlight');assert.ok((await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+  await act('hide');assert.ok(!(await api(bob,null,'?highlights='+alice.id)).data.some((p:{id:string})=>p.id===id));
+ }finally{await pool.query('UPDATE "user" SET role=\'user\' WHERE id=$1',[carol.id]);}
 });
