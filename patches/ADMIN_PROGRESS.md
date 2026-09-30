@@ -20,7 +20,7 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 9 | Hardening: 2FA, roles, session policy, audit viewer | Applied and merged to main (PR #25) | `phase09.patch` |
 | 10 | Messages, notifications, email, announcements, CMS pages | Applied and merged to main (PR #26) | `phase10.patch` |
 | 11 | Analytics, exports, system tools, polish | Done locally; verification below | `phase 11.patch` |
-| 12 | Final QA, docs, owner handover | Not started | — |
+| 12 | Final QA, docs, owner handover | Done locally; deployment-preview/browser QA pending | `phase 12.patch` |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -541,7 +541,7 @@ Implemented locally on the complete Phase 1–9 baseline. This increment preserv
 2. Sign in through the existing protected admin flow and open **Communications** at `/rstmcadmin/communications`. Use break-glass access only with a documented reason; it is audited. Keep the global Messages and Notifications feature flags as independent gates.
 3. Leave email sending paused until Brevo is configured and verified in a deployment preview. Test dry-run first. The per-campaign maximum is 25; the global UTC daily cap applies across requests and attempts consume reserved capacity even if delivery fails.
 4. Publish a draft announcement only after checking its audience and UTC schedule. Create legal/CMS pages as drafts, review their preview/SEO fields, then publish. Drafts are intentionally not publicly fetchable.
-5. Phases 11–12 remain not started.
+5. No push or pull request was made. Phase 11 is recorded below; Phase 12 remained for the next increment at the time of handoff.
 
 ### Integration verification — 2026-09-30 (Phase 10)
 
@@ -578,3 +578,57 @@ Implemented as an incremental addition on the complete Phase 1–10 baseline. Ex
 - The SQL runner intentionally accepts a narrow subset of plain `SELECT` only: no comments, CTEs/subqueries, multiple statements, protected auth/settings tables, unapproved functions, schema-qualified relations/functions, or write/locking commands. Query text is not stored in the audit log; only a SHA-256 hash, byte-length metadata, row cap, timeout, and operator reason are recorded.
 - Exports are bounded to at most 1,000 rows per request; fetch another filtered request to retrieve more data. They are streams and do not materialize the full matching result set in memory.
 - Demo wipe excludes profiles linked to auth accounts, preventing a test/demo flag from causing deletion of a real login. Reseeding is owner-only, explicitly confirmed, audited at start/completion/failure, and invokes the bundled seeder only after enabling the durable seed switch. Story pruning requires an exact current batch count; orphan pruning rechecks under the shared media lock and moves eligible assets to recoverable Trash.
+
+### Apply and operate
+
+1. Apply the earlier phase patches in order through Phase 10, then apply only `phase 11.patch`; do not apply the generated Phase 11 patch against raw `main` alone. Preserve migration history through 11 and append migration 12.
+2. Run `npm run install:ci`, `npm run typecheck`, `npm run lint`, `npm run test:vercel`, and `npm run build` before deployment. Keep `ADMIN_IP_ALLOWLIST`, auth secrets, storage tokens, and provider credentials out of the inspector; it reports only configured/not-configured booleans.
+3. Review the analytics definitions before comparing trends. Use CSV/JSON filters to export a bounded subset; each download is audited. SQL execution is owner-only, read-only, narrow-allowlist, capped at 500 returned rows and 5 seconds. Do not paste secrets, personal data, or query text into operator reason fields.
+4. Treat demo wipe, pruning, and cache purge as operational actions. Confirm the displayed current count/phrase and enter a meaningful reason. Wiped demo profiles are not recoverable through this tool; only orphaned assets are staged in Trash. Verify backups/recovery procedures before using destructive retention actions.
+5. The incremental patch is independently apply-checked on the reconstructed Phase 1–10 baseline. No push, pull request, or remote GitHub operation was attempted. Phase 12 is now recorded below.
+
+## Phase 12 — Final QA, docs, and owner handover
+
+Completed the local documentation, recovery, HTTP, migration-fixture, and synthetic-performance work on top of the full Phase 1–11 state. No Phase 1–11 application policy or production data was changed for handover. The tracker marks this phase locally complete while explicitly leaving deployment-preview and real-browser QA pending; those acceptance checks cannot be honestly certified without an isolated deployed preview and a browser runtime with its system libraries.
+
+### Delivered
+
+- Added `docs/ADMIN_PANEL.md`: operator guide for all panel screens, the owner/admin/moderator matrix, mandatory 2FA and 12-hour sessions, bootstrap semantics, verified email rotation, restores and operational cautions, SQL-runner boundaries, and owner recovery.
+- Added a Neon SQL-editor owner-recovery transaction. It requires an exact verified active account, serializes with application role changes, changes only that account to owner, revokes its existing sessions, and writes an append-only audit record. It preserves verified-email, ban/expiry, and soft-delete checks, and does not change TOTP secrets or the durable bootstrap marker. The statement's CTE/trigger behavior was exercised against migrated PGlite.
+- Updated `scripts/admin-check.mts` to seed the full migration registry through version 12, create fresh session fixtures and profiles, and check every admin page plus the legacy and Phase 11 APIs across guest, ordinary, active admin, banned, unverified, expired, revoked, and forged sessions.
+- Added `scripts/phase12-browser.mjs` for the requested viewport/theme/admin-page loop, layout and touch-target checks, keyboard focus, button/form naming, and semantic table checks. It uses browser tooling under `.local` only and commits no browser binaries.
+- Added `scripts/phase12-perf.mts`, an isolated in-memory PGlite analytics benchmark with synthetic data; it cannot connect to a managed or production database.
+
+### Local verification
+
+- `npm run typecheck`: passed after Phase 12 changes.
+- `npm run lint`: passed with 0 errors and the same 7 existing public-image warnings.
+- `npm run test:vercel`: 112 tests; 109 passed, 0 failed, 3 optional managed-Postgres tests skipped because no isolated managed database URL was supplied.
+- `npm run build`: passed; all current admin routes/APIs were included in the production manifest.
+- `node --import tsx scripts/admin-check.mts seed` and `check`: passed locally against isolated `.local/admin-check-db`; the HTTP matrix returned 401 to guests, 403 to normal/banned accounts, 401 to unverified/expired/revoked/forged sessions, and 200 to the active admin for all checked admin pages and APIs. The export endpoint was checked across those identities; SQL execution returned 403 for admin and 200 for owner; owner-only role-action and legacy page-export regressions also passed.
+- `node --import tsx scripts/phase12-perf.mts`: seven warmed dashboard runs on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets) measured median **65 ms**, max **76 ms** over 14 days. This is a local query benchmark, not a production performance SLA.
+- The recovery SQL was executed against migrated PGlite and returned the intended new owner/audit row. No Neon editor or production database was used.
+- Browser automation was attempted, but the sandbox Chromium binary could not start because system libraries `libnspr4.so` and `libnss3.so` are unavailable. Therefore no viewport/theme screenshots, keyboard-only full pass, or screen-reader/browser audit is claimed. No Vercel/Neon preview was available for full end-to-end acceptance re-verification.
+
+### Owner handover
+
+- Keep at least one verified, active owner account with working TOTP and access from the approved network. Confirm a second recovery path before changing `ADMIN_IP_ALLOWLIST`, email, 2FA, or owner roles.
+- `ADMIN_BOOTSTRAP_EMAIL` is not an account-rotation control after the durable marker exists. Change login email through the account's confirmed Change email flow; use the reviewed Neon procedure only as an emergency owner recovery.
+- The Neon recovery transaction is a last resort and should be reviewed, ticketed, backed up, and applied only to the exact account in the correct project/branch. Do not delete `admin_bootstrap`, bypass account eligibility predicates, or manipulate stored TOTP material.
+- Before production release, run the documented test/typecheck/lint/build commands and the Phase 12 browser script in an environment with supported Chromium libraries; then repeat the phase acceptance criteria on a private deployment preview using isolated test data and configured test providers. Verify Vercel/Neon/Blob/Brevo behavior there; no real email campaigns or production retention tools are part of this local handoff.
+
+### Patch and status
+
+- `patches/phase-12-qa-docs.patch` is a separate incremental patch intended to apply after Phase 11. It adds documentation and local QA tooling only; it does not replace any earlier patch.
+- Phase 12 is **done locally**. Preview deployment, real browser/screen-reader QA, and production-provider verification remain deployment-owner tasks. No remote GitHub operation, push, or PR was attempted.
+
+### Integration verification — 2026-09-30 (Phase 12)
+
+- Applied on the complete Phase 1–11 checkout (`6c9bc07`) as branch `arena/01a0f071-functiongram` for review. All 5 file diffs are present (`docs/ADMIN_PANEL.md`, `patches/ADMIN_PROGRESS.md`, `scripts/admin-check.mts`, `scripts/phase12-browser.mjs`, `scripts/phase12-perf.mts`), and no earlier feature, migration, test or setting was removed.
+- Patch transport: the upload's only damage was a missing final newline in the last hunk of `scripts/phase12-perf.mts` (git apply: `corrupt patch at line 469`), identical to the single-byte newline issue in `phase09.patch` and `phase10.patch`. Appending that byte restored the artifact; the repaired `phase 12.patch` is retained in the repository and now passes `git apply --check` against the Phase 1–11 tree apart from this progress document, which is the only file merged by hand.
+- 4 of the 5 sections landed byte-identical to the upload (`docs/ADMIN_PANEL.md` at 152 lines, `scripts/phase12-browser.mjs` at 90 lines, `scripts/phase12-perf.mts` at 63 lines, and `scripts/admin-check.mts` at index `d7e1827..e24d149`). `patches/ADMIN_PROGRESS.md` was merged manually because its table and tail context predate the retained Phase 9–11 notes; the Phase 12 section above is preserved verbatim. Two minor doc fixes during the merge: the retained document was missing Phase 11's `### Apply and operate` block (restored from `phase 11.patch` with step 5 reading `Phase 12 is now recorded below`), and the Phase 12 status-table artifact points at the retained `phase 12.patch` instead of the packaged `phase-12-qa-docs.patch` name.
+- Verified in this checkout: `npm run typecheck` passed; `npm run lint` passed (0 errors, the same 7 existing public `<img>` warnings); `npm run test:vercel` at **116 tests, 113 passed, 0 failed, 3 optional managed-PostgreSQL skips** (112/109 in the author's baseline; the 4 extra tests are pre-existing in this tree); `npm run build` passed with `/rstmcadmin/analytics`, `/rstmcadmin/exports`, `/rstmcadmin/system`, `/rstmcadmin/guide` and their APIs in the route manifest; `git diff --check` clean.
+- `node --import tsx scripts/admin-check.mts seed` and `check` passed against isolated `.local/admin-check-db`: 8 identities × 16 admin pages plus legacy and Phase 11 APIs returned 401 to guests, 403 to normal/banned accounts, 401 to unverified/expired/revoked/forged sessions, and 200 to the active admin; the export endpoint returned `X-Export-Row-Cap: 1000` for admin; the SQL tool returned 403 for admin and 200 for owner.
+- `node --import tsx scripts/phase12-perf.mts` passed on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets): median **124 ms**, max **150 ms** over 7 warmed 14-day dashboard runs on this host (author reported 65/76 ms; local benchmark only, not a production SLA).
+- The `docs/ADMIN_PANEL.md` recovery transaction was executed against migrated PGlite with substituted placeholders: it promoted the exact eligible account to owner, revoked its sessions, wrote one `admin.owner.recovery` audit row, and returned zero rows for an unverified account without weakening predicates. No Neon editor or production database was used.
+- `scripts/phase12-browser.mjs` was not executed here (no `.local/browser-tools` install in this checkout); viewport/theme/keyboard/screen-reader passes and deployment-preview acceptance remain deployment-owner tasks per the Phase 12 handover notes. No production data, credentials, or provider delivery was touched.

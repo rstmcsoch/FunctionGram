@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
-import * as schema from '../lib/postgres-schema';
+import { DATABASE_MIGRATIONS } from '../lib/postgres';
 import { ADMIN_BASE_PATH } from '../lib/admin/config';
 
 const directory = path.resolve(process.env.ADMIN_CHECK_DB||'.local/admin-check-db');
@@ -21,15 +21,22 @@ if (process.argv[2] === 'seed') {
   const db = new PGlite(directory);
   const cookies: Record<string, string> = {};
   try {
-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
+    await db.exec('CREATE TABLE IF NOT EXISTS functiongram_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+    for (const migration of DATABASE_MIGRATIONS) {
+      for (const sql of migration.statements) await db.exec(sql);
+      await db.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
+    }
     for (const [id, role, verified, banned] of [
       ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
       ['expired', 'admin', true, false], ['revoked', 'admin', true, false],
     ] as const) {
-      await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)
-        ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,"emailVerified"=EXCLUDED."emailVerified",banned=EXCLUDED.banned`,
-      [id, `${id}@example.test`, role, verified, banned]);
+      await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified",banned,"twoFactorEnabled") VALUES($1,$1,$2,$3,$4,$5,$6)
+        ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,"emailVerified"=EXCLUDED."emailVerified",banned=EXCLUDED.banned,"twoFactorEnabled"=EXCLUDED."twoFactorEnabled",deleted_at=NULL`,
+      [id, `${id}@example.test`, role, verified, banned, role === 'owner' || role === 'admin']);
+      await db.query('DELETE FROM session WHERE "userId"=$1', [id]);
+      await db.query(`INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,'','',0,$2)
+        ON CONFLICT(id) DO UPDATE SET deleted_at=NULL,is_demo=0`, [id, Date.now()]);
       const token = randomBytes(32).toString('hex');
       if (id !== 'revoked') await db.query('INSERT INTO session(id,token,"userId","expiresAt") VALUES($1,$1,$2,$3)', [token, id, new Date(Date.now() + (id === 'expired' ? -3600000 : 86400000))]);
       cookies[id] = 'better-auth.session_token=' + encodeURIComponent(`${token}.${createHmac('sha256', secret).update(token).digest('base64')}`);
@@ -43,7 +50,7 @@ if (process.argv[2] === 'seed') {
   if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
   await fetch(origin+'/api/social');
   for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
-    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/content/demo_coast', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings']) {
+    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/appearance', ADMIN_BASE_PATH+'/features', ADMIN_BASE_PATH+'/labels', ADMIN_BASE_PATH+'/media', ADMIN_BASE_PATH+'/moderation', ADMIN_BASE_PATH+'/audit', ADMIN_BASE_PATH+'/security', ADMIN_BASE_PATH+'/communications', ADMIN_BASE_PATH+'/analytics', ADMIN_BASE_PATH+'/exports', ADMIN_BASE_PATH+'/system', ADMIN_BASE_PATH+'/guide', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings', '/api/admin/analytics?days=14', '/api/admin/system']) {
       const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
       const body = await response.text();
       assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
@@ -53,7 +60,7 @@ if (process.argv[2] === 'seed') {
       if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
       else if (route === ADMIN_BASE_PATH) {
         assert.match(body, /A pulse on your community./);
-        assert.match(body, /1, 2, 3, 4, 5, 6, 7/);
+        assert.match(body, /Applied migrations:[\s\S]*?1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12/);
         assert.match(body, /noindex/);
       }
       assert.ok(!body.includes(secret), 'No server secret in responses');
@@ -64,6 +71,17 @@ if (process.argv[2] === 'seed') {
     const response = await fetch(origin + '/api/admin', { method, headers: { cookie: cookies.admin, origin: 'https://foreign.example.test' } });
     assert.equal(response.status, method === 'POST' ? 403 : 405, 'Foreign-origin POST is denied; unsupported methods remain unavailable');
   }
+  const exportChecks = [['guest',401],['regular',403],['admin',200],['banned',403],['unverified',401],['expired',401],['revoked',401],['forged',401]] as const;
+  for (const [who, expected] of exportChecks) {
+    const response = await fetch(origin+'/api/admin/exports',{method:'POST',headers:{cookie:who==='forged'?'better-auth.session_token=forged':cookies[who],origin,'content-type':'application/json'},body:JSON.stringify({resource:'users',format:'json',filters:{}})});
+    assert.equal(response.status,expected,`${who} Phase 11 export API`);
+    if(who==='admin'){assert.equal(response.headers.get('X-Export-Row-Cap'),'1000');assert.ok(Array.isArray(await response.json()));}
+  }
+  const sqlCheck=await fetch(origin+'/api/admin/system',{method:'POST',headers:{cookie:cookies.admin,origin,'content-type':'application/json'},body:JSON.stringify({action:'readOnlySql',query:'SELECT 1',reason:'Check owner-only access'})});
+  assert.equal(sqlCheck.status,403,'The SQL tool remains owner-only over HTTP');
+  const ownerSql=await fetch(origin+'/api/admin/system',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action:'readOnlySql',query:'SELECT 1',reason:'Local owner access check'})});
+  const ownerResult=await ownerSql.json() as {rows:Record<string,unknown>[]};
+  assert.equal(ownerSql.status,200);assert.equal(ownerResult.rows[0]['?column?'],1);
   for (const who of ['guest','regular']) {
     const response = await fetch(origin + '/api/admin', { method: 'POST', headers: { cookie: cookies[who] || '', origin, 'content-type': 'application/json' }, body: JSON.stringify({action:'verify',id:'regular',confirmation:'regular@example.test'}) });
     assert.equal(response.status,who === 'guest' ? 401 : 403);
@@ -79,7 +97,7 @@ if (process.argv[2] === 'seed') {
   assert.equal((await action('verify')).status,200);
   const csv = await action('exportUsers',{limit:200}); assert.equal(csv.status,200); assert.match(csv.headers.get('content-type') || '',/text\/csv/);
   assert.equal((await fetch(origin + '/api/admin?resource=users&limit=201',{headers:{cookie:cookies.admin}})).status,400);
-  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test'})});
+  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test',reason:'Local HTTP recovery check'})});
   assert.equal((await ownerAction('promote')).status,200);
   assert.equal((await action('ban')).status,403,'Admins cannot act on another administrator');
   assert.equal((await ownerAction('demote')).status,200);
