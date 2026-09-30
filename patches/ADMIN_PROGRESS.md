@@ -18,8 +18,9 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 7 | Media & upload pipeline | Applied and merged to main (PR #23) | `patch07.patch` |
 | 8 | Moderation: reports, filters, safety | Applied on `arena/01a0ec62-functiongram`; deployment pending | `patch 08.patch` |
 | 9 | Hardening: 2FA, roles, session policy, audit viewer | Applied and merged to main (PR #25) | `phase09.patch` |
-| 10 | Messages, notifications, email, announcements, CMS pages | Done locally; verification below | `phase10.patch` |
-| 11–12 | Analytics through handover | Not started | — |
+| 10 | Messages, notifications, email, announcements, CMS pages | Applied and merged to main (PR #26) | `phase10.patch` |
+| 11 | Analytics, exports, system tools, polish | Done locally; verification below | `phase 11.patch` |
+| 12 | Final QA, docs, owner handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -548,3 +549,32 @@ Implemented locally on the complete Phase 1–9 baseline. This increment preserv
 - Patch transport: the upload's only damage was a missing final newline in the last hunk of `tests/vercel.test.ts` (git apply: `corrupt patch at line 1471`), identical to the single-byte newline issue in `phase09.patch`. Appending that byte restored the artifact. All 30 code and test files landed byte-identical to the patch's declared output hashes.
 - `patches/ADMIN_PROGRESS.md` was merged manually because its table and tail context predated the retained Phase 9 notes; the Phase 10 section above is preserved verbatim.
 - Verified in this checkout: `npm run typecheck`; `npm run lint` (0 errors, 7 existing public image warnings); `npm run build`, which now lists `/p/[slug]`, `/rstmcadmin/communications`, `/api/admin/comms`, `/api/admin/pages`; `git diff --check` clean; and `npm run test:vercel` at **109 tests, 106 passed, 0 failed, 3 optional managed-PostgreSQL skips**.
+
+## Phase 11 — Analytics, exports, system tools, polish
+
+Implemented as an incremental addition on the complete Phase 1–10 baseline. Existing bootstrap/owner rules, static role matrix, mandatory admin 2FA/session protections, audit immutability, and earlier communication/content/media safeguards remain in place.
+
+### Delivered
+
+- **Dashboard analytics v2** at `/rstmcadmin/analytics`: UTC daily series for signups, active-session refresh proxy, creations, messages, reports and newly added asset bytes; ranked eligible content/creators; category/hashtag use; and a lifetime member-to-first-post funnel. Demo, hidden/deleted and unavailable content is excluded where appropriate. The UI explicitly describes the activity/storage definitions instead of presenting proxies as exact historical DAU/storage snapshots.
+- **Bounded streaming exports** at `/rstmcadmin/exports` for users, posts, reports and audit rows in CSV or JSON. Query filters reuse existing validated list services, rows are paged, capped at 1,000, sensitive session/password fields are omitted, CSV formula cells are neutralized, and each download is audited with format/cap/filter-hash metadata.
+- **System tools** at `/rstmcadmin/system`: applied/registered migration status; booleans-only environment readiness; logged single-SELECT SQL runner with a strict table/function allowlist, read-only transaction, 500-row cap and 5-second database timeout; audited cache invalidation; owner-only demo reseed/wipe and retention pruning. Each power tool verifies current permissions and records an audit event. Demo wipe disables automatic seeding and preserves demo-flagged profiles linked to real auth accounts. Expired stories older than a 30-day grace period are permanently removed in batches; orphaned assets older than 7 days are moved to Trash for recovery rather than deleted.
+- **Admin operator guide** at `/rstmcadmin/guide` documenting tool permissions, SQL boundaries, export limitations, confirmations, data-retention actions, demo-seed behavior and recovery cautions.
+- Additive, repeatable **migration 12** adds the singleton demo-seed control and analytics query indexes; previous migrations remain registered and unchanged. The normal automatic demo seed honors the persisted disable switch.
+- Preserved `/rstmcadmin` navigation and Phase 10 content; added Phase 11 styles and links without replacing prior controls.
+
+### Verification
+
+- `npm run typecheck`: passed.
+- `npm run lint`: passed, **0 errors** and 7 existing public `<img>` optimization warnings.
+- `npm run test:vercel`: **112 tests; 109 passed, 0 failed, 3 optional managed-PostgreSQL tests skipped** because no isolated managed database URL was supplied. New `tests/admin-system.test.ts`: **7/7 passed**.
+- `npm run build`: passed; analytics, exports, system, and guide pages and their APIs appeared in the production route manifest.
+- Focused PGlite integration coverage checks migration 12 repeatability, manual-SQL parity for analytics, strict SQL rejection/read-only cap/audit hash, CSV/JSON streaming/cap/formula safety/download audit, demo wipe/reseed and auth-profile preservation, retention behavior, and role restrictions.
+- `git diff --check` clean.
+
+### Boundaries and safety notes
+
+- “Active users” is based on session refresh timestamps because the app does not currently emit a per-request activity event. “Storage over time” reports asset bytes added during the selected period, not a historical retained-storage snapshot. The UI labels both definitions.
+- The SQL runner intentionally accepts a narrow subset of plain `SELECT` only: no comments, CTEs/subqueries, multiple statements, protected auth/settings tables, unapproved functions, schema-qualified relations/functions, or write/locking commands. Query text is not stored in the audit log; only a SHA-256 hash, byte-length metadata, row cap, timeout, and operator reason are recorded.
+- Exports are bounded to at most 1,000 rows per request; fetch another filtered request to retrieve more data. They are streams and do not materialize the full matching result set in memory.
+- Demo wipe excludes profiles linked to auth accounts, preventing a test/demo flag from causing deletion of a real login. Reseeding is owner-only, explicitly confirmed, audited at start/completion/failure, and invokes the bundled seeder only after enabling the durable seed switch. Story pruning requires an exact current batch count; orphan pruning rechecks under the shared media lock and moves eligible assets to recoverable Trash.

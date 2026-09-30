@@ -25,7 +25,7 @@ async function fixture(){
 test('migration 11 is additive, repeatable and registered after Phase 9',async()=>{
  const db=new PGlite();try{
   for(const sql of statements)await db.exec(sql);for(const sql of schema.adminCommsUpgradeStatements)await db.exec(sql);
-  assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,11);assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements,schema.adminCommsUpgradeStatements);
+  assert.equal(DATABASE_MIGRATIONS.find(item=>item.version===11)?.statements,schema.adminCommsUpgradeStatements);
   assert.equal((await db.query('SELECT kind FROM admin_notification_templates')).rows.length,5);
   assert.equal((await db.query('SELECT id FROM admin_email_controls')).rows.length,1);
   for(const table of ['admin_message_controls','admin_notification_templates','admin_email_controls']){const {rows}=await db.query<{name:string|null}>('SELECT to_regclass($1) AS name',[table]);assert.equal(rows[0].name,table);}

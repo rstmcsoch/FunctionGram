@@ -193,3 +193,11 @@ export const adminCommsUpgradeStatements=[
  'CREATE INDEX IF NOT EXISTS site_pages_published_footer_idx ON site_pages(published,show_in_footer,footer_order)',
  'CREATE INDEX IF NOT EXISTS announcements_live_idx ON announcements(published,starts_at,ends_at)',
 ];
+
+// Version 12: safe analytics/support tools and an explicit demo-seed control.
+export const adminSystemUpgradeStatements=[
+ `CREATE TABLE IF NOT EXISTS admin_demo_seed_control(id integer PRIMARY KEY CHECK(id=1),enabled boolean NOT NULL DEFAULT true,updated_at bigint NOT NULL DEFAULT 0,updated_by text NOT NULL DEFAULT '')`,
+ 'INSERT INTO admin_demo_seed_control(id,enabled) VALUES(1,true) ON CONFLICT(id) DO NOTHING',
+ 'CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC,id)',
+ 'CREATE INDEX IF NOT EXISTS idx_session_updated ON session("updatedAt" DESC,"userId")',
+];
