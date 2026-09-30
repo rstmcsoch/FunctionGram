@@ -133,41 +133,10 @@ update patches/ADMIN_PROGRESS.md, and STOP.
 - Text check passes. No sideways scroll. Existing browser QA passes.
 - Gates pass. `git diff --stat` shows no forbidden files.
 
-**Prompt to paste**
-
-```
-Read FunctionGram_Admin_Visual_Redesign_Phases.md ("Rules for every phase" and "Phase C").
-Also read only Spec sections 9, 10, 11 of FunctionGram_Admin_Panel_Visual_Redesign_Guide.md.
-Phases A and B are already applied. Do ONLY Phase C (pages + polish + final QA), in the listed order.
-Visual only. Keep it lean. If you run low on budget, finish the current page, list the rest under "Not done".
-Then make patches/phase-13c-visual-pages.patch on top of Phase B, verify with git apply --check,
-save .patch and .patch.txt in the sandbox downloads and present them as downloadable files,
-update patches/ADMIN_PROGRESS.md, and STOP.
-```
 
 **Fallback (if Phase C is still too big):** ask for Phase C in two runs.
 - **C1:** steps 1 to 3 (Overview, Users, Content). Patch `phase-13c1-visual-pages.patch`.
 - **C2:** steps 4 to 8. Patch `phase-13c2-visual-pages.patch`.
 
-Use the same prompt, changing "Phase C" to "Phase C1" or "Phase C2" and naming the steps.
-
----
-
-## How the user applies each patch
-
-Same as before, once per phase, in order A → B → C:
-
-```
-git pull
-git checkout -b admin/visual-phase-a      # then -b, -c for next phases
-git apply --check <patch file>
-git apply <patch file>
-npm install
-npm run lint && npm run test:vercel && npm run build
-```
-
-Then commit, push, open the pull request, check the Vercel preview, merge. Start the next phase only after the previous one is merged.
-
----
 
 *End of phase plan. One phase per run. Patch after every phase. Stop after every phase.*
