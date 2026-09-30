@@ -57,6 +57,12 @@ export function AdminNav({ groups, wordmark, account }: {
     return () => query.removeEventListener('change', sync);
   }, []);
 
+  // On load (and route change) bring the active link into view inside the
+  // sidebar's own scroll container; `nearest` never scrolls the page itself.
+  useEffect(() => {
+    sidebar.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [pathname]);
+
   useEffect(() => {
     if (!open) return;
     const node = sidebar.current;
@@ -80,12 +86,6 @@ export function AdminNav({ groups, wordmark, account }: {
       document.body.style.overflow = previousOverflow;
     };
   }, [open, close]);
-
-  // Keep the current page visible inside the scrolling sidebar on load.
-  useEffect(() => {
-    const active = sidebar.current?.querySelector<HTMLElement>('a[aria-current="page"]');
-    active?.scrollIntoView({ block: 'nearest' });
-  }, [pathname]);
 
   // Exact for Overview, prefix for every other panel route (§6.2).
   const isActive = (item: AdminNavItem) => item.match === 'exact'
