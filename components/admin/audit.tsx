@@ -1,6 +1,8 @@
 'use client';
 import {useState} from 'react';
 import type {AuditFilters,AuditRow} from '@/lib/admin/audit';
+import { Avatar } from './avatar';
+import { Badge, auditTone } from './badge';
 
 export function AuditTools({filters}:{filters:AuditFilters}){
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -12,7 +14,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
-  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" href="/rstmcadmin/audit">Clear</a>
+  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a>
  </form><button className="admin-button" disabled={busy} onClick={async()=>{
   setBusy(true);setError('');
   try{
@@ -27,7 +29,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
 function pretty(value:string|null){if(!value)return '—';try{return JSON.stringify(JSON.parse(value),null,2);}catch{return value;}}
 export function AuditTable({rows}:{rows:AuditRow[]}){
  return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Read-only administrator audit log"><table><caption>Newest first · read-only historical records</caption><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th><th>Before / after</th><th>Network / client</th></tr></thead><tbody>
-  {rows.map(row=><tr key={row.id}><td>{new Date(Number(row.created_at)).toISOString()}</td><td>{row.actor_email}<small>{row.actor_id}</small></td><td><code>{row.action}</code></td><td>{row.target_type||'—'}<small>{row.target_id||'—'}</small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
+  {rows.map(row=><tr key={row.id}><td className="admin-cell-time">{new Date(Number(row.created_at)).toISOString()}</td><td><div className="admin-cell-identity"><Avatar name={row.actor_email} email={row.actor_email} seed={String(row.actor_id||row.actor_email)} size={28} /><div>{row.actor_email}<small>{row.actor_id}</small></div></div></td><td><Badge tone={auditTone(row.action)} className="admin-badge-mono">{row.action}</Badge></td><td>{row.target_type||'—'}<small><code>{row.target_id||'—'}</code></small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
   {!rows.length&&<tr><td colSpan={7}>No historical audit rows match these filters.</td></tr>}
  </tbody></table></div>;
 }

@@ -1,0 +1,1886 @@
+diff --git a/app/rstmcadmin/admin-components.css b/app/rstmcadmin/admin-components.css
+new file mode 100644
+index 0000000..f21db2e
+--- /dev/null
++++ b/app/rstmcadmin/admin-components.css
+@@ -0,0 +1,133 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — reusable primitives
++   Phase 1 seeds the two primitives the shell account card needs (§8.5 badges,
++   §8.10 avatars). Later phases extend this file with the remaining controls.
++
++   VISUAL ONLY, scoped to `.admin-shell` (and the dialog portal, which renders
++   outside the shell subtree).
++   ========================================================================== */
++
++/* ==========================================================================
++   Avatars (§8.10)
++   ========================================================================== */
++
++.admin-shell .admin-avatar {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  flex: none;
++  width: 36px;
++  height: 36px;
++  border-radius: var(--adm-r-pill);
++  font-size: 13px;
++  font-weight: 600;
++  line-height: 1;
++  letter-spacing: .01em;
++  text-transform: uppercase;
++  user-select: none;
++}
++
++.admin-shell .admin-avatar[data-size="28"] {
++  width: 28px;
++  height: 28px;
++  font-size: 11px;
++}
++
++.admin-shell .admin-avatar[data-size="40"] {
++  width: 40px;
++  height: 40px;
++}
++
++.admin-shell .admin-avatar[data-size="64"] {
++  width: 64px;
++  height: 64px;
++  font-size: 20px;
++}
++
++/* Six deterministic tints: background at 16%, text at the readable variant. */
++.admin-shell .admin-avatar[data-tint="blue"] {
++  background: rgba(27, 132, 255, .16);
++  color: var(--adm-accent-text);
++}
++
++.admin-shell .admin-avatar[data-tint="green"] {
++  background: rgba(23, 198, 83, .16);
++  color: var(--adm-success-text);
++}
++
++.admin-shell .admin-avatar[data-tint="purple"] {
++  background: rgba(114, 57, 234, .16);
++  color: var(--adm-purple-text);
++}
++
++.admin-shell .admin-avatar[data-tint="amber"] {
++  background: rgba(246, 177, 0, .16);
++  color: var(--adm-warning-text);
++}
++
++.admin-shell .admin-avatar[data-tint="red"] {
++  background: rgba(248, 40, 90, .16);
++  color: var(--adm-danger-text);
++}
++
++.admin-shell .admin-avatar[data-tint="cyan"] {
++  background: rgba(6, 182, 212, .16);
++  color: var(--adm-cyan-text);
++}
++
++/* ==========================================================================
++   Badges (§8.5)
++   ========================================================================== */
++
++.admin-shell .admin-badge {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  height: 24px;
++  padding: 0 10px;
++  border-radius: var(--adm-r-pill);
++  font-size: 12px;
++  line-height: 16px;
++  font-weight: 500;
++  white-space: nowrap;
++  vertical-align: middle;
++}
++
++.admin-shell .admin-badge-dot {
++  width: 6px;
++  height: 6px;
++  flex: none;
++  border-radius: var(--adm-r-pill);
++  background: currentColor;
++}
++
++.admin-shell .admin-badge[data-tone="neutral"] {
++  background: var(--adm-muted-surface);
++  color: var(--adm-text-2);
++  box-shadow: inset 0 0 0 1px var(--adm-border-subtle);
++}
++
++.admin-shell .admin-badge[data-tone="primary"] {
++  background: var(--adm-accent-soft);
++  color: var(--adm-accent-text);
++}
++
++.admin-shell .admin-badge[data-tone="purple"] {
++  background: rgba(114, 57, 234, .14);
++  color: var(--adm-purple-text);
++}
++
++.admin-shell .admin-badge[data-tone="warning"] {
++  background: rgba(246, 177, 0, .14);
++  color: var(--adm-warning-text);
++}
++
++.admin-shell .admin-badge[data-tone="success"] {
++  background: rgba(23, 198, 83, .14);
++  color: var(--adm-success-text);
++}
++
++.admin-shell .admin-badge[data-tone="danger"] {
++  background: rgba(248, 40, 90, .14);
++  color: var(--adm-danger-text);
++}
+diff --git a/app/rstmcadmin/admin-shell.css b/app/rstmcadmin/admin-shell.css
+new file mode 100644
+index 0000000..1d4a19c
+--- /dev/null
++++ b/app/rstmcadmin/admin-shell.css
+@@ -0,0 +1,546 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — application shell
++   Redesign guide §6 (shell), §7 (responsive), §10.3/10.4 (active bar, glass).
++
++   VISUAL ONLY. The grid layout is scoped to `.admin-shell.admin-layout` so the
++   standalone two-factor screens, which reuse `.admin-shell` for tokens only,
++   keep their centred single-column presentation.
++   ========================================================================== */
++
++.admin-shell.admin-layout {
++  display: grid;
++  grid-template-columns: 272px minmax(0, 1fr);
++  height: 100dvh;
++  min-height: 100dvh;
++  padding: 0;
++  background: var(--adm-bg);
++  color: var(--adm-text);
++  overflow: hidden;
++}
++
++/* ==========================================================================
++   Sidebar (§6.2)
++   ========================================================================== */
++
++.admin-sidebar {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s2);
++  height: 100dvh;
++  min-width: 0;
++  padding: var(--adm-s4);
++  overflow-y: auto;
++  overscroll-behavior: contain;
++  background: var(--adm-bg);
++}
++
++/* Brand row. */
++.admin-brand {
++  display: flex;
++  align-items: center;
++  height: 64px;
++  padding: var(--adm-s2) var(--adm-s3);
++  font-size: 22px;
++  font-weight: 700;
++  letter-spacing: -.02em;
++  color: var(--adm-text);
++  white-space: nowrap;
++}
++
++.admin-brand span {
++  color: var(--adm-brand-dot);
++}
++
++/* Navigation. */
++.admin-nav {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s3);
++  flex: 1 1 auto;
++  min-height: 0;
++}
++
++.admin-nav-group {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++}
++
++.admin-nav-group-label {
++  padding: var(--adm-s4) var(--adm-s3) 6px;
++  font-size: 11px;
++  line-height: 16px;
++  font-weight: 600;
++  text-transform: uppercase;
++  letter-spacing: .08em;
++  color: var(--adm-text-3);
++}
++
++.admin-nav-link {
++  position: relative;
++  display: flex;
++  align-items: center;
++  gap: var(--adm-s3);
++  min-height: 44px;
++  padding: 0 var(--adm-s3);
++  border-radius: var(--adm-r-control);
++  font-size: 14px;
++  font-weight: 500;
++  color: var(--adm-text-2);
++  text-decoration: none;
++  transition: background-color var(--adm-dur) ease-out, color var(--adm-dur) ease-out;
++}
++
++.admin-nav-link svg {
++  flex: none;
++  width: 18px;
++  height: 18px;
++  color: var(--adm-text-3);
++  transition: color var(--adm-dur) ease-out;
++}
++
++.admin-nav-label {
++  flex: 1 1 auto;
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.admin-nav-link:hover {
++  background: var(--adm-hover);
++  color: var(--adm-text);
++  text-decoration: none;
++}
++
++.admin-nav-link:hover svg {
++  color: var(--adm-text-2);
++}
++
++.admin-nav-link[aria-current="page"] {
++  background: var(--adm-active-bg);
++  color: var(--adm-accent-text);
++  font-weight: 600;
++}
++
++.admin-nav-link[aria-current="page"] svg {
++  color: var(--adm-accent-text);
++}
++
++/* §10.3 — 3x18 accent bar on the active item. */
++.admin-nav-link[aria-current="page"]::before {
++  content: "";
++  position: absolute;
++  left: 0;
++  top: 50%;
++  width: 3px;
++  height: 18px;
++  margin-top: -9px;
++  border-radius: 2px;
++  background: var(--adm-accent);
++}
++
++.admin-nav-external {
++  flex: none;
++  margin-left: auto;
++}
++
++/* Account card (§6.2) — display only, never interactive. */
++.admin-account {
++  display: flex;
++  align-items: center;
++  gap: var(--adm-s3);
++  margin-top: auto;
++  padding: var(--adm-s3);
++  border: 1px solid var(--adm-border-subtle);
++  border-radius: 12px;
++  background: var(--adm-muted-surface);
++}
++
++.admin-account-body {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  min-width: 0;
++}
++
++.admin-account-email {
++  font-size: 13px;
++  font-weight: 500;
++  color: var(--adm-text);
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++/* ==========================================================================
++   Panel (§6.1)
++   ========================================================================== */
++
++.admin-panel {
++  display: flex;
++  flex-direction: column;
++  min-width: 0;
++  margin: var(--adm-s4) var(--adm-s4) var(--adm-s4) 0;
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-panel);
++  background: var(--adm-panel);
++  min-height: calc(100dvh - 32px);
++  max-height: calc(100dvh - 32px);
++  overflow-y: auto;
++  overscroll-behavior: contain;
++}
++
++/* Main area (§6.4). */
++.admin-shell .admin-main {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s5);
++  flex: 1 1 auto;
++  width: 100%;
++  max-width: 1360px;
++  margin: 0 auto;
++  padding: var(--adm-s6) var(--adm-s7) var(--adm-s8);
++  min-width: 0;
++}
++
++/* Page head (§6.3). Bleeds out of the main padding so the sticky glass bar
++   spans the panel, while the content below stays centred. */
++.admin-page-head {
++  position: sticky;
++  top: env(safe-area-inset-top, 0px);
++  z-index: 20;
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s2);
++  margin: calc(var(--adm-s6) * -1) calc(var(--adm-s7) * -1) 0;
++  padding: var(--adm-s6) var(--adm-s7) var(--adm-s4);
++  border-bottom: 1px solid var(--adm-border-subtle);
++  background: color-mix(in srgb, var(--adm-panel) 85%, transparent);
++  backdrop-filter: blur(12px);
++  -webkit-backdrop-filter: blur(12px);
++}
++
++/* Browsers without color-mix keep a solid, readable bar. */
++@supports not (background: color-mix(in srgb, red 85%, transparent)) {
++  .admin-page-head {
++    background: var(--adm-panel);
++  }
++}
++
++.admin-page-head-row {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--adm-s3) var(--adm-s4);
++}
++
++.admin-page-head-title {
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  min-width: 0;
++}
++
++.admin-page-head-actions {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: var(--adm-s2);
++}
++
++.admin-page-intro {
++  max-width: 68ch;
++  margin: 0;
++  font-size: 14px;
++  line-height: 22px;
++  color: var(--adm-text-2);
++}
++
++/* Title and breadcrumb share one baseline row on desktop. */
++@media (min-width: 1024px) {
++  .admin-page-head-title {
++    flex-direction: row;
++    align-items: baseline;
++    gap: var(--adm-s4);
++  }
++}
++
++/* Footer (§6.5). */
++.admin-footer {
++  padding: var(--adm-s5) var(--adm-s7);
++  border-top: 1px solid var(--adm-border-subtle);
++}
++
++.admin-footer p {
++  margin: 0;
++  font-size: 12px;
++  line-height: 16px;
++  color: var(--adm-text-3);
++}
++
++/* ==========================================================================
++   Mobile top bar and drawer (§7) — hidden at >= 768px
++   ========================================================================== */
++
++.admin-topbar,
++.admin-backdrop {
++  display: none;
++}
++
++/* ==========================================================================
++   Responsive (§7)
++   ========================================================================== */
++
++/* 1024–1279 — narrower labelled sidebar. */
++@media (max-width: 1279px) {
++  .admin-shell.admin-layout {
++    grid-template-columns: 240px minmax(0, 1fr);
++  }
++}
++
++/* 768–1023 — 76px icon rail; labels stay in the DOM but are hidden. */
++@media (max-width: 1023px) {
++  .admin-shell.admin-layout {
++    grid-template-columns: 76px minmax(0, 1fr);
++  }
++
++  .admin-sidebar {
++    padding: var(--adm-s3) var(--adm-s2);
++    align-items: stretch;
++  }
++
++  .admin-brand {
++    justify-content: center;
++    padding: var(--adm-s2) 0;
++    font-size: 18px;
++  }
++
++  .admin-nav-link {
++    justify-content: center;
++    padding: 0;
++  }
++
++  .admin-nav-label,
++  .admin-nav-external {
++    position: absolute;
++    width: 1px;
++    height: 1px;
++    padding: 0;
++    margin: -1px;
++    overflow: hidden;
++    clip: rect(0 0 0 0);
++    clip-path: inset(50%);
++    white-space: nowrap;
++    border: 0;
++  }
++
++  /* Group labels become thin dividers. */
++  .admin-nav-group-label {
++    height: 1px;
++    padding: 0;
++    margin: var(--adm-s3) var(--adm-s2) var(--adm-s2);
++    overflow: hidden;
++    text-indent: -999em;
++    background: var(--adm-border-subtle);
++  }
++
++  .admin-account {
++    justify-content: center;
++    padding: var(--adm-s2);
++  }
++
++  .admin-account-body {
++    display: none;
++  }
++
++  /* Panel is full-bleed below 1024 (§6.1). */
++  .admin-panel {
++    margin: 0;
++    border: 0;
++    border-radius: 0;
++    min-height: 100dvh;
++    max-height: 100dvh;
++  }
++}
++
++/* < 768 — sticky top bar plus slide-in drawer. */
++@media (max-width: 767px) {
++  .admin-shell.admin-layout {
++    display: block;
++    height: auto;
++    min-height: 100dvh;
++    overflow: visible;
++  }
++
++  .admin-topbar {
++    position: sticky;
++    top: 0;
++    z-index: 40;
++    display: flex;
++    align-items: center;
++    gap: var(--adm-s2);
++    height: calc(56px + env(safe-area-inset-top, 0px));
++    padding: env(safe-area-inset-top, 0px) var(--adm-s2) 0;
++    border-bottom: 1px solid var(--adm-border);
++    background: var(--adm-bg);
++  }
++
++  .admin-topbar-button {
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    width: 44px;
++    height: 44px;
++    flex: none;
++    padding: 0;
++    border: 0;
++    border-radius: var(--adm-r-control);
++    background: transparent;
++    color: var(--adm-text);
++    cursor: pointer;
++  }
++
++  .admin-topbar-button:hover {
++    background: var(--adm-hover);
++  }
++
++  .admin-topbar .admin-brand {
++    height: auto;
++    padding: 0 var(--adm-s1);
++    font-size: 20px;
++  }
++
++  /* The sidebar becomes the drawer. Same nav, never duplicated in the DOM. */
++  .admin-sidebar {
++    position: fixed;
++    inset: 0 auto 0 0;
++    z-index: 60;
++    width: min(296px, 86vw);
++    height: 100dvh;
++    padding: var(--adm-s4);
++    border-right: 1px solid var(--adm-border);
++    background: var(--adm-bg);
++    transform: translateX(-100%);
++    visibility: hidden;
++    transition: transform var(--adm-dur-lg) var(--adm-ease), visibility 0s linear var(--adm-dur-lg);
++  }
++
++  .admin-sidebar[data-open="true"] {
++    transform: translateX(0);
++    visibility: visible;
++    transition: transform var(--adm-dur-lg) var(--adm-ease), visibility 0s;
++  }
++
++  .admin-backdrop {
++    position: fixed;
++    inset: 0;
++    z-index: 50;
++    display: block;
++    border: 0;
++    padding: 0;
++    background: rgba(0, 0, 0, .55);
++    backdrop-filter: blur(2px);
++    -webkit-backdrop-filter: blur(2px);
++    opacity: 0;
++    visibility: hidden;
++    transition: opacity var(--adm-dur-lg) var(--adm-ease), visibility 0s linear var(--adm-dur-lg);
++  }
++
++  .admin-backdrop[data-open="true"] {
++    opacity: 1;
++    visibility: visible;
++    transition: opacity var(--adm-dur-lg) var(--adm-ease), visibility 0s;
++  }
++
++  /* Rail overrides from the 1023 breakpoint are reverted inside the drawer. */
++  .admin-sidebar .admin-brand {
++    justify-content: flex-start;
++    height: 56px;
++    padding: var(--adm-s2) var(--adm-s3);
++    font-size: 22px;
++  }
++
++  .admin-nav-link {
++    justify-content: flex-start;
++    padding: 0 var(--adm-s3);
++  }
++
++  .admin-nav-label,
++  .admin-nav-external {
++    position: static;
++    width: auto;
++    height: auto;
++    margin: 0;
++    overflow: visible;
++    clip: auto;
++    clip-path: none;
++  }
++
++  .admin-nav-label {
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++
++  .admin-nav-external {
++    margin-left: auto;
++  }
++
++  .admin-nav-group-label {
++    height: auto;
++    padding: var(--adm-s4) var(--adm-s3) 6px;
++    margin: 0;
++    overflow: visible;
++    text-indent: 0;
++    background: none;
++  }
++
++  .admin-account {
++    justify-content: flex-start;
++    padding: var(--adm-s3);
++  }
++
++  .admin-account-body {
++    display: flex;
++  }
++
++  .admin-panel {
++    margin: 0;
++    border: 0;
++    border-radius: 0;
++    min-height: 0;
++    max-height: none;
++    overflow: visible;
++  }
++
++  .admin-shell .admin-main {
++    padding: var(--adm-s4) var(--adm-s4) var(--adm-s6);
++    gap: var(--adm-s4);
++  }
++
++  /* Not sticky on mobile — it would eat the screen (§6.3). */
++  .admin-page-head {
++    position: static;
++    margin: calc(var(--adm-s4) * -1) calc(var(--adm-s4) * -1) 0;
++    padding: var(--adm-s4) var(--adm-s4) var(--adm-s3);
++    background: var(--adm-panel);
++    backdrop-filter: none;
++    -webkit-backdrop-filter: none;
++  }
++
++  .admin-footer {
++    padding: var(--adm-s5) var(--adm-s4);
++  }
++}
++
++/* Page-level sideways scroll is never acceptable (§1.4, §7). */
++.admin-shell.admin-layout,
++.admin-panel,
++.admin-shell .admin-main {
++  max-width: 100%;
++}
++
++.admin-shell .admin-main > * {
++  min-width: 0;
++}
+diff --git a/app/rstmcadmin/admin-tokens.css b/app/rstmcadmin/admin-tokens.css
+new file mode 100644
+index 0000000..3d4efdc
+--- /dev/null
++++ b/app/rstmcadmin/admin-tokens.css
+@@ -0,0 +1,343 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — design tokens and typography
++   Redesign guide §4 (tokens), §5 (typography), §10 (touches), §11 (motion/a11y).
++
++   VISUAL ONLY. Everything is scoped to `.admin-shell`; no public-site token,
++   `app/globals.css` value or component behaviour is touched.
++
++   Theme switching mirrors the selectors the app already emits from
++   `appearanceCss()` in `lib/appearance.ts`:
++     html:root{...}                       -> light
++     html:root[data-theme="dark"]{...}    -> explicit dark
++     @media(prefers-color-scheme:dark){html:root:not([data-theme]){...}}
++   A `.dark` class is honoured too, in case a later theme provider sets one.
++   ========================================================================== */
++
++.admin-shell {
++  /* ---- Accent. Change ONLY this block to re-brand (brand pink = #eb456e) -- */
++  --adm-accent: #1b84ff;
++  --adm-accent-hover: #0f6fe0;
++  --adm-accent-soft: rgba(27, 132, 255, .14);
++  --adm-on-accent: #fff;
++
++  /* ---- Status tones ---------------------------------------------------- */
++  --adm-success: #17c653;
++  --adm-warning: #f6b100;
++  --adm-danger: #f8285a;
++  --adm-purple: #7239ea;
++  --adm-cyan: #06b6d4;
++
++  /* ---- Shape ----------------------------------------------------------- */
++  --adm-r-panel: 20px;
++  --adm-r-card: 14px;
++  --adm-r-control: 10px;
++  --adm-r-pill: 999px;
++
++  /* ---- Type -----------------------------------------------------------
++     Inter first, then a full system stack. The guide asks for `next/font`,
++     but the panel must stay readable and correctly proportioned when Inter
++     is unavailable, so every size below is tuned against this stack.       */
++  --adm-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++  --adm-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
++
++  /* ---- Motion ---------------------------------------------------------- */
++  --adm-ease: cubic-bezier(.2, .8, .2, 1);
++  --adm-dur: 150ms;
++  --adm-dur-lg: 240ms;
++
++  /* ---- Spacing scale (4px base) ---------------------------------------- */
++  --adm-s1: 4px;
++  --adm-s2: 8px;
++  --adm-s3: 12px;
++  --adm-s4: 16px;
++  --adm-s5: 20px;
++  --adm-s6: 24px;
++  --adm-s7: 28px;
++  --adm-s8: 32px;
++  --adm-s9: 48px;
++
++  /* The single remaining piece of brand pink: the wordmark dot (§6.2). */
++  --adm-brand-dot: #eb456e;
++}
++
++/* ---- LIGHT (base) -------------------------------------------------------- */
++.admin-shell {
++  color-scheme: light;
++  --adm-bg: #f3f4f6;
++  --adm-panel: #fff;
++  --adm-card: #fff;
++  --adm-muted-surface: #f7f8fa;
++  --adm-hover: #f1f3f6;
++  --adm-border: #e4e6eb;
++  --adm-border-subtle: #eceef2;
++  --adm-text: #15161a;
++  --adm-text-2: #5b606c;
++  --adm-text-3: #8a8f9b;
++  --adm-accent-text: #0f63d6;           /* passes AA on white */
++  --adm-active-bg: var(--adm-accent-soft);
++  --adm-shadow: 0 1px 2px rgba(16, 24, 40, .06);
++  --adm-success-text: #0d8a3c;
++  --adm-warning-text: #a15c07;
++  --adm-danger-text: #d61f4c;
++  --adm-purple-text: #6234c7;
++  --adm-cyan-text: #0e7490;             /* companion to --adm-cyan (§9.1) */
++  --adm-dialog-shadow: 0 24px 64px rgba(16, 24, 40, .24);
++}
++
++/* ---- DARK (default look, matches the reference) -------------------------- */
++html[data-theme="dark"] .admin-shell,
++.dark .admin-shell {
++  color-scheme: dark;
++  --adm-bg: #0f0f12;                    /* page + sidebar */
++  --adm-panel: #08080a;                 /* main panel */
++  --adm-card: #0c0c0f;
++  --adm-muted-surface: #131317;         /* table header, chips, code */
++  --adm-hover: #17171c;
++  --adm-border: #222228;
++  --adm-border-subtle: #1a1a1f;
++  --adm-text: #f5f5f7;
++  --adm-text-2: #a1a1aa;                /* secondary */
++  --adm-text-3: #71717a;                /* hints */
++  --adm-accent-text: #4da3ff;           /* links + active nav text */
++  --adm-active-bg: #000;
++  --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
++  --adm-success-text: #3ddc84;
++  --adm-warning-text: #ffc933;
++  --adm-danger-text: #ff5c85;
++  --adm-purple-text: #a78bfa;
++  --adm-cyan-text: #45d0e8;
++  --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
++}
++
++@media (prefers-color-scheme: dark) {
++  html:not([data-theme]) .admin-shell {
++    color-scheme: dark;
++    --adm-bg: #0f0f12;
++    --adm-panel: #08080a;
++    --adm-card: #0c0c0f;
++    --adm-muted-surface: #131317;
++    --adm-hover: #17171c;
++    --adm-border: #222228;
++    --adm-border-subtle: #1a1a1f;
++    --adm-text: #f5f5f7;
++    --adm-text-2: #a1a1aa;
++    --adm-text-3: #71717a;
++    --adm-accent-text: #4da3ff;
++    --adm-active-bg: #000;
++    --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
++    --adm-success-text: #3ddc84;
++    --adm-warning-text: #ffc933;
++    --adm-danger-text: #ff5c85;
++    --adm-purple-text: #a78bfa;
++    --adm-cyan-text: #45d0e8;
++    --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
++  }
++}
++
++/* ==========================================================================
++   Typography (§5)
++   ========================================================================== */
++
++.admin-shell {
++  font-family: var(--adm-font);
++  color: var(--adm-text);
++  font-size: 14px;
++  line-height: 22px;
++  -webkit-font-smoothing: antialiased;
++}
++
++.admin-shell h1 {
++  font-size: 24px;
++  line-height: 32px;
++  font-weight: 600;
++  letter-spacing: -.01em;
++  margin: 0;
++}
++
++.admin-shell h2 {
++  font-size: 16px;
++  line-height: 24px;
++  font-weight: 600;
++  margin: 0;
++}
++
++.admin-shell h3 {
++  font-size: 14px;
++  line-height: 20px;
++  font-weight: 600;
++  margin: 0;
++}
++
++.admin-shell p {
++  line-height: 22px;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell small,
++.admin-shell .admin-caption {
++  font-size: 12px;
++  line-height: 16px;
++  color: var(--adm-text-3);
++}
++
++.admin-shell code,
++.admin-shell pre,
++.admin-shell kbd,
++.admin-shell samp {
++  font-family: var(--adm-mono);
++  font-size: 12px;
++  line-height: 18px;
++}
++
++.admin-shell a {
++  color: var(--adm-accent-text);
++  text-decoration: none;
++}
++
++.admin-shell a:hover,
++.admin-shell a:focus-visible {
++  text-decoration: underline;
++}
++
++/* The old eyebrow becomes the breadcrumb: normal case, no tracking, not pink. */
++.admin-shell .admin-eyebrow {
++  font-size: 13px;
++  line-height: 20px;
++  font-weight: 500;
++  letter-spacing: normal;
++  text-transform: none;
++  color: var(--adm-text-2);
++  margin: 0;
++}
++
++.admin-shell .admin-muted {
++  color: var(--adm-text-2);
++}
++
++/* Numbers line up wherever they are compared (§10.7). */
++.admin-shell .admin-stat strong,
++.admin-shell .admin-num {
++  font-variant-numeric: tabular-nums;
++}
++
++@media (max-width: 767px) {
++  .admin-shell h1 {
++    font-size: 22px;
++    line-height: 28px;
++  }
++}
++
++/* ==========================================================================
++   Shared shell affordances (§10, §11)
++   ========================================================================== */
++
++/* §10.9 — selection colour. */
++.admin-shell ::selection {
++  background: rgba(27, 132, 255, .3);
++}
++
++/* §10.11 — custom scrollbars, admin only. */
++.admin-shell *::-webkit-scrollbar {
++  width: 8px;
++  height: 8px;
++}
++
++.admin-shell *::-webkit-scrollbar-track {
++  background: transparent;
++}
++
++.admin-shell *::-webkit-scrollbar-thumb {
++  background: var(--adm-border);
++  border-radius: 4px;
++}
++
++.admin-shell *::-webkit-scrollbar-thumb:hover {
++  background: var(--adm-text-3);
++}
++
++.admin-shell * {
++  scrollbar-width: thin;
++  scrollbar-color: var(--adm-border) transparent;
++}
++
++/* §11 — focus is never removed; :focus-visible only. */
++.admin-shell :focus-visible,
++.admin-confirm-dialog :focus-visible {
++  outline: 2px solid var(--adm-accent);
++  outline-offset: 2px;
++  border-radius: 4px;
++}
++
++/* §11 — the sticky page head must not hide in-page anchor targets. */
++html:has(.admin-shell) {
++  scroll-padding-top: 96px;
++}
++
++/* §10.8 — skip link, hidden until focused, first in the DOM. */
++.admin-skip-link {
++  position: fixed;
++  top: 8px;
++  left: 8px;
++  z-index: 100;
++  display: inline-flex;
++  align-items: center;
++  min-height: 44px;
++  padding: 0 16px;
++  border-radius: var(--adm-r-control);
++  background: var(--adm-accent);
++  color: var(--adm-on-accent);
++  font-size: 14px;
++  font-weight: 500;
++  text-decoration: none;
++  transform: translateY(-200%);
++  transition: transform var(--adm-dur) ease-out;
++}
++
++.admin-skip-link:focus-visible {
++  transform: translateY(0);
++  text-decoration: none;
++}
++
++/* §10.12 — press feedback. */
++.admin-shell button:not(:disabled):active,
++.admin-shell .admin-button:not(:disabled):active {
++  transform: scale(.98);
++}
++
++/* §11 — content fade-in. */
++.admin-shell .admin-main {
++  animation: adm-rise 200ms ease-out both;
++}
++
++@keyframes adm-rise {
++  from {
++    opacity: 0;
++    transform: translateY(4px);
++  }
++
++  to {
++    opacity: 1;
++    transform: none;
++  }
++}
++
++/* §11 — reduced motion turns everything off. */
++@media (prefers-reduced-motion: reduce) {
++
++  .admin-shell,
++  .admin-shell *,
++  .admin-shell *::before,
++  .admin-shell *::after,
++  .admin-confirm-dialog,
++  .admin-confirm-dialog * {
++    animation-duration: .001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: .001ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .admin-shell button:not(:disabled):active,
++  .admin-shell .admin-button:not(:disabled):active {
++    transform: none;
++  }
++}
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index b536042..3d6db41 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -1,17 +1,23 @@
+-.admin-shell{min-height:100vh;background:var(--canvas);color:var(--foreground);padding:24px;--admin-max:1200px}
+-.admin-header,.admin-main{width:min(100%,var(--admin-max));margin:auto}
+-.admin-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;border:1px solid var(--border);background:var(--card);border-radius:26px;padding:16px 24px;box-shadow:var(--shadow-1)}
+-.admin-header .brand{font-size:27px}.admin-header nav{display:flex;gap:8px;flex-wrap:wrap}.admin-header a,.admin-pagination a{display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border-radius:18px;background:var(--secondary)}
+-.admin-main{padding:32px 0}.admin-main h1{font-size:clamp(26px,4vw,36px);letter-spacing:-1px}.admin-main h2{font-size:20px;font-weight:650}.admin-main p{line-height:1.65;overflow-wrap:anywhere}.admin-main h1+p{color:var(--muted-foreground);margin-top:6px}.admin-eyebrow{text-transform:uppercase;letter-spacing:2px;font-size:12px;color:var(--primary);margin-bottom:8px}
++/* ==========================================================================
++   FunctionGram / RSTMC admin — page and control styling.
++
++   Tokens, typography and the application shell now live in admin-tokens.css,
++   admin-shell.css and admin-components.css. What remains below is the older
++   page/control styling that the later redesign phases replace in place.
++   ========================================================================== */
++/* The standalone two-factor screens reuse .admin-shell for tokens only; they
++   keep their own centred, padded single-column presentation. */
++.admin-shell.admin-two-factor-shell{min-height:100dvh;padding:var(--adm-s6);background:var(--adm-bg);color:var(--adm-text)}
++.admin-pagination a{display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border-radius:18px;background:var(--secondary)}
+ .admin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.admin-stat,.admin-card{border:1px solid var(--border);border-radius:20px;background:var(--card);padding:24px;min-width:0}.admin-stat p,.admin-stat small,.admin-muted{color:var(--muted-foreground)}.admin-stat strong{display:block;font-size:32px;margin:8px 0}.admin-stat small{font-size:12px}.admin-card{margin-top:20px}.admin-card h2{margin-bottom:12px}
+ .admin-search{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:24px 0 12px}.admin-search label:first-child{flex:1 1 240px}.admin-search label,.admin-confirm label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;min-width:0}
+ .admin-shell input,.admin-shell select,.admin-confirm input,.admin-confirm textarea{min-height:44px;width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}
+ .admin-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);color:var(--foreground);font-weight:600;cursor:pointer;font-size:14px;line-height:1.4}.admin-primary{background:var(--primary);color:var(--primary-foreground)}.admin-button:disabled{opacity:.5;cursor:wait}
+-.admin-shell :focus-visible,.admin-confirm :focus-visible{outline:2px solid var(--ring);outline-offset:3px}.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
++.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
+ .admin-table-scroll{overflow-x:auto;max-width:100%;border:1px solid var(--border);border-radius:16px;margin:20px 0;background:var(--card)}.admin-table-scroll table{border-collapse:collapse;width:100%;text-align:left;min-width:700px;font-size:14px}.admin-table-scroll caption{text-align:left;padding:16px;color:var(--muted-foreground);font-size:13px}.admin-table-scroll th{color:var(--muted-foreground);font-size:12px;text-transform:uppercase;letter-spacing:.6px}.admin-table-scroll th,.admin-table-scroll td{padding:14px 16px;border-top:1px solid var(--border);max-width:340px;overflow-wrap:anywhere}.admin-table-scroll td a{display:inline-flex;min-height:44px;align-items:center;text-decoration:underline}.admin-table-scroll td small{display:block;color:var(--muted-foreground)}
+ .admin-pagination{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap}.admin-drawer summary{cursor:pointer;min-height:44px;font-weight:650}.admin-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.admin-detail dl{display:grid;gap:10px}.admin-detail dt{color:var(--muted-foreground);font-size:12px}.admin-detail dd{overflow-wrap:anywhere;margin:0 0 8px}.admin-action-grid{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.admin-confirm{display:flex;flex-direction:column;gap:16px}.admin-confirm-dialog{max-height:90dvh;overflow:auto}.admin-confirm-dialog p{overflow-wrap:anywhere}.admin-confirm textarea{min-height:80px}
+-@media(max-width:700px){.admin-shell{padding:12px}.admin-header{padding:12px 16px;border-radius:20px}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-main{padding:24px 0}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
+-.admin-two-factor-page{min-height:calc(100vh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
++@media(max-width:700px){.admin-shell.admin-two-factor-shell{padding:var(--adm-s3)}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
++.admin-two-factor-page{min-height:calc(100dvh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
+ 
+ .admin-confirm-dialog>button{min-width:44px;min-height:44px;top:4px;right:4px;display:grid;place-items:center}
+ .admin-content-editor select{min-height:44px;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}
+diff --git a/app/rstmcadmin/analytics/page.tsx b/app/rstmcadmin/analytics/page.tsx
+index 41977e8..56d8eaa 100644
+--- a/app/rstmcadmin/analytics/page.tsx
++++ b/app/rstmcadmin/analytics/page.tsx
+@@ -2,10 +2,11 @@ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { getPool } from '@/lib/postgres';
+ import { dashboardAnalytics } from '@/lib/admin/analytics';
+ import { AnalyticsDashboard } from '@/components/admin/analytics';
++import { PageHead } from '@/components/admin/page-head';
+ export const dynamic = 'force-dynamic';
+ export default async function AnalyticsPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'analytics.read');
+   const initial = await dashboardAnalytics(await getPool(), 14);
+-  return <><p className="admin-eyebrow">Control room / Analytics</p><h1>Community insights</h1><AnalyticsDashboard initial={initial}/></>;
++  return <><PageHead breadcrumb="Control room / Analytics" title="Community insights" /><AnalyticsDashboard initial={initial}/></>;
+ }
+diff --git a/app/rstmcadmin/appearance/page.tsx b/app/rstmcadmin/appearance/page.tsx
+index 9bc8729..e12fb33 100644
+--- a/app/rstmcadmin/appearance/page.tsx
++++ b/app/rstmcadmin/appearance/page.tsx
+@@ -3,7 +3,8 @@ import {readSettings} from '@/lib/admin/settings';
+ import {appearanceFromSettings} from '@/lib/appearance';
+ import {localDevDatabase} from '@/lib/postgres';
+ import {AppearanceEditor} from '@/components/admin/appearance';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function AppearancePage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');const value=appearanceFromSettings(await readSettings());
+- return <><p className="admin-eyebrow">Control room / Appearance</p><h1>Make this space yours</h1><p>Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default.</p><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
++ return <><PageHead breadcrumb="Control room / Appearance" title="Make this space yours" intro="Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default." /><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
+ }
+diff --git a/app/rstmcadmin/audit/page.tsx b/app/rstmcadmin/audit/page.tsx
+index f66ee41..ac0ed74 100644
+--- a/app/rstmcadmin/audit/page.tsx
++++ b/app/rstmcadmin/audit/page.tsx
+@@ -4,6 +4,7 @@ import {auditFilters,listAudit} from '@/lib/admin/audit';
+ import {AuditTable,AuditTools} from '@/components/admin/audit';
+ import {ADMIN_BASE_PATH} from '@/lib/admin/config';
+ import Link from 'next/link';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AuditPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'audit.read');
+@@ -11,5 +12,5 @@ export default async function AuditPage({searchParams}:{searchParams:Promise<Rec
+  try{filters=auditFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid audit filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/audit'}>Clear filters</Link></section>;}
+  const result=await listAudit(await getPool(),filters),pages=Math.max(1,Math.ceil(result.total/filters.limit));
+  const pageLink=(page:number)=>ADMIN_BASE_PATH+'/audit?'+new URLSearchParams({...Object.fromEntries(Object.entries(filters).map(([key,value])=>[key,String(value)])),page:String(page)});
+- return <><p className="admin-eyebrow">Control room / Security</p><h1>Administrator audit log</h1><p>{result.total.toLocaleString('en-IN')} matching historical events. Older records remain readable. This viewer is read-only; no edit or delete action exists.</p><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}>Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next</Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
++ return <><PageHead breadcrumb="Control room / Security" title="Administrator audit log" intro={<>{result.total.toLocaleString('en-IN')} matching historical events. Older records remain readable. This viewer is read-only; no edit or delete action exists.</>} /><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}>Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next</Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
+ }
+diff --git a/app/rstmcadmin/communications/page.tsx b/app/rstmcadmin/communications/page.tsx
+index 724871f..e25ec8f 100644
+--- a/app/rstmcadmin/communications/page.tsx
++++ b/app/rstmcadmin/communications/page.tsx
+@@ -1,6 +1,7 @@
+ import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
+ import { CommunicationCenter } from '@/components/admin/communications';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function CommunicationsPage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'messages.read');
+- return <><p className="admin-eyebrow">Control room / Communications</p><h1>Messages, notifications &amp; CMS</h1><p>Private message content is access-controlled and audited. Campaign sends are paused by default, capped, and require an explicit dry-run confirmation.</p><CommunicationCenter/></>;
++ return <><PageHead breadcrumb="Control room / Communications" title={<>Messages, notifications &amp; CMS</>} intro="Private message content is access-controlled and audited. Campaign sends are paused by default, capped, and require an explicit dry-run confirmation." /><CommunicationCenter/></>;
+ }
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+index c8828d4..bbf73d9 100644
+--- a/app/rstmcadmin/content/[id]/page.tsx
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -8,6 +8,7 @@ import { AdminError } from '@/lib/admin/validation';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentActions, ContentEditor } from '@/components/admin/content';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function ContentItem({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{resource?:string}>}) {
+   const actor=await requireAdminPage();const {id}=await params;const query=await searchParams;
+@@ -15,7 +16,7 @@ export default async function ContentItem({params,searchParams}:{params:Promise<
+   const item=await contentDetail(await getPool(),resource,id).catch(error=>{if(error instanceof AdminError&&error.status===404)notFound();throw error;});
+   const operations=actor.role==='moderator'?(item.deleted_at?[]:['hide','unhide']):item.deleted_at?['restore',...actor.role==='owner'?['purge']:[]]:['hide','unhide','delete',...resource==='posts'?['pin','unpin',...item.kind==='story'?['expire','highlight']:[]]:[]];
+   const counts=item.counts as Record<string,unknown>|undefined;
+-  return <><p className="admin-eyebrow">Control room / {resource}</p><h1>{resource==='posts'?String(item.kind)+' detail':'Comment detail'}</h1><p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
++  return <><PageHead breadcrumb={<>Control room / {resource}</>} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'} intro={<>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</>} />
+     <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
+     {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
+     {resource==='posts'&&actor.role!=='moderator'&&<section className="admin-card"><h2>Counter baselines</h2><CounterEditor key={String(item.base_likes)+':'+String(item.base_comments)+':'+String(item.base_views)} id={id} likes={Number(item.base_likes)} comments={Number(item.base_comments)} views={Number(item.base_views)} disabled={!!item.deleted_at}/></section>}
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index aae4519..0f9750d 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -6,13 +6,14 @@ import { readSettings } from '@/lib/admin/settings';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentSettings, ContentTable } from '@/components/admin/content';
+ import { hasPermission } from '@/lib/admin/permissions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
+   const actor=await requireAdminPage();let filter;
+   try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
+   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
+   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
+-  return <><p className="admin-eyebrow">Control room / Content</p><h1>Content & moderation</h1><p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
++  return <><PageHead breadcrumb="Control room / Content" title="Content & moderation" intro={<>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</>} />
+     {settings&&hasPermission(actor.role,'settings.manage')&&<ContentSettings settings={settings}/>}<form className="admin-search" action={base}>
+       <label>Search text<input name="q" maxLength={100} defaultValue={filter.q}/></label><label>Resource<select name="resource" defaultValue={filter.resource}><option value="posts">Posts, reels, stories</option><option value="comments">Comments</option></select></label>
+       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
+diff --git a/app/rstmcadmin/exports/page.tsx b/app/rstmcadmin/exports/page.tsx
+index 892c35a..d835aae 100644
+--- a/app/rstmcadmin/exports/page.tsx
++++ b/app/rstmcadmin/exports/page.tsx
+@@ -1,7 +1,8 @@
+ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { ExportManager } from '@/components/admin/exports';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function ExportsPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'exports.read');
+-  return <><p className="admin-eyebrow">Control room / Exports</p><h1>Bounded data exports</h1><ExportManager/></>;
++  return <><PageHead breadcrumb="Control room / Exports" title="Bounded data exports" /><ExportManager/></>;
+ }
+diff --git a/app/rstmcadmin/features/page.tsx b/app/rstmcadmin/features/page.tsx
+index 53cc452..9083b3c 100644
+--- a/app/rstmcadmin/features/page.tsx
++++ b/app/rstmcadmin/features/page.tsx
+@@ -3,4 +3,5 @@ import {loadSettings} from '@/lib/admin/core';
+ import {getPool} from '@/lib/postgres';
+ import {featureConfig} from '@/lib/features';
+ import {FeatureEditor} from '@/components/admin/features';
+-export default async function FeaturePage(){const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');return <><p className="admin-eyebrow">Control room / Features</p><h1>Features & availability</h1><FeatureEditor initial={featureConfig(await loadSettings(await getPool()))}/></>;}
++import { PageHead } from '@/components/admin/page-head';
++export default async function FeaturePage(){const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');return <><PageHead breadcrumb="Control room / Features" title="Features & availability" /><FeatureEditor initial={featureConfig(await loadSettings(await getPool()))}/></>;}
+diff --git a/app/rstmcadmin/guide/page.tsx b/app/rstmcadmin/guide/page.tsx
+index 9282d1b..e65c465 100644
+--- a/app/rstmcadmin/guide/page.tsx
++++ b/app/rstmcadmin/guide/page.tsx
+@@ -1,12 +1,13 @@
+ import Link from 'next/link';
+ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AdminGuidePage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'system.read');
+   return <>
+-    <p className="admin-eyebrow">Control room / Operator guide</p><h1>Operations guide</h1>
++    <PageHead breadcrumb="Control room / Operator guide" title="Operations guide" />
+     <section className="admin-card admin-guide"><h2>Analytics and exports</h2><p>Analytics uses UTC day buckets. “Active sign-in proxy” counts distinct accounts whose Better Auth session was refreshed that day; it is not a per-request DAU event. Uploaded storage is the sum of asset bytes added during the chosen window, not a historical snapshot of retained storage. The signup funnel counts non-demo member accounts with at least one non-deleted post; stories and reels are not counted as first posts.</p><p>Exports are streamed and capped at 1,000 records. User exports contain email addresses, report exports can include moderation details, and audit exports include recorded network/client metadata. Save and share these files only with a justified operational need.</p>
+       <p><Link href={ADMIN_BASE_PATH+'/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH+'/exports'}>Open exports</Link></p></section>
+     <section className="admin-card admin-guide"><h2>Migration status and cache</h2><p>The system page compares applied migration versions with the application registry; it does not apply migrations. Run migrations through the normal deployment process. Cache invalidation clears the tagged settings cache and revalidates the public root layout; it cannot clear a browser cache or a third-party CDN.</p><p>Environment inspection reports booleans only. Keep credentials in deployment environment settings, never in the database-backed site settings.</p></section>
+diff --git a/app/rstmcadmin/labels/page.tsx b/app/rstmcadmin/labels/page.tsx
+index f1a793a..3ab4545 100644
+--- a/app/rstmcadmin/labels/page.tsx
++++ b/app/rstmcadmin/labels/page.tsx
+@@ -3,8 +3,9 @@ import {loadSettings} from '@/lib/admin/core';
+ import {getPool} from '@/lib/postgres';
+ import {labelsFromSettings} from '@/lib/admin/labels';
+ import {LabelsEditor} from '@/components/admin/labels';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function LabelsPage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');
+  const initial=labelsFromSettings(await loadSettings(await getPool()));
+- return <><p className="admin-eyebrow">Control room / Copy</p><h1>Labels &amp; copy</h1><p>English-first plain-text labels. Changes are audited and appear on the next public page load, with server-rendered first paint. Existing open tabs must reload.</p><LabelsEditor initial={initial}/></>;
++ return <><PageHead breadcrumb="Control room / Copy" title={<>Labels &amp; copy</>} intro="English-first plain-text labels. Changes are audited and appear on the next public page load, with server-rendered first paint. Existing open tabs must reload." /><LabelsEditor initial={initial}/></>;
+ }
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index c66872f..7067e14 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -1,31 +1,55 @@
+ import type { Metadata } from 'next';
+-import Link from 'next/link';
+ import { requireAdminPage } from '@/lib/admin/guard';
+ import { hasPermission } from '@/lib/admin/permissions';
+ import type { AdminPermission } from '@/lib/admin/permissions';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { AdminNav, type AdminNavGroup, type AdminNavIcon } from '@/components/admin/admin-nav';
++import './admin-tokens.css';
++import './admin-shell.css';
++import './admin-components.css';
+ import './admin.css';
+ 
+ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: { index: false, follow: false } };
+ export const dynamic = 'force-dynamic';
+-const navigation: {label:string;path:string;permission:AdminPermission}[] = [
+-  {label:'Overview',path:'',permission:'dashboard.read'},
+-  {label:'Users',path:'/users',permission:'users.read'},
+-  {label:'Content',path:'/content',permission:'content.read'},
+-  {label:'Appearance',path:'/appearance',permission:'settings.manage'},
+-  {label:'Features',path:'/features',permission:'settings.manage'},
+-  {label:'Labels',path:'/labels',permission:'settings.manage'},
+-  {label:'Media',path:'/media',permission:'media.manage'},
+-  {label:'Safety',path:'/moderation',permission:'moderation.read'},
+-  {label:'Audit',path:'/audit',permission:'audit.read'},
+-  {label:'Security & roles',path:'/security',permission:'security.read'},
+-  {label:'Communications',path:'/communications',permission:'messages.read'},
+-  {label:'Analytics',path:'/analytics',permission:'analytics.read'},
+-  {label:'Exports',path:'/exports',permission:'exports.read'},
+-  {label:'System tools',path:'/system',permission:'system.read'},
+-  {label:'Operator guide',path:'/guide',permission:'system.read'},
++
++// Same 16 destinations, same order, same labels, same permissions as before.
++// `group` and `icon` are presentation only and add no route or capability.
++const navigation: { label: string; path: string; permission: AdminPermission; group: string; icon: AdminNavIcon }[] = [
++  {label:'Overview',path:'',permission:'dashboard.read',group:'MANAGE',icon:'LayoutDashboard'},
++  {label:'Users',path:'/users',permission:'users.read',group:'MANAGE',icon:'Users'},
++  {label:'Content',path:'/content',permission:'content.read',group:'MANAGE',icon:'FileText'},
++  {label:'Appearance',path:'/appearance',permission:'settings.manage',group:'CUSTOMIZE',icon:'Palette'},
++  {label:'Features',path:'/features',permission:'settings.manage',group:'CUSTOMIZE',icon:'ToggleRight'},
++  {label:'Labels',path:'/labels',permission:'settings.manage',group:'CUSTOMIZE',icon:'Tags'},
++  {label:'Media',path:'/media',permission:'media.manage',group:'CUSTOMIZE',icon:'Images'},
++  {label:'Safety',path:'/moderation',permission:'moderation.read',group:'PROTECT',icon:'ShieldAlert'},
++  {label:'Audit',path:'/audit',permission:'audit.read',group:'PROTECT',icon:'ScrollText'},
++  {label:'Security & roles',path:'/security',permission:'security.read',group:'PROTECT',icon:'ShieldCheck'},
++  {label:'Communications',path:'/communications',permission:'messages.read',group:'REACH & INSIGHT',icon:'Megaphone'},
++  {label:'Analytics',path:'/analytics',permission:'analytics.read',group:'REACH & INSIGHT',icon:'BarChart3'},
++  {label:'Exports',path:'/exports',permission:'exports.read',group:'REACH & INSIGHT',icon:'Download'},
++  {label:'System tools',path:'/system',permission:'system.read',group:'SYSTEM',icon:'Wrench'},
++  {label:'Operator guide',path:'/guide',permission:'system.read',group:'SYSTEM',icon:'BookOpen'},
+ ];
++
+ export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+-  const actor=await requireAdminPage();
+-  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation">{navigation.filter(item=>hasPermission(actor.role,item.permission)).map(item=><Link key={item.path} href={ADMIN_BASE_PATH+item.path}>{item.label}</Link>)}<Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
++  const actor = await requireAdminPage();
++  const groups: AdminNavGroup[] = [];
++  for (const item of navigation) {
++    if (!hasPermission(actor.role, item.permission)) continue;
++    const group = groups.find(entry => entry.label === item.group) ?? (groups.push({ label: item.group, items: [] }), groups[groups.length - 1]);
++    group.items.push({ label: item.label, href: ADMIN_BASE_PATH + item.path, icon: item.icon, match: item.path ? 'prefix' : 'exact' });
++  }
++  // `View site` stays the last link and still opens the public site as before.
++  const system = groups.find(entry => entry.label === 'SYSTEM') ?? (groups.push({ label: 'SYSTEM', items: [] }), groups[groups.length - 1]);
++  system.items.push({ label: 'View site', href: '/', icon: 'ExternalLink', match: 'none', external: true });
++
++  return <div className="admin-shell admin-layout">
++    <a className="admin-skip-link" href="#admin-main">Skip to main content</a>
++    <AdminNav groups={groups} wordmark="RSTMC" account={{ email: actor.email, role: actor.role, userId: actor.userId }} />
++    <div className="admin-panel">
++      <main id="admin-main" className="admin-main">{children}</main>
++      <footer className="admin-footer"><p>© {new Date().getFullYear()} RSTMC.</p></footer>
++    </div>
++  </div>;
+ }
+diff --git a/app/rstmcadmin/media/page.tsx b/app/rstmcadmin/media/page.tsx
+index a51d81d..3c64633 100644
+--- a/app/rstmcadmin/media/page.tsx
++++ b/app/rstmcadmin/media/page.tsx
+@@ -3,7 +3,8 @@ import {getPool} from '@/lib/postgres';
+ import {readMediaConfig} from '@/lib/media-policy';
+ import {MediaEditor,StorageInventory} from '@/components/admin/media';
+ import {mediaReport} from '@/lib/admin/media';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function MediaPage({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'media.manage');const pool=await getPool();const report=await mediaReport(pool,await searchParams);
+- return <><p className="admin-eyebrow">Control room / Media</p><h1>Media &amp; storage</h1><p>Verified uploads, current limits and safe storage cleanup. Existing posts stay intact when limits change; new attachment requests are revalidated.</p><MediaEditor initial={await readMediaConfig(pool)}/><StorageInventory report={report} owner={actor.role==='owner'}/></>;
++ return <><PageHead breadcrumb="Control room / Media" title={<>Media &amp; storage</>} intro="Verified uploads, current limits and safe storage cleanup. Existing posts stay intact when limits change; new attachment requests are revalidated." /><MediaEditor initial={await readMediaConfig(pool)}/><StorageInventory report={report} owner={actor.role==='owner'}/></>;
+ }
+diff --git a/app/rstmcadmin/moderation/page.tsx b/app/rstmcadmin/moderation/page.tsx
+index 15de2d2..1890116 100644
+--- a/app/rstmcadmin/moderation/page.tsx
++++ b/app/rstmcadmin/moderation/page.tsx
+@@ -4,8 +4,9 @@ import {moderationConfig,DEFAULT_MODERATION} from '@/lib/moderation-policy';
+ import {readSettings} from '@/lib/admin/settings';
+ import {reportQueue,rateLimitQueue} from '@/lib/admin/moderation';
+ import {ModerationConsole} from '@/components/admin/moderation';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function ModerationPage({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
+  const actor=await requireAdminPage(),pool=await getPool(),filters=await searchParams;
+  const [reports,config,rates]=await Promise.all([reportQueue(pool,filters),actor.role==='moderator'?Promise.resolve(DEFAULT_MODERATION):readSettings().then(moderationConfig),actor.role==='moderator'?Promise.resolve({page:1,total:0,hits:0,items:[]}):rateLimitQueue(pool,1)]);
+- return <><p className="admin-eyebrow">Control room / Safety</p><h1>Reports &amp; moderation</h1><p>Review user reports, apply policy filters, manage account-specific restrictions, and clear rate-limit buckets. Sensitive IP addresses are never shown.</p><ModerationConsole actorId={actor.userId} role={actor.role} initialReports={reports} initialConfig={config} initialRates={rates}/></>;
++ return <><PageHead breadcrumb="Control room / Safety" title={<>Reports &amp; moderation</>} intro="Review user reports, apply policy filters, manage account-specific restrictions, and clear rate-limit buckets. Sensitive IP addresses are never shown." /><ModerationConsole actorId={actor.userId} role={actor.role} initialReports={reports} initialConfig={config} initialRates={rates}/></>;
+ }
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+index e68b1ee..7b3076a 100644
+--- a/app/rstmcadmin/page.tsx
++++ b/app/rstmcadmin/page.tsx
+@@ -4,6 +4,7 @@ import { getPool } from '@/lib/postgres';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { dashboard } from '@/lib/admin/queries';
+ import { StatCard, bytes } from '@/components/admin/ui';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AdminHome() {
+   const actor = await requireAdminPage();
+@@ -12,8 +13,7 @@ export default async function AdminHome() {
+   const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
+   const number = (key: string) => Number(stats[key]).toLocaleString('en-IN');
+   return <>
+-    <p className="admin-eyebrow">Control room / Overview</p><h1>A pulse on your community.</h1>
+-    <p>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</p>
++    <PageHead breadcrumb="Control room / Overview" title="A pulse on your community." intro={<>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</>} />
+     <section className="admin-stats" aria-label="Community statistics">
+       <StatCard label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
+       <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
+diff --git a/app/rstmcadmin/security/page.tsx b/app/rstmcadmin/security/page.tsx
+index c6ac36b..37dc242 100644
+--- a/app/rstmcadmin/security/page.tsx
++++ b/app/rstmcadmin/security/page.tsx
+@@ -3,6 +3,7 @@ import {getPool} from '@/lib/postgres';
+ import {ADMIN_ROLES} from '@/lib/admin/config';
+ import {ROLE_PERMISSIONS,ADMIN_PERMISSIONS} from '@/lib/admin/permissions';
+ import {parseAdminIpAllowlist} from '@/lib/admin/network';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ const labels:Record<string,string>={
+  'admin.access':'Open admin panel','dashboard.read':'View dashboard','content.read':'Read content','content.moderate':'Hide or unhide content','users.read':'Read accounts','users.manage':'Manage non-role account actions','roles.manage':'Grant or revoke roles','settings.manage':'Manage site settings and moderation policy','media.manage':'Manage media','moderation.read':'Read reports','moderation.triage':'Assign, note, dismiss or hide reports','moderation.accounts':'Apply account safety restrictions','moderation.rates':'Inspect and clear rate limits','audit.read':'Read and export audit history','security.read':'Read security policy',
+@@ -15,7 +16,7 @@ export default async function SecurityPage(){
+   pool.query('SELECT COUNT(*) total,COUNT(*) FILTER(WHERE "twoFactorEnabled"=true) secured FROM "user" WHERE role=\'owner\' AND "emailVerified"=true AND (banned=false OR "banExpires"<=now()) AND deleted_at IS NULL'),
+  ]);
+  const allowlist=parseAdminIpAllowlist(process.env.ADMIN_IP_ALLOWLIST);
+- return <><p className="admin-eyebrow">Control room / Security</p><h1>Security &amp; administrator roles</h1>
++ return <><PageHead breadcrumb="Control room / Security" title={<>Security &amp; administrator roles</>} />
+   <section className="admin-card"><h2>Enforced account policy</h2><dl className="admin-definition-list"><dt>Your role</dt><dd>{actor.role}</dd><dt>Two-factor authentication</dt><dd>{user?.twoFactorEnabled?'Enabled — required on every admin request':'Setup required'}</dd><dt>Admin session lifetime</dt><dd>12 hours absolute; public account session settings are unchanged.</dd><dt>Optional IP allowlist</dt><dd>{allowlist.length?`Enabled (${allowlist.length} configured network${allowlist.length===1?'':'s'})`:'Disabled — ADMIN_IP_ALLOWLIST is unset.'}</dd><dt>Verified owners with 2FA</dt><dd>{Number(owners.secured)} of {Number(owners.total)}</dd></dl><p>Administrator accounts cannot disable 2FA through the account endpoint. An owner account must never be left with password-only panel access. Configure optional networks as comma-separated IPv4/IPv6 addresses or CIDRs in the deployment environment; this page deliberately does not reveal the configured addresses.</p></section>
+   <section className="admin-card"><h2>Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}>{role}</th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role}>{ROLE_PERMISSIONS[role].includes(permission)?'Allowed':'—'}</td>)}</tr>)}</tbody></table></div></section>
+   <section className="admin-card"><h2>Known sign-in devices for your account</h2><p>Only an HMAC fingerprint is stored. A new IP/browser tuple generates a security email and an audit event; raw device details are not persisted in the device registry.</p><div className="admin-table-scroll"><table><thead><tr><th>Fingerprint (partial)</th><th>First seen (UTC)</th><th>Last seen (UTC)</th></tr></thead><tbody>{devices.map(device=><tr key={device.fingerprint_hash}><td><code>{String(device.fingerprint_hash).slice(0,16)}…</code></td><td>{new Date(Number(device.first_seen)).toISOString()}</td><td>{new Date(Number(device.last_seen)).toISOString()}</td></tr>)}{!devices.length&&<tr><td colSpan={3}>No device fingerprints recorded. The current network may not provide an IP or browser identifier.</td></tr>}</tbody></table></div></section>
+diff --git a/app/rstmcadmin/system/page.tsx b/app/rstmcadmin/system/page.tsx
+index 071b73d..b6c82d5 100644
+--- a/app/rstmcadmin/system/page.tsx
++++ b/app/rstmcadmin/system/page.tsx
+@@ -3,10 +3,11 @@ import { hasPermission } from '@/lib/admin/permissions';
+ import { getPool } from '@/lib/postgres';
+ import { systemOverview } from '@/lib/admin/system';
+ import { SystemTools } from '@/components/admin/system';
++import { PageHead } from '@/components/admin/page-head';
+ export const dynamic = 'force-dynamic';
+ export default async function SystemPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'system.read');
+   const initial = await systemOverview(await getPool());
+-  return <><p className="admin-eyebrow">Control room / System tools</p><h1>Health and safe power tools</h1><SystemTools initial={initial} canOwnerTools={hasPermission(actor.role,'system.sql')&&hasPermission(actor.role,'system.demo')} canPrune={hasPermission(actor.role,'system.prune')}/></>;
++  return <><PageHead breadcrumb="Control room / System tools" title="Health and safe power tools" /><SystemTools initial={initial} canOwnerTools={hasPermission(actor.role,'system.sql')&&hasPermission(actor.role,'system.demo')} canPrune={hasPermission(actor.role,'system.prune')}/></>;
+ }
+diff --git a/app/rstmcadmin/users/[id]/page.tsx b/app/rstmcadmin/users/[id]/page.tsx
+index 62ff14d..af12d20 100644
+--- a/app/rstmcadmin/users/[id]/page.tsx
++++ b/app/rstmcadmin/users/[id]/page.tsx
+@@ -6,6 +6,7 @@ import { AdminError } from '@/lib/admin/validation';
+ import { USER_ACTIONS, type UserAction } from '@/lib/admin/users';
+ import { Drawer, DataTable, bytes } from '@/components/admin/ui';
+ import { UserActions } from '@/components/admin/actions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
+   const actor = await requireAdminPage(); assertAdminPagePermission(actor,'users.read'); const { id } = await params;
+@@ -17,7 +18,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
+   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
+   else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
+   const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
+-  return <><p className="admin-eyebrow">Control room / Account detail</p><h1>{user.name}</h1><p>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</p>
++  return <><PageHead breadcrumb="Control room / Account detail" title={user.name} intro={<>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</>} />
+     <div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
+     <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
+     <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+diff --git a/app/rstmcadmin/users/page.tsx b/app/rstmcadmin/users/page.tsx
+index 8da4832..3a77cf1 100644
+--- a/app/rstmcadmin/users/page.tsx
++++ b/app/rstmcadmin/users/page.tsx
+@@ -5,6 +5,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { listUsers, userFilters } from '@/lib/admin/queries';
+ import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui';
+ import { ExportUsers } from '@/components/admin/actions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+   const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
+@@ -14,7 +15,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<Re
+   const result = await listUsers(await getPool(), filters);
+   const pages = Math.max(1, Math.ceil(result.total / filters.limit));
+   const pageLink = (page: number) => ADMIN_BASE_PATH + '/users?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([k,v]) => [k,String(v)])), page: String(page) });
+-  return <><p className="admin-eyebrow">Control room / People</p><h1>Users & accounts</h1><p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
++  return <><PageHead breadcrumb="Control room / People" title="Users & accounts" intro={<>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</>} />
+     <SearchBar filters={filters} /><FilterChips filters={filters} /><ExportUsers filters={filters} />
+     <DataTable caption={`Accounts · page ${filters.page} of ${pages}. CSV exports only this page (maximum 200).`} headings={['Account','Role','Email','Access','Storage']}>
+       {result.users.map(user => <tr key={user.id}><td><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></td><td>{user.role}</td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</td><td>{bytes(user.storage_bytes)}</td></tr>)}
+diff --git a/components/admin/admin-nav.tsx b/components/admin/admin-nav.tsx
+new file mode 100644
+index 0000000..25d9a3c
+--- /dev/null
++++ b/components/admin/admin-nav.tsx
+@@ -0,0 +1,146 @@
++'use client';
++
++/** Admin shell navigation (redesign guide §6.2, §7, §10.3).
++ *
++ * VISUAL ONLY. The link set, order, labels, hrefs and permission filtering are
++ * decided on the server and passed in unchanged; this component adds the
++ * active state, the grouped presentation, the icon rail and the mobile drawer.
++ * The same <nav> serves desktop and mobile, so links are never duplicated in
++ * the DOM.
++ */
++
++import { useCallback, useEffect, useRef, useState } from 'react';
++import Link from 'next/link';
++import { usePathname } from 'next/navigation';
++import {
++  BarChart3, BookOpen, Download, ExternalLink, FileText, Images, LayoutDashboard,
++  Megaphone, Menu, Palette, ScrollText, ShieldAlert, ShieldCheck, Tags, ToggleRight,
++  Users, Wrench,
++} from 'lucide-react';
++import { Avatar } from './avatar';
++import { Badge, toneFor } from './badge';
++
++/** Decorative icons only; every one is aria-hidden (§11). */
++const ICONS = {
++  LayoutDashboard, Users, FileText, Palette, ToggleRight, Tags, Images, ShieldAlert,
++  ScrollText, ShieldCheck, Megaphone, BarChart3, Download, Wrench, BookOpen, ExternalLink,
++} as const;
++
++export type AdminNavIcon = keyof typeof ICONS;
++export type AdminNavItem = { label: string; href: string; icon: AdminNavIcon; match: 'exact' | 'prefix' | 'none'; external?: boolean };
++export type AdminNavGroup = { label: string; items: AdminNavItem[] };
++
++const FOCUSABLE = 'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])';
++
++export function AdminNav({ groups, wordmark, account }: {
++  groups: AdminNavGroup[];
++  wordmark: string;
++  account: { email: string; role: string; userId: string };
++}) {
++  const pathname = usePathname() || '';
++  const [open, setOpen] = useState(false);
++  const sidebar = useRef<HTMLElement | null>(null);
++  const trigger = useRef<HTMLButtonElement | null>(null);
++
++  /** Escape, backdrop and link taps all return focus to the menu button. */
++  const close = useCallback(() => {
++    setOpen(false);
++    trigger.current?.focus();
++  }, []);
++
++  // Leaving the mobile breakpoint must not strand a locked page behind an
++  // invisible drawer.
++  useEffect(() => {
++    const query = window.matchMedia('(min-width: 768px)');
++    const sync = () => { if (query.matches) setOpen(false); };
++    query.addEventListener('change', sync);
++    return () => query.removeEventListener('change', sync);
++  }, []);
++
++  useEffect(() => {
++    if (!open) return;
++    const node = sidebar.current;
++    if (!node) return;
++    const previousOverflow = document.body.style.overflow;
++    document.body.style.overflow = 'hidden';
++    const focusable = () => Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE));
++    focusable()[0]?.focus();
++    const onKeyDown = (event: KeyboardEvent) => {
++      if (event.key === 'Escape') { event.preventDefault(); close(); return; }
++      if (event.key !== 'Tab') return;
++      const items = focusable();
++      if (!items.length) return;
++      const first = items[0], last = items[items.length - 1];
++      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
++      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
++    };
++    document.addEventListener('keydown', onKeyDown);
++    return () => {
++      document.removeEventListener('keydown', onKeyDown);
++      document.body.style.overflow = previousOverflow;
++    };
++  }, [open, close]);
++
++  // Exact for Overview, prefix for every other panel route (§6.2).
++  const isActive = (item: AdminNavItem) => item.match === 'exact'
++    ? pathname === item.href
++    : item.match === 'prefix' && (pathname === item.href || pathname.startsWith(item.href + '/'));
++
++  const brand = <span className="admin-brand">{wordmark}<span>.</span></span>;
++
++  return <>
++    <div className="admin-topbar">
++      <button
++        ref={trigger}
++        type="button"
++        className="admin-topbar-button"
++        aria-label="Open navigation"
++        aria-expanded={open}
++        aria-controls="admin-sidebar"
++        onClick={() => setOpen(value => !value)}
++      ><Menu aria-hidden="true" size={22} strokeWidth={1.75} /></button>
++      {brand}
++    </div>
++
++    <button
++      type="button"
++      className="admin-backdrop"
++      data-open={open}
++      tabIndex={-1}
++      aria-hidden="true"
++      onClick={close}
++    />
++
++    <aside ref={sidebar} id="admin-sidebar" className="admin-sidebar" data-open={open}>
++      {brand}
++      <nav className="admin-nav" aria-label="Admin navigation">
++        {groups.map(group => <div key={group.label} className="admin-nav-group" role="group" aria-label={group.label}>
++          <p className="admin-nav-group-label">{group.label}</p>
++          {group.items.map(item => {
++            const Icon = ICONS[item.icon];
++            return <Link
++              key={item.href + item.label}
++              href={item.href}
++              className="admin-nav-link"
++              title={item.label}
++              aria-label={item.label}
++              aria-current={isActive(item) ? 'page' : undefined}
++              onClick={() => setOpen(false)}
++            >
++              <Icon aria-hidden="true" size={18} strokeWidth={1.75} />
++              <span className="admin-nav-label">{item.label}</span>
++              {item.external && <ExternalLink className="admin-nav-external" aria-hidden="true" size={14} strokeWidth={1.75} />}
++            </Link>;
++          })}
++        </div>)}
++      </nav>
++      <div className="admin-account">
++        <Avatar seed={account.userId || account.email} email={account.email} size={40} />
++        <span className="admin-account-body">
++          <span className="admin-account-email" title={account.email}>{account.email}</span>
++          <Badge tone={toneFor(account.role)}>{account.role}</Badge>
++        </span>
++      </div>
++    </aside>
++  </>;
++}
+diff --git a/components/admin/avatar.tsx b/components/admin/avatar.tsx
+new file mode 100644
+index 0000000..7041204
+--- /dev/null
++++ b/components/admin/avatar.tsx
+@@ -0,0 +1,44 @@
++/** Admin avatar (redesign guide §8.10).
++ *
++ * Visual only. No image is ever fetched: the panel has no avatar data, so the
++ * tile shows initials over a deterministic tint derived from an id/email that
++ * the page already renders. Nothing here reads or changes application state.
++ */
++
++const TINTS = ['blue', 'green', 'purple', 'amber', 'red', 'cyan'] as const;
++export type AvatarTint = typeof TINTS[number];
++
++/** Stable, non-cryptographic hash so one account always keeps one colour. */
++function hash(seed: string) {
++  let value = 0;
++  for (let index = 0; index < seed.length; index += 1) value = (value * 31 + seed.charCodeAt(index)) >>> 0;
++  return value;
++}
++
++export function tintFor(seed: string): AvatarTint {
++  return TINTS[hash(seed || '') % TINTS.length];
++}
++
++/** First letters of the first two words of the name; falls back to the handle
++ *  or email local part, exactly as the guide specifies. */
++export function initialsFor(...candidates: (string | null | undefined)[]) {
++  for (const candidate of candidates) {
++    const value = (candidate || '').trim();
++    if (!value) continue;
++    const words = value.replace(/^@/, '').split(/[\s._-]+/).filter(Boolean);
++    const letters = words.slice(0, 2).map(word => word[0]).join('');
++    const initials = letters.replace(/[^\p{L}\p{N}]/gu, '');
++    if (initials) return initials.toUpperCase();
++  }
++  return '—';
++}
++
++export function Avatar({ seed, name, handle, email, size = 36 }: {
++  seed: string;
++  name?: string | null;
++  handle?: string | null;
++  email?: string | null;
++  size?: 28 | 36 | 40 | 64;
++}) {
++  return <span className="admin-avatar" data-size={size} data-tint={tintFor(seed || email || handle || name || '')} aria-hidden="true">{initialsFor(name, handle, email, seed)}</span>;
++}
+diff --git a/components/admin/badge.tsx b/components/admin/badge.tsx
+new file mode 100644
+index 0000000..22f73ef
+--- /dev/null
++++ b/components/admin/badge.tsx
+@@ -0,0 +1,61 @@
++/** Admin badges and chips (redesign guide §8.5).
++ *
++ * Visual only. `toneFor` maps an ALREADY RENDERED string to a colour tone; it
++ * never rewrites, translates or shortens the text it is given, and an unknown
++ * value falls back to the neutral tone.
++ */
++
++import type { ReactNode } from 'react';
++
++export const TONES = ['neutral', 'primary', 'purple', 'warning', 'success', 'danger'] as const;
++export type Tone = typeof TONES[number];
++
++/** Tones that read as a live state carry a dot in front of the text (§8.5). */
++const DOTTED: Tone[] = ['success', 'danger'];
++
++const EXACT: Record<string, Tone> = {
++  // Roles
++  user: 'neutral', admin: 'primary', owner: 'purple', moderator: 'warning',
++  // Content kinds
++  post: 'neutral', comment: 'neutral', reel: 'purple', story: 'warning',
++  // Content and account state
++  'in trash': 'neutral', trash: 'danger', pinned: 'primary', hidden: 'warning',
++  unhidden: 'success', active: 'success', banned: 'danger',
++  verified: 'success', unverified: 'warning',
++  // Report queue state
++  new: 'danger', 'in triage': 'warning', triage: 'warning',
++  resolved: 'success', actioned: 'success', dismissed: 'neutral',
++  // Generic outcomes
++  failed: 'danger', error: 'danger', pending: 'warning', applied: 'success',
++  ready: 'success', quarantined: 'warning', purging: 'danger',
++};
++
++/** Returns a tone name for a visible label. Text is never modified. */
++export function toneFor(text: unknown): Tone {
++  const value = String(text ?? '').trim().toLowerCase();
++  if (!value) return 'neutral';
++  if (EXACT[value]) return EXACT[value];
++  if (value.includes('trash')) return value.includes('in trash') ? 'neutral' : 'danger';
++  if (value.startsWith('unverified') || value.includes('triage')) return 'warning';
++  if (value.startsWith('unhidden')) return 'success';
++  if (value.startsWith('hidden')) return 'warning';
++  if (value.startsWith('verified')) return 'success';
++  if (value.includes('fail') || value.includes('denied') || value.includes('ban')) return 'danger';
++  return 'neutral';
++}
++
++export function Badge({ tone, dot, children, className }: {
++  tone?: Tone;
++  dot?: boolean;
++  children: ReactNode;
++  className?: string;
++}) {
++  const resolved: Tone = tone ?? 'neutral';
++  const showDot = dot ?? DOTTED.includes(resolved);
++  return <span className={'admin-badge' + (className ? ' ' + className : '')} data-tone={resolved}>{showDot && <i className="admin-badge-dot" aria-hidden="true" />}{children}</span>;
++}
++
++/** Badge whose tone is derived from the text it already shows. */
++export function AutoBadge({ children, dot, className }: { children: string; dot?: boolean; className?: string }) {
++  return <Badge tone={toneFor(children)} dot={dot} className={className}>{children}</Badge>;
++}
+diff --git a/components/admin/page-head.tsx b/components/admin/page-head.tsx
+new file mode 100644
+index 0000000..c449d13
+--- /dev/null
++++ b/components/admin/page-head.tsx
+@@ -0,0 +1,26 @@
++/** Admin page header (redesign guide §6.3).
++ *
++ * VISUAL ONLY. This is a wrapper: the breadcrumb, title and intro strings are
++ * whatever the page already rendered, passed through unchanged. `actions` only
++ * ever receives controls that already exist on that page.
++ */
++
++import type { ReactNode } from 'react';
++
++export function PageHead({ breadcrumb, title, intro, actions }: {
++  breadcrumb: ReactNode;
++  title: ReactNode;
++  intro?: ReactNode;
++  actions?: ReactNode;
++}) {
++  return <header className="admin-page-head">
++    <div className="admin-page-head-row">
++      <div className="admin-page-head-title">
++        <h1>{title}</h1>
++        <p className="admin-eyebrow">{breadcrumb}</p>
++      </div>
++      {actions && <div className="admin-page-head-actions">{actions}</div>}
++    </div>
++    {intro && <p className="admin-page-intro">{intro}</p>}
++  </header>;
++}
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 09f1fb7..ebd39a3 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -632,3 +632,131 @@ Completed the local documentation, recovery, HTTP, migration-fixture, and synthe
+ - `node --import tsx scripts/phase12-perf.mts` passed on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets): median **124 ms**, max **150 ms** over 7 warmed 14-day dashboard runs on this host (author reported 65/76 ms; local benchmark only, not a production SLA).
+ - The `docs/ADMIN_PANEL.md` recovery transaction was executed against migrated PGlite with substituted placeholders: it promoted the exact eligible account to owner, revoked its sessions, wrote one `admin.owner.recovery` audit row, and returned zero rows for an unverified account without weakening predicates. No Neon editor or production database was used.
+ - `scripts/phase12-browser.mjs` was not executed here (no `.local/browser-tools` install in this checkout); viewport/theme/keyboard/screen-reader passes and deployment-preview acceptance remain deployment-owner tasks per the Phase 12 handover notes. No production data, credentials, or provider delivery was touched.
++
++---
++
++# Admin panel visual redesign (`FunctionGram_Admin_Panel_3_Phase_AI_Builder_Guide.md`)
++
++A separate, **visual-only** programme from the Phase 0–12 feature work recorded
++above. It restyles `/rstmcadmin` to the Metronic "demo4" reference and changes
++no feature, option, visible word, route, API, permission, setting or data.
++
++Branch: `arena/01a0f0d0-functiongram`
++Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
++
++## Redesign status
++
++| Phase | Name | Status | Patch |
++| --- | --- | --- | --- |
++| 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
++| 2 | Primitives — reusable admin control styling | Not started | `patches/phase-2-primitives.patch` |
++| 3 | Pages, polish and final QA | Not started | `patches/phase-3-pages-polish-qa.patch` |
++
++### Baseline measured before any redesign change
++
++`npm run lint` 0 errors / 7 pre-existing `<img>` warnings in `components/social/**`;
++`npm run typecheck` passed; `npm run test:vercel` 116 tests, 113 passed, 0 failed,
++3 skipped (optional managed-PostgreSQL checks, no `ADMIN_TEST_DATABASE_URL`);
++`npm run build` passed. Every later result is compared against exactly this.
++
++## Phase 1 — Foundation: done locally
++
++### Scope delivered
++
++Guide §4 (design tokens), §5 (typography), §6 (app shell), §7 (responsive
++rules), §10 items 3/4/8/9/10/11/12 at shell level, and the shell portion of §11
++(motion, reduced motion, focus, landmarks, touch targets).
++
++### Files changed
++
++- **New** `app/rstmcadmin/admin-tokens.css` — the complete §4 token set plus §5
++  typography, `::selection`, custom scrollbars, the `:focus-visible` ring, the
++  skip link, content fade-in and the `prefers-reduced-motion` switch-off.
++- **New** `app/rstmcadmin/admin-shell.css` — §6 sidebar, panel, page head,
++  footer and the full §7 responsive ladder (272 / 240 / 76px rail / drawer).
++- **New** `app/rstmcadmin/admin-components.css` — seeded with the two
++  primitives the shell account card needs: §8.10 avatars and §8.5 badges.
++- **New** `components/admin/admin-nav.tsx` — client nav: active detection,
++  grouping, icon rail and mobile drawer.
++- **New** `components/admin/page-head.tsx`, `components/admin/avatar.tsx`,
++  `components/admin/badge.tsx`.
++- **Changed** `app/rstmcadmin/layout.tsx` — shell markup, skip link, `<main
++  id="admin-main">`, footer; the nav table gains presentation-only `group` and
++  `icon` fields.
++- **Changed** `app/rstmcadmin/admin.css` — legacy `.admin-shell` / `.admin-header`
++  / `.admin-main` / `.admin-eyebrow` rules removed because the new layers
++  replace them; everything else left untouched for Phases 2–3.
++- **Changed** all 17 `app/rstmcadmin/**/page.tsx` entry points — the existing
++  eyebrow, `h1` and intro paragraph are wrapped in `<PageHead>`. Text is
++  byte-identical; no logic, query, field or control changed.
++
++### Decisions and deviations
++
++- **§5 Inter via `next/font/google` is NOT included.** The build environment
++  cannot reach `fonts.googleapis.com`, and `next/font` treats that as a hard
++  error (`Failed to fetch 'Inter' from Google Fonts` → `Build failed because of
++  webpack errors`), which would break the mandatory `npm run build` gate. The
++  panel therefore ships the §4 stack `Inter, ui-sans-serif, system-ui,
++  -apple-system, "Segoe UI", Roboto, sans-serif`, which renders Inter wherever
++  it is installed and degrades to the platform UI font otherwise — the
++  behaviour §5 already requires when the font fails to load. Every size in §5
++  was checked against that fallback. Re-enabling it later is a three-line
++  change in `app/rstmcadmin/layout.tsx` once the build host can reach Google
++  Fonts. This is the only guide instruction not implemented.
++- **Theme switching copies the selectors the app already emits** from
++  `appearanceCss()` in `lib/appearance.ts`: light is the base, dark comes from
++  `html[data-theme="dark"]` plus a `.dark` fallback, and
++  `@media (prefers-color-scheme: dark)` applies only to
++  `html:not([data-theme])`. No new theme mechanism was invented and
++  `app/globals.css` was not touched.
++- **The grid layout is scoped to `.admin-shell.admin-layout`.** `/two-factor`
++  and `/admin-two-factor/setup` also render `.admin-shell`; they keep their
++  centred single-column presentation and simply inherit the new tokens.
++- **§8.5 badges and §8.10 avatars were built in Phase 1**, ahead of their
++  Phase 2 listing, because §6.2's account card requires both. Phase 2 reuses
++  these primitives instead of duplicating them.
++- `--adm-cyan-text` was added alongside the guide's `--adm-cyan`; §9.1 needs a
++  readable cyan text tone and §4 defines only the fill.
++
++### Validation — actual results
++
++| Command | Result |
++| --- | --- |
++| `npm run lint` | Passed — 0 errors, the same 7 pre-existing `<img>` warnings |
++| `npm run typecheck` | Passed |
++| `npm run test:vercel` | 116 tests, **113 passed, 0 failed**, 3 skipped — identical to baseline |
++| `npm run build` | Passed; all 16 admin routes present in the manifest |
++
++Rendered-HTML checks against `next dev` on the isolated `.local/admin-check-db`
++PGlite fixture, authenticated with the seeded admin session:
++
++- All 16 admin routes plus `/rstmcadmin/users/regular` returned **200**.
++- Each page renders **exactly 16 nav links** — the drawer reuses the same
++  `<nav>`, so links are never duplicated in the DOM (§7).
++- Link labels, order and hrefs are unchanged from the pre-redesign layout:
++  Overview, Users, Content, Appearance, Features, Labels, Media, Safety, Audit,
++  Security & roles, Communications, Analytics, Exports, System tools, Operator
++  guide, View site.
++- Groups render in order MANAGE / CUSTOMIZE / PROTECT / REACH & INSIGHT /
++  SYSTEM, each with `role="group"` and an `aria-label`.
++- Active state resolves correctly: `/rstmcadmin` → Overview (exact),
++  `/rstmcadmin/users` and `/rstmcadmin/users/regular` → Users (prefix),
++  `/rstmcadmin/content` → Content, `/rstmcadmin/moderation` → Safety.
++- One `<nav aria-label="Admin navigation">`, one `<main id="admin-main">` and
++  one `<header class="admin-page-head">` per page; the skip link is first in
++  the DOM; the footer renders `© 2026 RSTMC.`
++- `git status` confirms no change under `lib/`, `app/api/`, migrations,
++  `package.json`, `package-lock.json`, `app/globals.css` or `components/social/`.
++
++Not claimed: no browser screenshots, and therefore no measured-pixel or
++screen-reader pass. The sandbox has no Chromium and cannot install one
++(`libnss3`/`libnspr4` are absent and the Debian mirrors are unreachable), so
++the 320/390/768/1024/1440 checks are reasoned from the CSS and the rendered
++markup rather than observed. Deployment-preview visual QA remains open.
++
++### Patch
++
++- `patches/phase-1-foundation.patch` and its plain-text copy
++  `patches/phase-1-foundation.patch.txt`.
++- Contains Phase 1 changes only, and verified with `git apply --check` against
++  a clean extraction of the `main` baseline `f6e3c37e`.

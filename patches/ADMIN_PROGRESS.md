@@ -632,3 +632,319 @@ Completed the local documentation, recovery, HTTP, migration-fixture, and synthe
 - `node --import tsx scripts/phase12-perf.mts` passed on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets): median **124 ms**, max **150 ms** over 7 warmed 14-day dashboard runs on this host (author reported 65/76 ms; local benchmark only, not a production SLA).
 - The `docs/ADMIN_PANEL.md` recovery transaction was executed against migrated PGlite with substituted placeholders: it promoted the exact eligible account to owner, revoked its sessions, wrote one `admin.owner.recovery` audit row, and returned zero rows for an unverified account without weakening predicates. No Neon editor or production database was used.
 - `scripts/phase12-browser.mjs` was not executed here (no `.local/browser-tools` install in this checkout); viewport/theme/keyboard/screen-reader passes and deployment-preview acceptance remain deployment-owner tasks per the Phase 12 handover notes. No production data, credentials, or provider delivery was touched.
+
+---
+
+# Admin panel visual redesign (`FunctionGram_Admin_Panel_3_Phase_AI_Builder_Guide.md`)
+
+A separate, **visual-only** programme from the Phase 0–12 feature work recorded
+above. It restyles `/rstmcadmin` to the Metronic "demo4" reference and changes
+no feature, option, visible word, route, API, permission, setting or data.
+
+Branch: `arena/01a0f0d0-functiongram`
+Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
+
+## Redesign status
+
+| Phase | Name | Status | Patch |
+| --- | --- | --- | --- |
+| 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
+| 2 | Primitives — reusable admin control styling | Done locally; all four gates green | `patches/phase-2-primitives.patch` |
+| 3 | Pages, polish and final QA | Done locally; all four gates green | `patches/phase-3-pages-polish-qa.patch` |
+
+### Baseline measured before any redesign change
+
+`npm run lint` 0 errors / 7 pre-existing `<img>` warnings in `components/social/**`;
+`npm run typecheck` passed; `npm run test:vercel` 116 tests, 113 passed, 0 failed,
+3 skipped (optional managed-PostgreSQL checks, no `ADMIN_TEST_DATABASE_URL`);
+`npm run build` passed. Every later result is compared against exactly this.
+
+## Phase 1 — Foundation: done locally
+
+### Scope delivered
+
+Guide §4 (design tokens), §5 (typography), §6 (app shell), §7 (responsive
+rules), §10 items 3/4/8/9/10/11/12 at shell level, and the shell portion of §11
+(motion, reduced motion, focus, landmarks, touch targets).
+
+### Files changed
+
+- **New** `app/rstmcadmin/admin-tokens.css` — the complete §4 token set plus §5
+  typography, `::selection`, custom scrollbars, the `:focus-visible` ring, the
+  skip link, content fade-in and the `prefers-reduced-motion` switch-off.
+- **New** `app/rstmcadmin/admin-shell.css` — §6 sidebar, panel, page head,
+  footer and the full §7 responsive ladder (272 / 240 / 76px rail / drawer).
+- **New** `app/rstmcadmin/admin-components.css` — seeded with the two
+  primitives the shell account card needs: §8.10 avatars and §8.5 badges.
+- **New** `components/admin/admin-nav.tsx` — client nav: active detection,
+  grouping, icon rail and mobile drawer.
+- **New** `components/admin/page-head.tsx`, `components/admin/avatar.tsx`,
+  `components/admin/badge.tsx`.
+- **Changed** `app/rstmcadmin/layout.tsx` — shell markup, skip link, `<main
+  id="admin-main">`, footer; the nav table gains presentation-only `group` and
+  `icon` fields.
+- **Changed** `app/rstmcadmin/admin.css` — legacy `.admin-shell` / `.admin-header`
+  / `.admin-main` / `.admin-eyebrow` rules removed because the new layers
+  replace them; everything else left untouched for Phases 2–3.
+- **Changed** all 17 `app/rstmcadmin/**/page.tsx` entry points — the existing
+  eyebrow, `h1` and intro paragraph are wrapped in `<PageHead>`. Text is
+  byte-identical; no logic, query, field or control changed.
+
+### Decisions and deviations
+
+- **§5 Inter via `next/font/google` is NOT included.** The build environment
+  cannot reach `fonts.googleapis.com`, and `next/font` treats that as a hard
+  error (`Failed to fetch 'Inter' from Google Fonts` → `Build failed because of
+  webpack errors`), which would break the mandatory `npm run build` gate. The
+  panel therefore ships the §4 stack `Inter, ui-sans-serif, system-ui,
+  -apple-system, "Segoe UI", Roboto, sans-serif`, which renders Inter wherever
+  it is installed and degrades to the platform UI font otherwise — the
+  behaviour §5 already requires when the font fails to load. Every size in §5
+  was checked against that fallback. Re-enabling it later is a three-line
+  change in `app/rstmcadmin/layout.tsx` once the build host can reach Google
+  Fonts. This is the only guide instruction not implemented.
+- **Theme switching copies the selectors the app already emits** from
+  `appearanceCss()` in `lib/appearance.ts`: light is the base, dark comes from
+  `html[data-theme="dark"]` plus a `.dark` fallback, and
+  `@media (prefers-color-scheme: dark)` applies only to
+  `html:not([data-theme])`. No new theme mechanism was invented and
+  `app/globals.css` was not touched.
+- **The grid layout is scoped to `.admin-shell.admin-layout`.** `/two-factor`
+  and `/admin-two-factor/setup` also render `.admin-shell`; they keep their
+  centred single-column presentation and simply inherit the new tokens.
+- **§8.5 badges and §8.10 avatars were built in Phase 1**, ahead of their
+  Phase 2 listing, because §6.2's account card requires both. Phase 2 reuses
+  these primitives instead of duplicating them.
+- `--adm-cyan-text` was added alongside the guide's `--adm-cyan`; §9.1 needs a
+  readable cyan text tone and §4 defines only the fill.
+
+### Validation — actual results
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` | Passed — 0 errors, the same 7 pre-existing `<img>` warnings |
+| `npm run typecheck` | Passed |
+| `npm run test:vercel` | 116 tests, **113 passed, 0 failed**, 3 skipped — identical to baseline |
+| `npm run build` | Passed; all 16 admin routes present in the manifest |
+
+Rendered-HTML checks against `next dev` on the isolated `.local/admin-check-db`
+PGlite fixture, authenticated with the seeded admin session:
+
+- All 16 admin routes plus `/rstmcadmin/users/regular` returned **200**.
+- Each page renders **exactly 16 nav links** — the drawer reuses the same
+  `<nav>`, so links are never duplicated in the DOM (§7).
+- Link labels, order and hrefs are unchanged from the pre-redesign layout:
+  Overview, Users, Content, Appearance, Features, Labels, Media, Safety, Audit,
+  Security & roles, Communications, Analytics, Exports, System tools, Operator
+  guide, View site.
+- Groups render in order MANAGE / CUSTOMIZE / PROTECT / REACH & INSIGHT /
+  SYSTEM, each with `role="group"` and an `aria-label`.
+- Active state resolves correctly: `/rstmcadmin` → Overview (exact),
+  `/rstmcadmin/users` and `/rstmcadmin/users/regular` → Users (prefix),
+  `/rstmcadmin/content` → Content, `/rstmcadmin/moderation` → Safety.
+- One `<nav aria-label="Admin navigation">`, one `<main id="admin-main">` and
+  one `<header class="admin-page-head">` per page; the skip link is first in
+  the DOM; the footer renders `© 2026 RSTMC.`
+- `git status` confirms no change under `lib/`, `app/api/`, migrations,
+  `package.json`, `package-lock.json`, `app/globals.css` or `components/social/`.
+
+Not claimed: no browser screenshots, and therefore no measured-pixel or
+screen-reader pass. The sandbox has no Chromium and cannot install one
+(`libnss3`/`libnspr4` are absent and the Debian mirrors are unreachable), so
+the 320/390/768/1024/1440 checks are reasoned from the CSS and the rendered
+markup rather than observed. Deployment-preview visual QA remains open.
+
+### Patch
+
+- `patches/phase-1-foundation.patch` and its plain-text copy
+  `patches/phase-1-foundation.patch.txt`.
+- Contains Phase 1 changes only, and verified with `git apply --check` against
+  a clean extraction of the `main` baseline `f6e3c37e`.
+
+## Phase 2 — Primitives
+
+Guide sections **§8.1–§8.15**. Visual only: no route, API, data, permission,
+copy, column, filter, field or ARIA change.
+
+### Stylesheet restructure
+
+`app/rstmcadmin/admin.css` is imported by the admin layout *and* by the two
+standalone two-factor screens outside `app/rstmcadmin/`. To give both the same
+tokens without editing files outside the allowed list, the old contents moved
+to `admin-legacy.css` (`git mv`) and `admin.css` became a short entry point
+that imports the layers in cascade order:
+
+1. `admin-legacy.css` — page styling no phase has replaced yet
+2. `admin-tokens.css` — §4 tokens, §5 typography
+3. `admin-shell.css` — §6 shell, §7 responsive
+4. `admin-components.css` — §8 primitives
+
+Later layers therefore win at equal specificity. Verified in the built
+stylesheet: legacy rules start at byte 469, tokens 9220, shell 18068,
+components 26132.
+
+### What was built
+
+| Section | Primitive |
+| --- | --- |
+| 8.1 | Buttons: default / `admin-primary` / `data-tone="danger"` / `data-tone="ghost"`, 44px hit area, 36px compact variant inside tables and action grids (44px preserved via a `::before` overlay) |
+| 8.2 | Text inputs, selects (inline SVG chevron), textareas, search fields (inline SVG magnifier), labels, help text |
+| 8.3 | Checkbox and radio: 20px box, accent fill, inline SVG check / dash, 44px wrapper |
+| 8.4 | Cards and stat cards: 1px border, `--adm-r-card`, `--adm-shadow`, hover lift; nested cards flattened |
+| 8.5 | Chips and filter pills |
+| 8.6 | Tables: sticky caption header, hover tint, `min-width:720px`, last row never clipped (`tbody tr:last-child td{border-bottom:0}` plus `overflow-y:visible`) |
+| 8.7 | Pagination |
+| 8.8 | Filter toolbar: aligned controls, primary submit, ghost clear |
+| 8.9 | Dialogs: 16px radius, blurred overlay, 44px close target, bottom sheet under 640px |
+| 8.10 | Avatars (seeded in Phase 1, reused here) |
+| 8.11 | Alerts: `[role="status"]` success, `[role="alert"]` / `.admin-error` danger, `.admin-note` info, each with a masked inline SVG icon that inherits the tone colour; empty live regions stay hidden |
+| 8.12 | Empty states on `td[colspan]` |
+| 8.13 | Drawer / `details` disclosure with rotating chevron |
+| 8.14 | Code and `pre` blocks |
+| 8.15 | Detail-page structure and key/value rows |
+
+### Icon tokens
+
+Seven inline `data:image/svg+xml` tokens were added to `admin-tokens.css`
+(`--adm-chevron`, `--adm-magnifier`, `--adm-check`, `--adm-dash`,
+`--adm-icon-success`, `--adm-icon-danger`, `--adm-icon-info`). No external
+image, CDN or font is referenced. The three alert icons are applied as
+`mask-image` with `background:currentColor`, so they follow the theme
+automatically; the chevron and magnifier are `background-image` (pseudo-
+elements are not available on `select` and `input`) and are therefore
+redefined per theme.
+
+The token blocks now also target `.admin-confirm-dialog`, because Radix
+portals the dialog to `<body>`, outside `.admin-shell`, where `--adm-*` would
+not otherwise inherit. `components/ui/dialog.tsx` is a prohibited file and was
+not modified; the dialog is styled entirely from CSS, using
+`.admin-confirm-dialog[data-slot="dialog-content"]` to outrank the utility
+classes already on the element, and `body:has(.admin-confirm-dialog)` to tint
+the shared overlay without affecting the public site.
+
+### Markup touched
+
+Class and attribute changes only — no action, handler, label or field changed.
+
+- `components/admin/badge.tsx` — new `dangerTone(operation)` helper, matching
+  `/\b(delete|purge|ban|trash|revoke|hide)\b/i`. Word boundaries deliberately
+  keep `unban`, `unhide` and `restore` neutral (verified against all 21
+  operation names in use).
+- `actions.tsx`, `content.tsx` — `data-tone={dangerTone(op)}` on the action grids.
+- `media.tsx`, `moderation.tsx` — `data-tone="danger"` on trash / purge / hide /
+  ban; `Filter assets` promoted to primary.
+- `ui.tsx`, `content/page.tsx`, `audit.tsx` — filter toolbars get a primary
+  submit and a ghost `Clear` (§8.8).
+
+### Superseded legacy rules removed
+
+`admin-legacy.css` dropped its button, input/select, search toolbar, chips,
+table, pagination, checkbox, dialog-close and card rules (now 28 lines, from
+37). Everything still referenced by a page that Phase 3 has not reached yet
+was kept.
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
+| `npm run build` | pass |
+
+Live check against the PGlite fixture: all 15 admin routes plus `View site`
+return 200, every page renders exactly 16 nav links in the prescribed order,
+one page head, and `aria-current="page"` on the active entry only. `data-tone`
+renders as expected (`Hide` and `Move to trash` danger, `Unhide` and `Restore`
+neutral, `Clear` ghost).
+
+Patch: `patches/phase-2-primitives.patch` (identical copy at
+`patches/phase-2-primitives.patch.txt`), verified with `git apply --check`
+against a clean extraction of the Phase 1 commit `3f40375`.
+
+## Phase 3 — Pages + polish + QA
+
+Guide sections **§9.1–§9.13**, the remaining **§10** designer touches, the
+remaining **§11** motion and accessibility items, and the **§13** checklist.
+Applied in the order the guide prescribes.
+
+New layer `app/rstmcadmin/admin-pages.css`, imported last by `admin.css`.
+
+### Page recipes
+
+| § | Page | Applied |
+| --- | --- | --- |
+| 9.1 | Overview | Gradient banner card with ambient glow and an inline hex lattice (hidden under 640px); the six stat cards keep their labels, order and captions and gain 40px icon tiles (Users/UserPlus/Activity/LayoutGrid/Flag/HardDrive in blue/green/purple/amber/red/cyan); People & accounts and System status become feature cards with a 48px tile, and System status renders label/value rows with ok/warning status dots |
+| 9.2 | Users list | `Export this page (CSV)` moved into the page head, avatar + name identity cell, role and access badges, and a §10.5 storage meter sized against the largest row on the page. The note was already the table caption |
+| 9.3 | User detail | 64px avatar in the page head, email/role/handle/verified/trash as badges, and both muted notes promoted to the info alert style |
+| 9.4 | Content | Four-column filter grid from 1024px, a bulk bar with the count left and actions right, kind badge + id in `code`, status badges, 96×96 contained media previews in bordered rows that stack under 640px, and five engagement tiles |
+| 9.5 | Settings pages | Card per group, responsive field grids, textareas spanning both columns, 44px colour swatches, one row per feature flag, and two-column label rows |
+| 9.6 | Audit | Muted tabular timestamps, actor avatar 28 + email, the action as a monospace badge toned by `auditTone()`, target id in `code`, snapshots already collapsed in `details` |
+| 9.7 | Safety | Reason as a neutral badge, status and target type as meaning-toned badges |
+| 9.8 | Security & roles | Role badges, and the permission matrix as a green check or a muted dash with the original `Allowed` / `—` text kept for screen readers via `.admin-visually-hidden` |
+| 9.9 | Analytics | Bars with 6px rounded tops in `--adm-accent`, accent-hover on hover, dashed baseline, 12px tabular axis labels, funnel bar and ranked lists restyled |
+| 9.10 | Exports | Two-column field grid from 768px |
+| 9.11 | System tools | Key/value environment rows, applied/pending migration chips, and any card containing a destructive control gets a `--adm-danger` 40% border |
+| 9.12 | Operator guide | 760px centred article column with the prescribed prose scale |
+| 9.13 | Errors inside admin | The two invalid-filter cards become centred 480px state cards with a ghost action |
+
+### Remaining §10 and §11
+
+Ambient glow, hex pattern, storage meter, tabular numerals, scroll shadows on
+table containers, and the reduced-motion guard for the new chart transition.
+The active nav bar, glass page head, deterministic avatar tints, skip link,
+selection colour, custom scrollbars and press feedback landed in Phase 1.
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
+| `npm run build` | pass; all 17 `/rstmcadmin*` routes still dynamic |
+
+### §13 visible-text comparison
+
+The pre-redesign commit `f6e3c37e` was checked out into a second worktree and
+served on port 3001 against a copy of the same PGlite fixture, while the
+redesigned branch served port 3000. Every one of the 15 admin routes was
+fetched from both, the shell markup stripped, and the word multisets compared.
+
+**Result: zero words removed on any route.** The only additions are the
+Phase 1 shell elements — the skip link, the `RSTMC.` wordmark, the five nav
+group headings and the account card. Counts (old → new): Overview 145→161,
+Users 142→165, Content 420→436, Safety 101→117, Media 332→348, Audit 102→118,
+Analytics 171→187, Security 341→357, System 250→266, Communications 103→119,
+Appearance 640→656, Features 240→256, Labels 679→695, Exports 90→106,
+Operator guide 480→496.
+
+The fixture assertion in `scripts/admin-check.mts` that matches
+`A pulse on your community.` and `Applied migrations: … 1, 2, … 12` still
+passes against the restructured System status rows.
+
+### Checklist items that could not be run here
+
+The sandbox has no browser binary and no package repository (`libnss3` and
+`libnspr4` are unavailable, `deb.debian.org` and `fonts.googleapis.com` are
+unreachable), so Playwright/Chromium cannot start. The screenshot matrix at
+320/390/768/1024/1440px in both themes, and the interactive drawer, dialog,
+focus-return, keyboard-traversal and contrast passes, were therefore verified
+by server-rendered HTML inspection and by reading the compiled stylesheet
+rather than from live screenshots. No screenshot is claimed to have been
+taken. The structural guarantees behind those checks are in the CSS: the
+sidebar drawer is driven by `data-open` with an Escape handler and focus trap
+in `admin-nav.tsx`, dialogs become bottom sheets below 640px, `min-width: 0`
+and `overflow-wrap: anywhere` are applied on every grid and table cell, and
+`tbody tr:last-child td { border-bottom: 0 }` with `overflow-y: visible`
+keeps the final table row fully visible.
+
+### Prohibited paths
+
+`git diff f6e3c37e..HEAD --name-only` contains no entry under `lib/`,
+`app/api/`, any migrations directory, `package.json`, `package-lock.json`,
+`app/globals.css` or `components/social/**`.
+
+Patch: `patches/phase-3-pages-polish-qa.patch` (identical copy at
+`patches/phase-3-pages-polish-qa.patch.txt`), verified with `git apply --check`
+against a clean extraction of the Phase 2 commit `c7a5008`.

@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+import { PageHead } from '@/components/admin/page-head';
 
 export default async function AdminGuidePage() {
   const actor = await requireAdminPage();
   assertAdminPagePermission(actor, 'system.read');
   return <>
-    <p className="admin-eyebrow">Control room / Operator guide</p><h1>Operations guide</h1>
+    <PageHead breadcrumb="Control room / Operator guide" title="Operations guide" />
     <section className="admin-card admin-guide"><h2>Analytics and exports</h2><p>Analytics uses UTC day buckets. “Active sign-in proxy” counts distinct accounts whose Better Auth session was refreshed that day; it is not a per-request DAU event. Uploaded storage is the sum of asset bytes added during the chosen window, not a historical snapshot of retained storage. The signup funnel counts non-demo member accounts with at least one non-deleted post; stories and reels are not counted as first posts.</p><p>Exports are streamed and capped at 1,000 records. User exports contain email addresses, report exports can include moderation details, and audit exports include recorded network/client metadata. Save and share these files only with a justified operational need.</p>
       <p><Link href={ADMIN_BASE_PATH+'/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH+'/exports'}>Open exports</Link></p></section>
     <section className="admin-card admin-guide"><h2>Migration status and cache</h2><p>The system page compares applied migration versions with the application registry; it does not apply migrations. Run migrations through the normal deployment process. Cache invalidation clears the tagged settings cache and revalidates the public root layout; it cannot clear a browser cache or a third-party CDN.</p><p>Environment inspection reports booleans only. Keep credentials in deployment environment settings, never in the database-backed site settings.</p></section>

@@ -1,0 +1,831 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — page recipes (§9) and remaining designer
+   touches (§10). Loaded last, after the §8 primitives.
+
+   Visual only. Nothing here adds, removes or rewrites a visible word.
+   ========================================================================== */
+
+/* ==========================================================================
+   9.1 Overview — banner (§9.1.1, §10.1 ambient glow, §10.2 hex pattern)
+   ========================================================================== */
+
+.admin-shell .admin-page-head-banner {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 28px;
+  border: 1px solid var(--adm-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(27, 132, 255, .1) 0%, rgba(27, 132, 255, 0) 60%),
+    var(--adm-card);
+  box-shadow: var(--adm-shadow);
+}
+
+/* §10.1 ambient glow, behind everything in the banner. */
+.admin-shell .admin-page-head-banner::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -140px;
+  left: -80px;
+  width: 420px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(27, 132, 255, .08), transparent);
+  pointer-events: none;
+}
+
+/* §10.2 hex lattice in the right corner. */
+.admin-shell .admin-banner-hex {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  right: 0;
+  width: 240px;
+  height: 120px;
+  color: var(--adm-accent);
+  opacity: .06;
+  pointer-events: none;
+}
+
+.admin-shell .admin-page-head-banner h1 {
+  font-size: 28px;
+  line-height: 36px;
+}
+
+@media (max-width: 639px) {
+  .admin-shell .admin-page-head-banner {
+    padding: var(--adm-s5);
+  }
+
+  .admin-shell .admin-banner-hex {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   9.1.2 Icon tiles
+   ========================================================================== */
+
+.admin-shell .admin-icon-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  color: var(--adm-accent-text);
+  background: rgba(27, 132, 255, .14);
+}
+
+.admin-shell .admin-icon-tile[data-size="48"] {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+.admin-shell .admin-icon-tile[data-tone="green"] {
+  color: var(--adm-success-text);
+  background: rgba(23, 178, 106, .14);
+}
+
+.admin-shell .admin-icon-tile[data-tone="purple"] {
+  color: var(--adm-purple-text);
+  background: rgba(127, 86, 217, .14);
+}
+
+.admin-shell .admin-icon-tile[data-tone="amber"] {
+  color: var(--adm-warning-text);
+  background: rgba(247, 144, 9, .16);
+}
+
+.admin-shell .admin-icon-tile[data-tone="red"] {
+  color: var(--adm-danger-text);
+  background: rgba(240, 68, 56, .14);
+}
+
+.admin-shell .admin-icon-tile[data-tone="cyan"] {
+  color: var(--adm-cyan-text);
+  background: rgba(6, 174, 212, .14);
+}
+
+/* Stat card with a tile: tile first, then label, number, caption (§9.1.2). */
+.admin-shell .admin-stat:has(.admin-icon-tile) {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  align-items: center;
+  column-gap: var(--adm-s3);
+  row-gap: 2px;
+}
+
+.admin-shell .admin-stat .admin-icon-tile {
+  grid-row: 1 / 3;
+}
+
+.admin-shell .admin-stat:has(.admin-icon-tile) small {
+  grid-column: 1 / -1;
+  margin-top: var(--adm-s2);
+}
+
+/* ==========================================================================
+   9.1.3 / 9.1.4 Feature cards
+   ========================================================================== */
+
+.admin-shell .admin-card-lead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--adm-s4);
+}
+
+.admin-shell .admin-card-lead > div {
+  min-width: 0;
+}
+
+.admin-shell .admin-card-lead h2 {
+  margin: 0 0 var(--adm-s2);
+}
+
+.admin-shell .admin-card-lead p {
+  margin: 0;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-card-lead:last-child h2 {
+  margin-bottom: 0;
+}
+
+.admin-shell .admin-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--adm-s5);
+}
+
+@media (max-width: 767px) {
+  .admin-shell .admin-card-footer .admin-button {
+    width: 100%;
+  }
+}
+
+/* Status rows: label left, value right, dot for meaning (§9.1.4). */
+.admin-shell .admin-status-list {
+  margin: var(--adm-s5) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .admin-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--adm-s3);
+  padding: var(--adm-s3) 0;
+  border-bottom: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .admin-status-row dt {
+  margin: 0;
+  color: var(--adm-text-2);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.admin-shell .admin-status-row dd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--adm-s2);
+  margin: 0;
+  min-width: 0;
+  color: var(--adm-text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-status-row dd::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--adm-success);
+  transform: translateY(-1px);
+}
+
+.admin-shell .admin-status-row dd[data-state="warn"]::before {
+  background: var(--adm-warning);
+}
+
+.admin-shell .admin-status-row dd[data-state="fail"]::before {
+  background: var(--adm-danger);
+}
+
+.admin-shell .admin-link-row {
+  margin: var(--adm-s5) 0 0;
+  color: var(--adm-text-3);
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   9.2 Users list — identity cell, storage meter (§10.5)
+   ========================================================================== */
+
+.admin-shell .admin-cell-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--adm-s3);
+  min-width: 0;
+}
+
+.admin-shell .admin-cell-identity > div {
+  min-width: 0;
+}
+
+.admin-shell .admin-meter-value {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-shell .admin-meter {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: var(--adm-r-pill);
+  background: var(--adm-muted-surface);
+  overflow: hidden;
+}
+
+.admin-shell .admin-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--adm-accent);
+}
+
+/* ==========================================================================
+   9.3 Detail pages — profile header
+   ========================================================================== */
+
+.admin-shell .admin-page-head .admin-avatar[data-size="64"] {
+  align-self: flex-start;
+}
+
+.admin-shell .admin-identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--adm-s2) var(--adm-s3);
+}
+
+.admin-shell .admin-handle {
+  color: var(--adm-text-3);
+}
+
+/* ==========================================================================
+   9.4 Content — filter toolbar, bulk bar, engagement tiles, media rows
+   ========================================================================== */
+
+/* Many fields → four columns on desktop (§9.4). */
+@media (min-width: 1024px) {
+  .admin-shell .admin-search:has(label:nth-child(8)) {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: end;
+  }
+
+  .admin-shell .admin-search:has(label:nth-child(8)) label:first-child {
+    flex: none;
+  }
+}
+
+.admin-shell .admin-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--adm-s3) var(--adm-s5);
+  margin: var(--adm-s5) 0 var(--adm-s4);
+  padding: var(--adm-s3) var(--adm-s4);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-card);
+  background: var(--adm-muted-surface);
+}
+
+.admin-shell .admin-bulk-bar > p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+.admin-shell .admin-bulk-bar .admin-action-grid {
+  margin: 0;
+  justify-content: flex-end;
+}
+
+/* Inline badge + code groups inside table cells. */
+.admin-shell .admin-cell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-shell td .admin-cell-meta code {
+  overflow-wrap: anywhere;
+}
+
+/* Small stat tiles (§9.4 engagement card). */
+.admin-shell .admin-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--adm-s3);
+  margin-top: var(--adm-s4);
+}
+
+.admin-shell .admin-tile {
+  display: grid;
+  gap: 2px;
+  padding: var(--adm-s3) var(--adm-s4);
+  border: 1px solid var(--adm-border-subtle);
+  border-radius: 12px;
+  background: var(--adm-muted-surface);
+  min-width: 0;
+}
+
+.admin-shell .admin-tile span {
+  color: var(--adm-text-2);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-tile strong {
+  color: var(--adm-text);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Media rows (§9.4). */
+.admin-shell .content-media-item {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--adm-s4);
+  padding: var(--adm-s4);
+  margin-bottom: var(--adm-s3);
+  border: 1px solid var(--adm-border);
+  border-bottom: 1px solid var(--adm-border);
+  border-radius: 12px;
+  background: var(--adm-card);
+}
+
+.admin-shell .content-media-item img,
+.admin-shell .content-media-item video {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: var(--adm-muted-surface);
+}
+
+.admin-shell .content-media-item code {
+  display: block;
+  margin-bottom: var(--adm-s3);
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .content-media-item .admin-action-grid {
+  margin: 0;
+}
+
+@media (max-width: 639px) {
+  .admin-shell .content-media-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell .content-media-item img,
+  .admin-shell .content-media-item video {
+    width: 100%;
+    height: auto;
+    max-height: 240px;
+  }
+}
+
+/* Confirmation field then a right-aligned primary save (§9.4). */
+.admin-shell .admin-content-editor > .admin-button[type="submit"] {
+  justify-self: end;
+}
+
+/* ==========================================================================
+   Shared helpers introduced by the page recipes
+   ========================================================================== */
+
+/* Kept in the accessibility tree, removed from the visual layout (§9.8). */
+.admin-shell .admin-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.admin-shell .admin-badge-mono {
+  font-family: var(--adm-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.admin-shell .admin-cell-time {
+  color: var(--adm-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   9.5 Settings-style pages
+   ========================================================================== */
+
+/* One card per group; fields in a responsive two-column grid. */
+.admin-shell .media-settings-grid,
+.admin-shell .media-filters,
+.admin-shell .appearance-editor .admin-detail,
+.admin-shell .export-manager .admin-detail {
+  gap: var(--adm-s4);
+}
+
+/* Long fields span both columns. */
+.admin-shell .admin-detail > label:has(textarea),
+.admin-shell .media-settings-grid > label:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+/* Save button at the card footer, right aligned; status sits beside it. */
+.admin-shell .admin-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--adm-s3);
+  margin-top: var(--adm-s5);
+}
+
+/* Appearance: a colour swatch beside each colour control (§9.5). */
+.admin-shell input[type="color"] {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 4px;
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-card);
+  cursor: pointer;
+}
+
+.admin-shell input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.admin-shell input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+
+.admin-shell .appearance-nav-row {
+  border: 1px solid var(--adm-border);
+  border-radius: 12px;
+  padding: var(--adm-s4);
+  background: var(--adm-muted-surface);
+}
+
+/* Features: one row per flag, label left, control right, dividers between. */
+.admin-shell .feature-grid fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--adm-s3);
+  padding: var(--adm-s4);
+  border: 1px solid var(--adm-border);
+  border-radius: 12px;
+  background: var(--adm-card);
+}
+
+.admin-shell .feature-grid legend {
+  padding: 0;
+  color: var(--adm-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Labels: two columns on desktop, key in code style above the field. */
+.admin-shell .labels-rows {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--adm-s4);
+}
+
+.admin-shell .label-row {
+  padding: var(--adm-s4);
+  border: 1px solid var(--adm-border);
+  border-radius: 12px;
+  background: var(--adm-card);
+}
+
+.admin-shell .label-row legend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   9.9 Analytics — charts
+   ========================================================================== */
+
+.admin-shell .analytics-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 120px;
+  padding: var(--adm-s3) 0;
+  border-bottom: 1px dashed var(--adm-border);
+}
+
+.admin-shell .analytics-bars > * {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 6px 6px 0 0;
+  background: var(--adm-accent);
+  transition: background var(--adm-dur) var(--adm-ease);
+}
+
+.admin-shell .analytics-bars > *:hover {
+  background: var(--adm-accent-hover);
+}
+
+.admin-shell .analytics-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--adm-s2);
+  color: var(--adm-text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-shell .analytics-chart {
+  padding: var(--adm-s6);
+}
+
+.admin-shell .analytics-chart h3 {
+  margin: 0 0 var(--adm-s4);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.admin-shell .analytics-funnel-bar {
+  height: 12px;
+  margin: var(--adm-s4) 0 var(--adm-s3);
+  border-radius: var(--adm-r-pill);
+  background: var(--adm-muted-surface);
+  overflow: hidden;
+}
+
+.admin-shell .analytics-funnel-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--adm-accent);
+}
+
+.admin-shell .analytics-ranked-list p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--adm-s3);
+  margin: 0;
+  padding: var(--adm-s3) 0;
+  border-bottom: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .analytics-ranked-list p:last-child {
+  border-bottom: 0;
+}
+
+.admin-shell .analytics-ranked-list strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   9.10 Exports — two columns from 768px
+   ========================================================================== */
+
+@media (min-width: 768px) {
+  .admin-shell .export-manager .admin-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.admin-shell .export-manager > .admin-button {
+  margin-top: var(--adm-s5);
+}
+
+/* ==========================================================================
+   9.11 System tools
+   ========================================================================== */
+
+.admin-shell .system-env-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 0 var(--adm-s6);
+  margin: var(--adm-s4) 0 0;
+}
+
+.admin-shell .system-env-list > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--adm-s3);
+  padding: var(--adm-s3) 0;
+  border-bottom: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .system-env-list dt,
+.admin-shell .system-env-list dd {
+  margin: 0;
+}
+
+.admin-shell .system-env-list dt {
+  color: var(--adm-text-2);
+  font-size: 14px;
+  text-transform: capitalize;
+}
+
+.admin-shell .system-env-list dd {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.admin-shell .migration-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--adm-s2);
+  margin-top: var(--adm-s4);
+}
+
+.admin-shell .migration-chips span {
+  padding: 4px 10px;
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-pill);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.admin-shell .migration-chips .is-applied {
+  border-color: rgba(23, 178, 106, .35);
+  background: rgba(23, 178, 106, .12);
+  color: var(--adm-success-text);
+}
+
+.admin-shell .migration-chips .is-pending {
+  border-color: rgba(247, 144, 9, .35);
+  background: rgba(247, 144, 9, .14);
+  color: var(--adm-warning-text);
+}
+
+/* A card that holds a destructive tool gets a danger-tinted border (§9.11). */
+.admin-shell .system-tools .admin-card:has(.admin-danger),
+.admin-shell .system-tools .admin-card:has([data-tone="danger"]) {
+  border-color: color-mix(in srgb, var(--adm-danger) 40%, transparent);
+}
+
+.admin-shell .admin-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--adm-s3);
+  margin-top: var(--adm-s4);
+}
+
+.admin-shell .admin-card-heading {
+  gap: var(--adm-s4);
+}
+
+.admin-shell .system-sql-result {
+  max-height: 420px;
+}
+
+/* ==========================================================================
+   9.12 Operator guide — article column
+   ========================================================================== */
+
+.admin-shell .admin-main:has(.admin-guide) > * {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.admin-shell .admin-guide h2 {
+  margin-top: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.admin-shell .admin-guide h3 {
+  margin-top: var(--adm-s7);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.admin-shell .admin-guide p {
+  font-size: 15px;
+  line-height: 26px;
+}
+
+.admin-shell .admin-guide ul,
+.admin-shell .admin-guide ol {
+  display: grid;
+  gap: var(--adm-s2);
+  padding-left: var(--adm-s5);
+  font-size: 15px;
+  line-height: 26px;
+}
+
+.admin-shell .admin-guide a {
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-guide blockquote {
+  margin: var(--adm-s4) 0;
+  padding: var(--adm-s3) var(--adm-s4);
+  border-left: 3px solid var(--adm-accent);
+  border-radius: 0 var(--adm-r-control) var(--adm-r-control) 0;
+  background: var(--adm-muted-surface);
+}
+
+/* ==========================================================================
+   9.13 Error and empty page states inside admin
+   ========================================================================== */
+
+.admin-shell .admin-state-card {
+  max-width: 480px;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.admin-shell .admin-state-card h1 {
+  margin: 0 0 var(--adm-s3);
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.admin-shell .admin-state-card p {
+  justify-content: center;
+  margin-bottom: var(--adm-s5);
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-state-card .admin-button {
+  min-width: 160px;
+}
+
+/* ==========================================================================
+   10.8 / 10.10 / 11 — remaining polish
+   ========================================================================== */
+
+/* Scroll shadows: the card edges fade while a table is scrolled sideways. */
+.admin-shell .admin-table-scroll {
+  background-image:
+    linear-gradient(to right, var(--adm-card) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left, var(--adm-card) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, rgba(16, 24, 40, .10), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(16, 24, 40, .10), rgba(0, 0, 0, 0));
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* Numbers line up wherever they are compared (§10.7). */
+.admin-shell .admin-stat strong,
+.admin-shell .admin-pagination span,
+.admin-shell .analytics-summary strong {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell .analytics-bars > * {
+    transition: none;
+  }
+}

@@ -2,9 +2,10 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import type { UserFilters } from '@/lib/admin/queries';
+import { IconTile, type TileIcon, type TileTone } from './icon-tile';
 
-export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return <article className="admin-stat"><p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
+export function StatCard({ label, value, hint, icon, tone }: { label: string; value: string; hint?: string; icon?: TileIcon; tone?: TileTone }) {
+  return <article className="admin-stat">{icon && <IconTile icon={icon} tone={tone} />}<p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
 }
 export function DataTable({ caption, headings, children }: { caption: string; headings: string[]; children: ReactNode }) {
   return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label={caption}><table><caption>{caption}</caption><thead><tr>{headings.map(heading => <th scope="col" key={heading}>{heading}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
@@ -18,7 +19,7 @@ export function SearchBar({ filters }: { filters: UserFilters }) {
     <label>Status<select name="status" defaultValue={filters.status}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
     <label>Role<select name="role" defaultValue={filters.role}>{['all','user','moderator','admin','owner'].map(role => <option key={role}>{role}</option>)}</select></label>
     <label>Per page<select name="limit" defaultValue={filters.limit}>{[25,50,100,200].map(limit => <option key={limit}>{limit}</option>)}</select></label>
-    <button className="admin-button" type="submit">Apply filters</button>
+    <button className="admin-button admin-primary" type="submit">Apply filters</button>
   </form>;
 }
 export function FilterChips({ filters }: { filters: UserFilters }) {
