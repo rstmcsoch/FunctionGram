@@ -21,7 +21,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
   const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
   const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
   const expected=['delete','purge'].includes(operation)&&ids.length===1?(targetNames[ids[0]]||ids[0]):ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
-  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
+  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" data-tone={['delete','purge','hide'].includes(op)?'danger':undefined} disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
     {!operation&&message&&<p role="status">{message}</p>}
     <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
       <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>
@@ -29,7 +29,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
         <label>Type {['delete','purge'].includes(operation)?'the exact content name':'the selection confirmation'} <code>{expected}</code> to confirm<input aria-label="Content confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
         <label>Moderation reason {operation==='hide'?'(required)':'(optional)'}<textarea maxLength={500} required={operation==='hide'} value={reason} onChange={event=>setReason(event.target.value)} /></label>
         {message&&<p role="alert">{message}</p>}
-        <button className="admin-button admin-primary" disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
+        <button className="admin-button admin-primary" data-tone={['delete','purge','hide'].includes(operation)?'danger':undefined} disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
       </form>
     </ConfirmDialog>
   </>;

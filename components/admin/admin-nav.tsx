@@ -8,6 +8,7 @@ import {
   Menu, Palette, ScrollText, ShieldAlert, ShieldCheck, Tags, ToggleRight, Users, Wrench, X,
 } from 'lucide-react';
 import { Avatar } from './avatar';
+import { Badge } from './badge';
 
 export type AdminNavItem = { label: string; href: string; icon: string; group: string; external?: boolean };
 
@@ -88,7 +89,7 @@ export function AdminNav({ items, email, role, homeHref }: { items: AdminNavItem
         <Avatar seed={email} size={40} />
         <div className="admin-account-text">
           <p className="admin-account-email">{email}</p>
-          <span className="admin-badge admin-badge-primary">{role}</span>
+          <Badge tone="primary">{role}</Badge>
         </div>
       </div>
     </aside>

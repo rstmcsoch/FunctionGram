@@ -27,7 +27,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
   }
   return <div className="admin-actions">
     <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
-    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={['ban', 'delete'].includes(action) ? 'danger' : undefined} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
     {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
     {!selected && message && <p role="status">{message}</p>}
     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
@@ -39,7 +39,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
         <label>Reason {selected === 'ban' ? '(required)' : '(optional)'}<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500} required={['ban','promote','promoteModerator','demote'].includes(String(selected))} /></label>
         {selected === 'ban' && <label>Ban until (your local time; blank means indefinite)<input type="datetime-local" value={expires} onChange={e => setExpires(e.target.value)} /></label>}
         {message && <p role="alert">{message}</p>}
-        <DialogFooter><button className="admin-button" type="button" disabled={pending} onClick={() => setSelected(null)}>Cancel</button><button className="admin-button admin-primary" type="submit" disabled={pending || confirmation !== email}>{pending ? 'Saving…' : 'Confirm action'}</button></DialogFooter>
+        <DialogFooter><button className="admin-button" type="button" disabled={pending} onClick={() => setSelected(null)}>Cancel</button><button className="admin-button admin-primary" data-tone={selected && ['ban', 'delete'].includes(selected) ? 'danger' : undefined} type="submit" disabled={pending || confirmation !== email}>{pending ? 'Saving…' : 'Confirm action'}</button></DialogFooter>
       </form>
     </ConfirmDialog>
   </div>;
