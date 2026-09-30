@@ -12,7 +12,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
-  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" href="/rstmcadmin/audit">Clear</a>
+  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a>
  </form><button className="admin-button" disabled={busy} onClick={async()=>{
   setBusy(true);setError('');
   try{

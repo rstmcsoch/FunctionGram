@@ -10,6 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import type { ContentResource } from '@/lib/admin/content';
 import type { Settings, AdminRole } from '@/lib/admin/config';
 import { contentConfirmationName } from '@/lib/admin/content-label';
+import { dangerTone } from './badge';
 
 async function send(body:Record<string,unknown>) {
   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -21,7 +22,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
   const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
   const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
   const expected=['delete','purge'].includes(operation)&&ids.length===1?(targetNames[ids[0]]||ids[0]):ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
-  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
+  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" data-tone={dangerTone(op)} disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
     {!operation&&message&&<p role="status">{message}</p>}
     <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
       <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>

@@ -1,0 +1,1540 @@
+diff --git a/app/rstmcadmin/admin-components.css b/app/rstmcadmin/admin-components.css
+index f21db2e..a8a5934 100644
+--- a/app/rstmcadmin/admin-components.css
++++ b/app/rstmcadmin/admin-components.css
+@@ -131,3 +131,1109 @@
+   background: rgba(248, 40, 90, .14);
+   color: var(--adm-danger-text);
+ }
++
++/* ==========================================================================
++   PHASE 2 — buttons, inputs, cards, tables, dialogs and the rest of §8.
++   ========================================================================== */
++
++/* ==========================================================================
++   Buttons (§8.1)
++   ========================================================================== */
++
++.admin-shell .admin-button,
++.admin-confirm-dialog .admin-button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: var(--adm-s2);
++  min-height: 44px;
++  padding: 0 var(--adm-s4);
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-control);
++  background: var(--adm-card);
++  color: var(--adm-text);
++  font-family: inherit;
++  font-size: 14px;
++  font-weight: 500;
++  line-height: 1.4;
++  text-decoration: none;
++  cursor: pointer;
++  transition: background-color var(--adm-dur) ease-out, border-color var(--adm-dur) ease-out, color var(--adm-dur) ease-out;
++}
++
++.admin-shell .admin-button:hover,
++.admin-confirm-dialog .admin-button:hover {
++  background: var(--adm-hover);
++  text-decoration: none;
++}
++
++.admin-shell .admin-button svg,
++.admin-confirm-dialog .admin-button svg {
++  width: 16px;
++  height: 16px;
++  flex: none;
++}
++
++/* Primary. */
++.admin-shell .admin-button.admin-primary,
++.admin-confirm-dialog .admin-button.admin-primary {
++  border-color: var(--adm-accent);
++  background: var(--adm-accent);
++  color: var(--adm-on-accent);
++}
++
++.admin-shell .admin-button.admin-primary:hover,
++.admin-confirm-dialog .admin-button.admin-primary:hover {
++  border-color: var(--adm-accent-hover);
++  background: var(--adm-accent-hover);
++}
++
++/* Danger — derived from the existing operation name, never from new logic. */
++.admin-shell .admin-button[data-tone="danger"],
++.admin-shell .admin-button.admin-danger,
++.admin-confirm-dialog .admin-button[data-tone="danger"],
++.admin-confirm-dialog .admin-button.admin-danger {
++  border-color: var(--adm-danger);
++  background: transparent;
++  color: var(--adm-danger-text);
++}
++
++.admin-shell .admin-button[data-tone="danger"]:hover:not(:disabled),
++.admin-shell .admin-button.admin-danger:hover:not(:disabled),
++.admin-confirm-dialog .admin-button[data-tone="danger"]:hover:not(:disabled),
++.admin-confirm-dialog .admin-button.admin-danger:hover:not(:disabled) {
++  background: var(--adm-danger);
++  color: #fff;
++}
++
++/* Ghost. */
++.admin-shell .admin-button[data-tone="ghost"],
++.admin-confirm-dialog .admin-button[data-tone="ghost"] {
++  border-color: transparent;
++  background: transparent;
++  color: var(--adm-accent-text);
++}
++
++.admin-shell .admin-button[data-tone="ghost"]:hover:not(:disabled),
++.admin-confirm-dialog .admin-button[data-tone="ghost"]:hover:not(:disabled) {
++  background: var(--adm-accent-soft);
++}
++
++.admin-shell .admin-button:disabled,
++.admin-confirm-dialog .admin-button:disabled {
++  opacity: .5;
++  cursor: not-allowed;
++}
++
++.admin-shell .admin-button:disabled:hover,
++.admin-confirm-dialog .admin-button:disabled:hover {
++  background: var(--adm-card);
++  color: var(--adm-text);
++}
++
++.admin-shell .admin-button.admin-primary:disabled:hover,
++.admin-confirm-dialog .admin-button.admin-primary:disabled:hover {
++  background: var(--adm-accent);
++  color: var(--adm-on-accent);
++}
++
++/* Compact variant: looks 36px, keeps a 44px hit area (§8.1, §1.4). */
++.admin-shell .admin-table-scroll .admin-button,
++.admin-shell .media-row-actions .admin-button,
++.admin-shell .admin-action-grid .admin-button {
++  position: relative;
++  min-height: 36px;
++  padding: 0 var(--adm-s3);
++}
++
++.admin-shell .admin-table-scroll .admin-button::before,
++.admin-shell .media-row-actions .admin-button::before,
++.admin-shell .admin-action-grid .admin-button::before {
++  content: "";
++  position: absolute;
++  inset: -4px 0;
++  min-height: 44px;
++}
++
++.admin-shell .admin-action-grid,
++.admin-shell .admin-button-row,
++.admin-shell .media-row-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--adm-s2);
++  margin: var(--adm-s4) 0 0;
++}
++
++/* ==========================================================================
++   Inputs, selects, textarea (§8.2)
++   ========================================================================== */
++
++.admin-shell input,
++.admin-shell select,
++.admin-shell textarea,
++.admin-confirm input,
++.admin-confirm select,
++.admin-confirm textarea,
++.admin-confirm-dialog input,
++.admin-confirm-dialog select,
++.admin-confirm-dialog textarea {
++  min-height: 44px;
++  width: 100%;
++  padding: 10px var(--adm-s3);
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-control);
++  background: var(--adm-card);
++  color: var(--adm-text);
++  font-family: inherit;
++  font-size: 14px;
++  line-height: 22px;
++  transition: border-color var(--adm-dur) ease-out, box-shadow var(--adm-dur) ease-out;
++}
++
++.admin-shell ::placeholder,
++.admin-confirm-dialog ::placeholder {
++  color: var(--adm-text-3);
++}
++
++.admin-shell input:hover:not(:disabled),
++.admin-shell select:hover:not(:disabled),
++.admin-shell textarea:hover:not(:disabled) {
++  border-color: color-mix(in srgb, var(--adm-text-3) 60%, transparent);
++}
++
++.admin-shell input:focus,
++.admin-shell select:focus,
++.admin-shell textarea:focus,
++.admin-confirm-dialog input:focus,
++.admin-confirm-dialog select:focus,
++.admin-confirm-dialog textarea:focus {
++  border-color: var(--adm-accent);
++  box-shadow: 0 0 0 3px var(--adm-accent-soft);
++  outline: none;
++}
++
++.admin-shell [aria-invalid="true"],
++.admin-shell input:user-invalid,
++.admin-shell textarea:user-invalid {
++  border-color: var(--adm-danger);
++  box-shadow: 0 0 0 3px rgba(248, 40, 90, .14);
++}
++
++.admin-shell input:disabled,
++.admin-shell select:disabled,
++.admin-shell textarea:disabled,
++.admin-shell fieldset:disabled input,
++.admin-shell fieldset:disabled select,
++.admin-shell fieldset:disabled textarea {
++  background: var(--adm-muted-surface);
++  opacity: .6;
++}
++
++/* Select chevron: a theme-aware inline SVG (§8.2). */
++.admin-shell select,
++.admin-confirm-dialog select {
++  appearance: none;
++  -webkit-appearance: none;
++  padding-right: 36px;
++  background-image: var(--adm-chevron);
++  background-repeat: no-repeat;
++  background-position: right var(--adm-s3) center;
++  background-size: 16px 16px;
++}
++
++.admin-shell textarea,
++.admin-confirm-dialog textarea {
++  min-height: 120px;
++  padding: var(--adm-s3);
++  resize: vertical;
++}
++
++.admin-shell input[type="file"] {
++  min-height: 0;
++  padding: 0;
++  border: 0;
++  background: none;
++}
++
++.admin-shell input[type="number"] {
++  font-variant-numeric: tabular-nums;
++}
++
++/* Labels sit above their field. */
++.admin-shell label,
++.admin-confirm label,
++.admin-confirm-dialog label {
++  min-width: 0;
++}
++
++.admin-shell .admin-search label,
++.admin-shell .admin-confirm label,
++.admin-shell .moderation-filters label,
++.admin-shell .media-filters label,
++.admin-shell .media-settings-grid label,
++.admin-confirm-dialog label {
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  font-size: 13px;
++  line-height: 20px;
++  font-weight: 500;
++  color: var(--adm-text);
++}
++
++/* Search fields get a magnifier inside the box (decoration only). */
++.admin-shell input[type="search"] {
++  padding-left: 40px;
++  background-image: var(--adm-magnifier);
++  background-repeat: no-repeat;
++  background-position: left var(--adm-s3) center;
++  background-size: 16px 16px;
++}
++
++/* ==========================================================================
++   Checkbox and radio (§8.3)
++   ========================================================================== */
++
++.admin-shell input[type="checkbox"],
++.admin-shell input[type="radio"],
++.admin-confirm-dialog input[type="checkbox"] {
++  appearance: none;
++  -webkit-appearance: none;
++  width: 20px;
++  height: 20px;
++  min-height: 20px;
++  flex: none;
++  padding: 0;
++  border: 1.5px solid var(--adm-border);
++  border-radius: 6px;
++  background: var(--adm-card);
++  cursor: pointer;
++  transition: background-color var(--adm-dur) ease-out, border-color var(--adm-dur) ease-out;
++}
++
++.admin-shell input[type="radio"] {
++  border-radius: var(--adm-r-pill);
++}
++
++.admin-shell input[type="checkbox"]:hover,
++.admin-shell input[type="radio"]:hover {
++  border-color: var(--adm-accent);
++}
++
++.admin-shell input[type="checkbox"]:checked,
++.admin-confirm-dialog input[type="checkbox"]:checked {
++  border-color: var(--adm-accent);
++  background: var(--adm-accent) var(--adm-check) center / 12px 12px no-repeat;
++}
++
++.admin-shell input[type="checkbox"]:indeterminate {
++  border-color: var(--adm-accent);
++  background: var(--adm-accent) var(--adm-dash) center / 12px 12px no-repeat;
++}
++
++.admin-shell input[type="radio"]:checked {
++  border-color: var(--adm-accent);
++  background: var(--adm-accent);
++  box-shadow: inset 0 0 0 4px var(--adm-card);
++}
++
++/* The wrappers that provide the 44px hit area stay untouched. */
++.admin-shell .content-checkbox {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 44px;
++  min-width: 44px;
++}
++
++.admin-shell .feature-switch,
++.admin-shell .appearance-toggle {
++  flex-direction: row !important;
++  align-items: center;
++  gap: 10px;
++  min-height: 44px;
++}
++
++/* ==========================================================================
++   Cards (§8.4)
++   ========================================================================== */
++
++.admin-shell .admin-card,
++.admin-shell .admin-stat {
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-card);
++  background: var(--adm-card);
++  box-shadow: var(--adm-shadow);
++  padding: var(--adm-s6);
++  min-width: 0;
++  margin: 0;
++}
++
++.admin-shell .admin-card > h2:first-child,
++.admin-shell .admin-card > .admin-card-heading:first-child {
++  margin-bottom: var(--adm-s3);
++}
++
++.admin-shell .admin-card h2 + p {
++  margin-top: 0;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-stats {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: var(--adm-s4);
++  margin: 0;
++}
++
++.admin-shell .admin-stat p,
++.admin-shell .admin-stat > span {
++  margin: 0;
++  font-size: 13px;
++  line-height: 20px;
++  font-weight: 500;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-stat strong {
++  display: block;
++  margin: var(--adm-s2) 0 var(--adm-s1);
++  font-size: 30px;
++  line-height: 36px;
++  font-weight: 600;
++  font-variant-numeric: tabular-nums;
++  color: var(--adm-text);
++}
++
++.admin-shell .admin-stat small {
++  display: block;
++  font-size: 12px;
++  line-height: 16px;
++  color: var(--adm-text-3);
++}
++
++/* ==========================================================================
++   Chips (§8.5)
++   ========================================================================== */
++
++.admin-shell .admin-chips {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: var(--adm-s3);
++  margin: 0;
++  font-size: 13px;
++}
++
++.admin-shell .admin-chips span {
++  display: inline-flex;
++  align-items: center;
++  height: 32px;
++  padding: 0 var(--adm-s3);
++  border: 1px solid var(--adm-border-subtle);
++  border-radius: var(--adm-s2);
++  background: var(--adm-muted-surface);
++  color: var(--adm-text-2);
++  font-size: 13px;
++  cursor: default;
++  overflow-wrap: anywhere;
++}
++
++/* "Clear filters" is a ghost action, not a chip. */
++.admin-shell .admin-chips a {
++  display: inline-flex;
++  align-items: center;
++  min-height: 44px;
++  padding: 0 var(--adm-s3);
++  border-radius: var(--adm-r-control);
++  color: var(--adm-accent-text);
++  font-weight: 500;
++  text-decoration: none;
++}
++
++.admin-shell .admin-chips a:hover {
++  background: var(--adm-accent-soft);
++  text-decoration: none;
++}
++
++/* ==========================================================================
++   Tables (§8.6)
++   ========================================================================== */
++
++.admin-shell .admin-table-scroll {
++  max-width: 100%;
++  margin: 0;
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-card);
++  background: var(--adm-card);
++  box-shadow: var(--adm-shadow);
++  overflow-x: auto;
++  overflow-y: visible;   /* no fixed height: the last row is never clipped */
++}
++
++.admin-shell .admin-table-scroll table {
++  width: 100%;
++  min-width: 720px;
++  border-collapse: collapse;
++  text-align: left;
++  font-size: 14px;
++}
++
++.admin-shell .admin-table-scroll caption {
++  position: sticky;
++  left: 0;
++  padding: var(--adm-s4) var(--adm-s5);
++  text-align: left;
++  font-size: 14px;
++  line-height: 20px;
++  font-weight: 500;
++  color: var(--adm-text);
++}
++
++.admin-shell .admin-table-scroll th {
++  padding: var(--adm-s3) var(--adm-s5);
++  border-bottom: 1px solid var(--adm-border);
++  background: var(--adm-muted-surface);
++  font-size: 13px;
++  line-height: 20px;
++  font-weight: 500;
++  letter-spacing: normal;
++  text-transform: none;
++  color: var(--adm-text-2);
++  white-space: nowrap;
++}
++
++.admin-shell .admin-table-scroll td {
++  padding: 14px var(--adm-s5);
++  border-top: 0;
++  border-bottom: 1px solid var(--adm-border-subtle);
++  vertical-align: middle;
++  font-size: 14px;
++  line-height: 20px;
++  max-width: 340px;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .admin-table-scroll tbody tr:last-child td {
++  border-bottom: 0;
++}
++
++.admin-shell .admin-table-scroll tbody tr:hover td {
++  background: var(--adm-hover);
++}
++
++.admin-shell .admin-table-scroll td small {
++  display: block;
++  color: var(--adm-text-2);
++  font-size: 12px;
++  line-height: 16px;
++}
++
++/* Names in tables are links but never underlined (§5). */
++.admin-shell .admin-table-scroll td a {
++  display: inline-flex;
++  align-items: center;
++  min-height: 44px;
++  color: var(--adm-text);
++  font-weight: 600;
++  text-decoration: none;
++}
++
++.admin-shell .admin-table-scroll td a:hover {
++  color: var(--adm-accent-text);
++  text-decoration: none;
++}
++
++/* Empty row (§8.6, §8.12). */
++.admin-shell .admin-table-scroll td[colspan] {
++  padding: var(--adm-s9) var(--adm-s5);
++  text-align: center;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-table-scroll tbody tr:hover td[colspan] {
++  background: transparent;
++}
++
++/* ==========================================================================
++   Pagination (§8.7)
++   ========================================================================== */
++
++.admin-shell .admin-pagination {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--adm-s4);
++  padding-top: var(--adm-s4);
++  margin: 0;
++}
++
++.admin-shell .admin-pagination > span:not(.admin-badge) {
++  font-size: 13px;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-pagination a {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--adm-s2);
++  min-height: 44px;
++  padding: 0 var(--adm-s4);
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-control);
++  background: var(--adm-card);
++  color: var(--adm-text);
++  font-size: 14px;
++  font-weight: 500;
++  text-decoration: none;
++}
++
++.admin-shell .admin-pagination a:hover {
++  background: var(--adm-hover);
++  text-decoration: none;
++}
++
++/* ==========================================================================
++   Filter toolbar (§8.8)
++   ========================================================================== */
++
++.admin-shell .admin-search,
++.admin-shell .moderation-filters,
++.admin-shell .media-filters {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
++  align-items: end;
++  gap: var(--adm-s4);
++  margin: 0;
++  padding: var(--adm-s5);
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-card);
++  background: var(--adm-card);
++  box-shadow: var(--adm-shadow);
++}
++
++@media (min-width: 1024px) {
++  .admin-shell .admin-search > label:first-of-type {
++    grid-column: span 2;
++  }
++}
++
++/* A toolbar already inside a card must not draw a second card. */
++.admin-shell .admin-card .admin-search,
++.admin-shell .admin-card .moderation-filters,
++.admin-shell .admin-card .media-filters,
++.admin-shell .admin-drawer .admin-search {
++  padding: 0;
++  border: 0;
++  background: none;
++  box-shadow: none;
++}
++
++.admin-shell .admin-search button,
++.admin-shell .admin-search .admin-button,
++.admin-shell .moderation-filters button,
++.admin-shell .media-filters button {
++  align-self: end;
++}
++
++@media (max-width: 479px) {
++
++  .admin-shell .admin-search,
++  .admin-shell .moderation-filters,
++  .admin-shell .media-filters {
++    grid-template-columns: minmax(0, 1fr);
++  }
++
++  .admin-shell .admin-search .admin-button,
++  .admin-shell .admin-search button {
++    width: 100%;
++  }
++}
++
++/* ==========================================================================
++   Alerts and messages (§8.11)
++   ========================================================================== */
++
++.admin-shell [role="status"],
++.admin-shell [role="alert"],
++.admin-confirm-dialog [role="status"],
++.admin-confirm-dialog [role="alert"] {
++  display: flex;
++  align-items: flex-start;
++  gap: var(--adm-s2);
++  margin: 0;
++  padding: var(--adm-s3) var(--adm-s4);
++  border: 1px solid;
++  border-radius: var(--adm-r-control);
++  font-size: 14px;
++  line-height: 22px;
++}
++
++/* The leading icon is decorative and inherits the banner's tone colour. */
++.admin-shell [role="status"]::before,
++.admin-shell [role="alert"]::before,
++.admin-confirm-dialog [role="status"]::before,
++.admin-confirm-dialog [role="alert"]::before {
++  content: "";
++  width: 16px;
++  height: 16px;
++  flex: none;
++  margin-top: 3px;
++  background: currentColor;
++  -webkit-mask: var(--adm-icon-info) center / 16px 16px no-repeat;
++  mask: var(--adm-icon-info) center / 16px 16px no-repeat;
++}
++
++.admin-shell [role="status"]::before,
++.admin-confirm-dialog [role="status"]::before {
++  -webkit-mask-image: var(--adm-icon-success);
++  mask-image: var(--adm-icon-success);
++}
++
++.admin-shell [role="alert"]::before,
++.admin-confirm-dialog [role="alert"]::before {
++  -webkit-mask-image: var(--adm-icon-danger);
++  mask-image: var(--adm-icon-danger);
++}
++
++/* An empty live region must not paint an empty banner. */
++.admin-shell [role="status"]:empty,
++.admin-shell [role="alert"]:empty,
++.admin-confirm-dialog [role="status"]:empty,
++.admin-confirm-dialog [role="alert"]:empty {
++  display: none;
++}
++
++.admin-shell [role="status"],
++.admin-confirm-dialog [role="status"] {
++  border-color: rgba(23, 198, 83, .3);
++  background-color: rgba(23, 198, 83, .1);
++  color: var(--adm-success-text);
++}
++
++.admin-shell [role="alert"],
++.admin-shell .admin-error,
++.admin-confirm-dialog [role="alert"] {
++  border-color: rgba(248, 40, 90, .3);
++  background-color: rgba(248, 40, 90, .1);
++  color: var(--adm-danger-text);
++}
++
++/* Informational note styling for non-live guidance text. */
++.admin-shell .admin-note {
++  display: flex;
++  gap: var(--adm-s2);
++  padding: var(--adm-s3) var(--adm-s4);
++  border: 1px solid rgba(27, 132, 255, .3);
++  border-radius: var(--adm-r-control);
++  background: rgba(27, 132, 255, .1);
++  color: var(--adm-text);
++  font-size: 14px;
++  line-height: 22px;
++}
++
++.admin-shell .admin-note::before {
++  content: "";
++  width: 16px;
++  height: 16px;
++  flex: none;
++  margin-top: 3px;
++  background: var(--adm-accent-text);
++  -webkit-mask: var(--adm-icon-info) center / 16px 16px no-repeat;
++  mask: var(--adm-icon-info) center / 16px 16px no-repeat;
++}
++
++/* ==========================================================================
++   Empty states (§8.12)
++   ========================================================================== */
++
++.admin-shell .admin-empty {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: var(--adm-s3);
++  padding: var(--adm-s9) var(--adm-s6);
++  text-align: center;
++  color: var(--adm-text-2);
++  font-size: 14px;
++  line-height: 22px;
++}
++
++.admin-shell .admin-empty-icon {
++  display: grid;
++  place-items: center;
++  width: 64px;
++  height: 64px;
++  border: 1.5px dashed var(--adm-border);
++  border-radius: var(--adm-r-pill);
++  background: var(--adm-muted-surface);
++  color: var(--adm-text-3);
++}
++
++.admin-shell .admin-empty-icon svg {
++  width: 32px;
++  height: 32px;
++}
++
++/* ==========================================================================
++   Details / drawer (§8.13)
++   ========================================================================== */
++
++.admin-shell .admin-drawer {
++  padding: 0;
++}
++
++.admin-shell .admin-drawer > summary {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--adm-s3);
++  min-height: 44px;
++  padding: 18px var(--adm-s6);
++  font-size: 16px;
++  line-height: 24px;
++  font-weight: 600;
++  color: var(--adm-text);
++  cursor: pointer;
++  list-style: none;
++}
++
++.admin-shell .admin-drawer > summary::-webkit-details-marker {
++  display: none;
++}
++
++.admin-shell .admin-drawer > summary::after {
++  content: "";
++  width: 18px;
++  height: 18px;
++  flex: none;
++  background: var(--adm-chevron) center / 18px 18px no-repeat;
++  transition: transform 150ms ease-out;
++}
++
++.admin-shell .admin-drawer[open] > summary::after {
++  transform: rotate(180deg);
++}
++
++.admin-shell .admin-drawer[open] > summary {
++  border-bottom: 1px solid var(--adm-border-subtle);
++}
++
++.admin-shell .admin-drawer > summary ~ * {
++  margin-left: var(--adm-s6);
++  margin-right: var(--adm-s6);
++}
++
++.admin-shell .admin-drawer > summary ~ *:last-child {
++  margin-bottom: var(--adm-s6);
++}
++
++.admin-shell .admin-drawer > summary + * {
++  margin-top: var(--adm-s6);
++}
++
++/* ==========================================================================
++   Code, IDs, JSON (§8.14)
++   ========================================================================== */
++
++.admin-shell code,
++.admin-confirm-dialog code {
++  padding: 2px 6px;
++  border-radius: 6px;
++  background: var(--adm-muted-surface);
++  color: var(--adm-text);
++  font-family: var(--adm-mono);
++  font-size: 12px;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell pre {
++  max-height: 320px;
++  padding: var(--adm-s4);
++  border: 1px solid var(--adm-border-subtle);
++  border-radius: var(--adm-r-control);
++  background: var(--adm-muted-surface);
++  font-family: var(--adm-mono);
++  font-size: 12px;
++  line-height: 18px;
++  overflow: auto;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell pre code {
++  padding: 0;
++  background: none;
++}
++
++/* ==========================================================================
++   Detail pages — structural primitives (§8.15)
++   ========================================================================== */
++
++.admin-shell .admin-detail {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: var(--adm-s4);
++  align-items: start;
++}
++
++@media (max-width: 767px) {
++  .admin-shell .admin-detail {
++    grid-template-columns: minmax(0, 1fr);
++  }
++}
++
++/* main (1fr) + side (360px), used by the detail page recipes. */
++.admin-shell .admin-detail-split {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr);
++  gap: var(--adm-s5);
++  align-items: start;
++}
++
++@media (min-width: 1024px) {
++  .admin-shell .admin-detail-split {
++    grid-template-columns: minmax(0, 1fr) 360px;
++  }
++}
++
++/* Key/value rows. */
++.admin-shell .admin-drawer dl,
++.admin-shell .admin-definition-list,
++.admin-shell .admin-kv {
++  display: grid;
++  gap: 0;
++  margin: 0;
++}
++
++.admin-shell .admin-drawer dl dt,
++.admin-shell .admin-definition-list dt,
++.admin-shell .admin-kv dt {
++  padding: var(--adm-s3) 0 0;
++  font-size: 13px;
++  line-height: 20px;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-drawer dl dd,
++.admin-shell .admin-definition-list dd,
++.admin-shell .admin-kv dd {
++  margin: 0;
++  padding: 0 0 var(--adm-s3);
++  border-bottom: 1px solid var(--adm-border-subtle);
++  font-size: 14px;
++  line-height: 22px;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .admin-drawer dl dd:last-child,
++.admin-shell .admin-definition-list dd:last-child,
++.admin-shell .admin-kv dd:last-child {
++  border-bottom: 0;
++}
++
++@media (min-width: 1024px) {
++
++  .admin-shell .admin-drawer dl,
++  .admin-shell .admin-definition-list,
++  .admin-shell .admin-kv {
++    grid-template-columns: 140px minmax(0, 1fr);
++    align-items: baseline;
++  }
++
++  .admin-shell .admin-drawer dl dt,
++  .admin-shell .admin-definition-list dt,
++  .admin-shell .admin-kv dt {
++    padding: var(--adm-s3) 0;
++    border-bottom: 1px solid var(--adm-border-subtle);
++  }
++
++  .admin-shell .admin-drawer dl dd,
++  .admin-shell .admin-definition-list dd,
++  .admin-shell .admin-kv dd {
++    padding: var(--adm-s3) 0;
++  }
++
++  .admin-shell .admin-drawer dl dt:last-of-type,
++  .admin-shell .admin-definition-list dt:last-of-type,
++  .admin-shell .admin-kv dt:last-of-type {
++    border-bottom: 0;
++  }
++}
++
++/* ==========================================================================
++   Forms inside confirmations (§8.9 body, §8.2 rows)
++   ========================================================================== */
++
++.admin-shell .admin-confirm,
++.admin-confirm-dialog .admin-confirm {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s4);
++  min-width: 0;
++}
++
++.admin-shell .admin-actions {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s3);
++}
++
++/* ==========================================================================
++   Dialogs (§8.9)
++
++   The confirm dialog is portaled outside `.admin-shell`, so these rules are
++   keyed on `.admin-confirm-dialog` itself (which only ever appears on admin
++   dialogs) and, for the shared overlay, on `body:has(.admin-confirm-dialog)`.
++   `components/ui/dialog.tsx` is a prohibited file and is not modified; the
++   extra attribute selector simply outranks its utility classes.
++   ========================================================================== */
++
++body:has(.admin-confirm-dialog) [data-slot="dialog-overlay"] {
++  background: rgba(0, 0, 0, .6);
++  backdrop-filter: blur(4px);
++  -webkit-backdrop-filter: blur(4px);
++}
++
++.admin-confirm-dialog[data-slot="dialog-content"] {
++  display: flex;
++  flex-direction: column;
++  gap: 0;
++  width: calc(100% - 32px);
++  max-width: 480px;
++  max-height: 90dvh;
++  padding: 0;
++  overflow: auto;
++  overscroll-behavior: contain;
++  border: 1px solid var(--adm-border);
++  border-radius: 16px;
++  background: var(--adm-card);
++  color: var(--adm-text);
++  font-family: var(--adm-font);
++  box-shadow: var(--adm-dialog-shadow);
++}
++
++.admin-confirm-dialog [data-slot="dialog-title"] {
++  padding: var(--adm-s5) var(--adm-s6) var(--adm-s3);
++  padding-right: 60px;
++  font-size: 18px;
++  line-height: 26px;
++  font-weight: 600;
++  color: var(--adm-text);
++}
++
++.admin-confirm-dialog [data-slot="dialog-description"] {
++  font-size: 14px;
++  line-height: 22px;
++  color: var(--adm-text-2);
++}
++
++/* Body: everything after the title. */
++.admin-confirm-dialog > form,
++.admin-confirm-dialog > .admin-confirm {
++  padding: 0 var(--adm-s6) var(--adm-s6);
++}
++
++/* Existing close button, resized to a 44x44 hit area. */
++.admin-confirm-dialog > button[data-slot="dialog-close"] {
++  position: absolute;
++  top: var(--adm-s2);
++  right: var(--adm-s2);
++  display: grid;
++  place-items: center;
++  width: 44px;
++  height: 44px;
++  min-width: 44px;
++  min-height: 44px;
++  border-radius: var(--adm-r-control);
++  color: var(--adm-text-2);
++  opacity: 1;
++}
++
++.admin-confirm-dialog > button[data-slot="dialog-close"]:hover {
++  background: var(--adm-hover);
++  color: var(--adm-text);
++}
++
++.admin-confirm-dialog [data-slot="dialog-footer"] {
++  display: flex;
++  flex-direction: row;
++  flex-wrap: wrap;
++  justify-content: flex-end;
++  gap: var(--adm-s3);
++  margin-top: var(--adm-s1);
++}
++
++.admin-confirm-dialog p {
++  margin: 0;
++  overflow-wrap: anywhere;
++}
++
++/* Typed-confirmation chip. */
++.admin-confirm-dialog code {
++  padding: 2px 6px;
++  border-radius: 6px;
++  background: var(--adm-muted-surface);
++  font-family: var(--adm-mono);
++  font-size: 12px;
++}
++
++/* --- Bottom sheet below 640px (§8.9) ------------------------------------- */
++@media (max-width: 639px) {
++  .admin-confirm-dialog[data-slot="dialog-content"] {
++    top: auto;
++    bottom: 0;
++    left: 0;
++    width: 100%;
++    max-width: none;
++    max-height: 90dvh;
++    transform: none;
++    border-bottom: 0;
++    border-radius: 20px 20px 0 0;
++    padding-bottom: env(safe-area-inset-bottom, 0px);
++    padding-top: var(--adm-s3);
++  }
++
++  /* Decorative drag handle. */
++  .admin-confirm-dialog[data-slot="dialog-content"]::before {
++    content: "";
++    position: sticky;
++    top: 0;
++    align-self: center;
++    width: 36px;
++    height: 4px;
++    flex: none;
++    margin-bottom: var(--adm-s2);
++    border-radius: var(--adm-r-pill);
++    background: var(--adm-border);
++  }
++
++  .admin-confirm-dialog[data-slot="dialog-content"][data-state="open"] {
++    animation: adm-sheet-up var(--adm-dur-lg) var(--adm-ease);
++  }
++
++  .admin-confirm-dialog [data-slot="dialog-footer"] {
++    flex-direction: column-reverse;
++  }
++
++  .admin-confirm-dialog [data-slot="dialog-footer"] .admin-button {
++    width: 100%;
++  }
++}
++
++@keyframes adm-sheet-up {
++  from {
++    transform: translateY(100%);
++  }
++
++  to {
++    transform: translateY(0);
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .admin-confirm-dialog[data-slot="dialog-content"][data-state="open"] {
++    animation: none;
++  }
++}
+diff --git a/app/rstmcadmin/admin-legacy.css b/app/rstmcadmin/admin-legacy.css
+new file mode 100644
+index 0000000..7e4a20e
+--- /dev/null
++++ b/app/rstmcadmin/admin-legacy.css
+@@ -0,0 +1,28 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — page and control styling.
++
++   Loaded first by admin.css. Tokens, typography, the app shell and the
++   reusable primitives live in the sibling admin-*.css layers that are
++   imported after this one. What remains here is the older page styling that
++   the later redesign phases replace in place.
++   ========================================================================== */
++/* The standalone two-factor screens reuse .admin-shell for tokens only; they
++   keep their own centred, padded single-column presentation. */
++.admin-shell.admin-two-factor-shell{min-height:100dvh;padding:var(--adm-s6);background:var(--adm-bg);color:var(--adm-text)}
++.admin-card{margin-top:0}.admin-card h2{margin-bottom:12px}
++.admin-detail dl{display:grid}.admin-confirm-dialog p{overflow-wrap:anywhere}.admin-confirm textarea{min-height:80px}
++@media(max-width:700px){.admin-shell.admin-two-factor-shell{padding:var(--adm-s3)}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}
++.admin-two-factor-page{min-height:calc(100dvh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
++
++.content-media{min-width:0;border:0;padding:0}.content-media p{color:var(--muted-foreground);margin:12px 0}.content-media-item{padding:12px 0;border-bottom:1px solid var(--border)}.content-media-item img,.content-media-item video{max-width:100%;width:auto;max-height:320px;object-fit:contain;background:var(--secondary);border-radius:12px}.content-media-item code,.admin-content-editor code{overflow-wrap:anywhere;word-break:break-word;display:block;font-size:12px}.admin-content-editor textarea{min-height:120px}.admin-content-editor .admin-button{align-self:start}
++
++.admin-content-fields{min-width:0;border:0;margin:0;padding:0}
++.appearance-editor fieldset{min-width:0}.appearance-nav-row{border:1px solid var(--border);border-radius:12px;padding:16px}.appearance-editor select{min-height:44px;width:100%;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}.appearance-editor .appearance-toggle{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:0 8px}.appearance-editor .appearance-toggle input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}.appearance-editor input[type=file]{font-size:12px;max-width:100%}.appearance-editor .admin-button{align-self:start}
++.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-top:20px}.feature-grid fieldset{border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}.feature-grid legend{font-weight:650}.feature-editor .feature-switch{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px}.feature-editor .feature-switch input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
++.labels-editor{max-width:100%}.labels-rows{display:grid;gap:1rem}.label-row{min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--border);border-radius:12px}.label-row legend,.label-row code,.label-row p{overflow-wrap:anywhere;white-space:pre-wrap}.label-row label{display:grid;gap:.5rem}.label-row textarea{width:100%;min-height:72px;resize:vertical}.labels-toolbar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}.labels-toolbar input[type=file]{max-width:100%;min-width:0}.labels-toolbar label{display:grid;gap:.5rem}
++.label-row label,.label-row textarea{min-width:0;max-width:100%}.label-row legend{max-width:100%}.labels-editor .admin-card{min-width:0}
++.label-row label{grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
++.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}.admin-table td small{display:block}.media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
++.moderation-console{display:grid;gap:20px;min-width:0}.moderation-tabs,.moderation-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.moderation-filters label{display:grid;gap:7px;flex:1 1 190px;min-width:min(100%,190px)}.moderation-report-list{display:grid;gap:14px}.moderation-report{display:grid;gap:12px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--background)}.moderation-report header{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;align-items:start}.moderation-report header p{margin:6px 0}.moderation-report p,.moderation-report code{overflow-wrap:anywhere}.moderation-report label{display:grid;gap:6px}.moderation-report textarea{width:100%;max-width:100%;min-width:0;min-height:80px;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-report input{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-console .admin-table-scroll{min-width:0;max-width:100%;overflow:auto}.moderation-console .admin-table{min-width:680px}.moderation-console .admin-card{min-width:0}
++.admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;min-height:100px;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
++.analytics-dashboard,.system-tools{display:grid;gap:18px}.analytics-controls,.admin-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.analytics-controls label{min-width:150px}.analytics-controls h2,.analytics-controls p{margin-top:0}.analytics-summary{margin:0}.analytics-summary .admin-stat strong{font-size:clamp(20px,3vw,30px)}.analytics-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analytics-chart{min-width:0}.analytics-chart h3{margin:0 0 14px;font-size:15px}.analytics-bars{height:112px;display:flex;align-items:end;gap:3px;padding:4px 2px;border-bottom:1px solid var(--line);overflow:hidden}.analytics-bars span{flex:1 1 0;min-width:2px;background:var(--primary);border-radius:3px 3px 0 0;opacity:.82}.analytics-axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:12px}.analytics-caption{max-width:340px;max-height:4.5em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.analytics-ranked-list p{display:flex;justify-content:space-between;gap:12px;padding:7px 0;margin:0;border-bottom:1px solid var(--line)}.analytics-funnel-bar{height:18px;margin:16px 0 10px;background:var(--canvas);border-radius:999px;overflow:hidden}.analytics-funnel-bar span{display:block;height:100%;background:var(--primary);border-radius:inherit}.analytics-funnel strong{display:block}.migration-chips{display:flex;flex-wrap:wrap;gap:8px}.migration-chips span{padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}.migration-chips .is-applied{border-color:#21835d}.migration-chips .is-pending{border-color:#b45309;color:#b45309}.system-env-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:0 20px;margin:0}.system-env-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.system-env-list dt{font-weight:600}.system-env-list dd{margin:0;color:var(--muted)}.system-sql textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:150px}.system-sql-result{max-height:480px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);white-space:pre-wrap;overflow-wrap:anywhere}.admin-button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.admin-guide{max-width:900px}.admin-guide h2{margin-top:0}.export-manager .admin-detail{align-items:end}@media(max-width:700px){.analytics-chart-grid{grid-template-columns:minmax(0,1fr)}.analytics-controls,.admin-card-heading{flex-direction:column}.analytics-controls label{width:100%}.analytics-bars{height:90px}}
+diff --git a/app/rstmcadmin/admin-tokens.css b/app/rstmcadmin/admin-tokens.css
+index 3d4efdc..1c3356d 100644
+--- a/app/rstmcadmin/admin-tokens.css
++++ b/app/rstmcadmin/admin-tokens.css
+@@ -13,7 +13,8 @@
+    A `.dark` class is honoured too, in case a later theme provider sets one.
+    ========================================================================== */
+ 
+-.admin-shell {
++.admin-shell,
++.admin-confirm-dialog {
+   /* ---- Accent. Change ONLY this block to re-brand (brand pink = #eb456e) -- */
+   --adm-accent: #1b84ff;
+   --adm-accent-hover: #0f6fe0;
+@@ -56,12 +57,21 @@
+   --adm-s8: 32px;
+   --adm-s9: 48px;
+ 
++  /* ---- Inline SVG decorations (no external asset, no CDN) -------------- */
++  --adm-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>");
++  --adm-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'><path d='M5 12h14'/></svg>");
++  /* Used as mask images, so the declared colour is irrelevant. */
++  --adm-icon-success: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='m9 12 2 2 4-4'/></svg>");
++  --adm-icon-danger: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 8v4'/><path d='M12 16h.01'/></svg>");
++  --adm-icon-info: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 16v-4'/><path d='M12 8h.01'/></svg>");
++
+   /* The single remaining piece of brand pink: the wordmark dot (§6.2). */
+   --adm-brand-dot: #eb456e;
+ }
+ 
+ /* ---- LIGHT (base) -------------------------------------------------------- */
+-.admin-shell {
++.admin-shell,
++.admin-confirm-dialog {
+   color-scheme: light;
+   --adm-bg: #f3f4f6;
+   --adm-panel: #fff;
+@@ -82,11 +92,15 @@
+   --adm-purple-text: #6234c7;
+   --adm-cyan-text: #0e7490;             /* companion to --adm-cyan (§9.1) */
+   --adm-dialog-shadow: 0 24px 64px rgba(16, 24, 40, .24);
++  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
++  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+ }
+ 
+ /* ---- DARK (default look, matches the reference) -------------------------- */
+ html[data-theme="dark"] .admin-shell,
+-.dark .admin-shell {
++html[data-theme="dark"] .admin-confirm-dialog,
++.dark .admin-shell,
++.dark .admin-confirm-dialog {
+   color-scheme: dark;
+   --adm-bg: #0f0f12;                    /* page + sidebar */
+   --adm-panel: #08080a;                 /* main panel */
+@@ -107,10 +121,13 @@ html[data-theme="dark"] .admin-shell,
+   --adm-purple-text: #a78bfa;
+   --adm-cyan-text: #45d0e8;
+   --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
++  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
++  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+ }
+ 
+ @media (prefers-color-scheme: dark) {
+-  html:not([data-theme]) .admin-shell {
++  html:not([data-theme]) .admin-shell,
++  html:not([data-theme]) .admin-confirm-dialog {
+     color-scheme: dark;
+     --adm-bg: #0f0f12;
+     --adm-panel: #08080a;
+@@ -131,6 +148,8 @@ html[data-theme="dark"] .admin-shell,
+     --adm-purple-text: #a78bfa;
+     --adm-cyan-text: #45d0e8;
+     --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
++  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
++  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+   }
+ }
+ 
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 3d6db41..90560bf 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -1,36 +1,19 @@
+ /* ==========================================================================
+-   FunctionGram / RSTMC admin — page and control styling.
++   FunctionGram / RSTMC admin — stylesheet entry point.
+ 
+-   Tokens, typography and the application shell now live in admin-tokens.css,
+-   admin-shell.css and admin-components.css. What remains below is the older
+-   page/control styling that the later redesign phases replace in place.
+-   ========================================================================== */
+-/* The standalone two-factor screens reuse .admin-shell for tokens only; they
+-   keep their own centred, padded single-column presentation. */
+-.admin-shell.admin-two-factor-shell{min-height:100dvh;padding:var(--adm-s6);background:var(--adm-bg);color:var(--adm-text)}
+-.admin-pagination a{display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border-radius:18px;background:var(--secondary)}
+-.admin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.admin-stat,.admin-card{border:1px solid var(--border);border-radius:20px;background:var(--card);padding:24px;min-width:0}.admin-stat p,.admin-stat small,.admin-muted{color:var(--muted-foreground)}.admin-stat strong{display:block;font-size:32px;margin:8px 0}.admin-stat small{font-size:12px}.admin-card{margin-top:20px}.admin-card h2{margin-bottom:12px}
+-.admin-search{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:24px 0 12px}.admin-search label:first-child{flex:1 1 240px}.admin-search label,.admin-confirm label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;min-width:0}
+-.admin-shell input,.admin-shell select,.admin-confirm input,.admin-confirm textarea{min-height:44px;width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}
+-.admin-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);color:var(--foreground);font-weight:600;cursor:pointer;font-size:14px;line-height:1.4}.admin-primary{background:var(--primary);color:var(--primary-foreground)}.admin-button:disabled{opacity:.5;cursor:wait}
+-.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
+-.admin-table-scroll{overflow-x:auto;max-width:100%;border:1px solid var(--border);border-radius:16px;margin:20px 0;background:var(--card)}.admin-table-scroll table{border-collapse:collapse;width:100%;text-align:left;min-width:700px;font-size:14px}.admin-table-scroll caption{text-align:left;padding:16px;color:var(--muted-foreground);font-size:13px}.admin-table-scroll th{color:var(--muted-foreground);font-size:12px;text-transform:uppercase;letter-spacing:.6px}.admin-table-scroll th,.admin-table-scroll td{padding:14px 16px;border-top:1px solid var(--border);max-width:340px;overflow-wrap:anywhere}.admin-table-scroll td a{display:inline-flex;min-height:44px;align-items:center;text-decoration:underline}.admin-table-scroll td small{display:block;color:var(--muted-foreground)}
+-.admin-pagination{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap}.admin-drawer summary{cursor:pointer;min-height:44px;font-weight:650}.admin-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.admin-detail dl{display:grid;gap:10px}.admin-detail dt{color:var(--muted-foreground);font-size:12px}.admin-detail dd{overflow-wrap:anywhere;margin:0 0 8px}.admin-action-grid{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.admin-confirm{display:flex;flex-direction:column;gap:16px}.admin-confirm-dialog{max-height:90dvh;overflow:auto}.admin-confirm-dialog p{overflow-wrap:anywhere}.admin-confirm textarea{min-height:80px}
+-@media(max-width:700px){.admin-shell.admin-two-factor-shell{padding:var(--adm-s3)}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
+-.admin-two-factor-page{min-height:calc(100dvh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
++   Every admin surface already imports this one file, including the two
++   standalone two-factor screens outside `app/rstmcadmin/`, so the redesign is
++   composed here in cascade order:
++
++     1. admin-legacy.css     page styling not yet replaced by a redesign phase
++     2. admin-tokens.css     §4 design tokens and §5 typography
++     3. admin-shell.css      §6 app shell and §7 responsive rules
++     4. admin-components.css §8 reusable primitives
+ 
+-.admin-confirm-dialog>button{min-width:44px;min-height:44px;top:4px;right:4px;display:grid;place-items:center}
+-.admin-content-editor select{min-height:44px;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}
+-.content-checkbox{display:flex;align-items:center;justify-content:center;min-height:44px;min-width:44px}.admin-shell .content-checkbox input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
+-.content-media{min-width:0;border:0;padding:0}.content-media p{color:var(--muted-foreground);margin:12px 0}.content-media-item{padding:12px 0;border-bottom:1px solid var(--border)}.content-media-item img,.content-media-item video{max-width:100%;width:auto;max-height:320px;object-fit:contain;background:var(--secondary);border-radius:12px}.content-media-item code,.admin-content-editor code{overflow-wrap:anywhere;word-break:break-word;display:block;font-size:12px}.admin-content-editor textarea{min-height:120px}.admin-content-editor .admin-button{align-self:start}
++   Later layers must win at equal specificity, so they are imported last.
++   ========================================================================== */
+ 
+-.admin-content-fields{min-width:0;border:0;margin:0;padding:0}
+-.appearance-editor fieldset{min-width:0}.appearance-nav-row{border:1px solid var(--border);border-radius:12px;padding:16px}.appearance-editor select{min-height:44px;width:100%;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}.appearance-editor .appearance-toggle{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:0 8px}.appearance-editor .appearance-toggle input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}.appearance-editor input[type=file]{font-size:12px;max-width:100%}.appearance-editor .admin-button{align-self:start}
+-.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-top:20px}.feature-grid fieldset{border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}.feature-grid legend{font-weight:650}.feature-editor .feature-switch{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px}.feature-editor .feature-switch input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
+-.labels-editor{max-width:100%}.labels-rows{display:grid;gap:1rem}.label-row{min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--border);border-radius:12px}.label-row legend,.label-row code,.label-row p{overflow-wrap:anywhere;white-space:pre-wrap}.label-row label{display:grid;gap:.5rem}.label-row textarea{width:100%;min-height:72px;resize:vertical}.labels-toolbar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}.labels-toolbar input[type=file]{max-width:100%;min-width:0}.labels-toolbar label{display:grid;gap:.5rem}
+-.label-row label,.label-row textarea{min-width:0;max-width:100%}.label-row legend{max-width:100%}.labels-editor .admin-card{min-width:0}
+-.label-row label{grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
+-.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}.admin-table td small{display:block}.media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
+-.moderation-console{display:grid;gap:20px;min-width:0}.moderation-tabs,.moderation-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.moderation-filters label{display:grid;gap:7px;flex:1 1 190px;min-width:min(100%,190px)}.moderation-report-list{display:grid;gap:14px}.moderation-report{display:grid;gap:12px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--background)}.moderation-report header{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;align-items:start}.moderation-report header p{margin:6px 0}.moderation-report p,.moderation-report code{overflow-wrap:anywhere}.moderation-report label{display:grid;gap:6px}.moderation-report textarea{width:100%;max-width:100%;min-width:0;min-height:80px;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-report input{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-console .admin-table-scroll{min-width:0;max-width:100%;overflow:auto}.moderation-console .admin-table{min-width:680px}.moderation-console .admin-card{min-width:0}
+-.admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;min-height:100px;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
+-.analytics-dashboard,.system-tools{display:grid;gap:18px}.analytics-controls,.admin-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.analytics-controls label{min-width:150px}.analytics-controls h2,.analytics-controls p{margin-top:0}.analytics-summary{margin:0}.analytics-summary .admin-stat strong{font-size:clamp(20px,3vw,30px)}.analytics-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analytics-chart{min-width:0}.analytics-chart h3{margin:0 0 14px;font-size:15px}.analytics-bars{height:112px;display:flex;align-items:end;gap:3px;padding:4px 2px;border-bottom:1px solid var(--line);overflow:hidden}.analytics-bars span{flex:1 1 0;min-width:2px;background:var(--primary);border-radius:3px 3px 0 0;opacity:.82}.analytics-axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:12px}.analytics-caption{max-width:340px;max-height:4.5em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.analytics-ranked-list p{display:flex;justify-content:space-between;gap:12px;padding:7px 0;margin:0;border-bottom:1px solid var(--line)}.analytics-funnel-bar{height:18px;margin:16px 0 10px;background:var(--canvas);border-radius:999px;overflow:hidden}.analytics-funnel-bar span{display:block;height:100%;background:var(--primary);border-radius:inherit}.analytics-funnel strong{display:block}.migration-chips{display:flex;flex-wrap:wrap;gap:8px}.migration-chips span{padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}.migration-chips .is-applied{border-color:#21835d}.migration-chips .is-pending{border-color:#b45309;color:#b45309}.system-env-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:0 20px;margin:0}.system-env-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.system-env-list dt{font-weight:600}.system-env-list dd{margin:0;color:var(--muted)}.system-sql textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:150px}.system-sql-result{max-height:480px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);white-space:pre-wrap;overflow-wrap:anywhere}.admin-button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.admin-guide{max-width:900px}.admin-guide h2{margin-top:0}.export-manager .admin-detail{align-items:end}@media(max-width:700px){.analytics-chart-grid{grid-template-columns:minmax(0,1fr)}.analytics-controls,.admin-card-heading{flex-direction:column}.analytics-controls label{width:100%}.analytics-bars{height:90px}}
++@import './admin-legacy.css';
++@import './admin-tokens.css';
++@import './admin-shell.css';
++@import './admin-components.css';
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index 0f9750d..18da8de 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -19,7 +19,7 @@ export default async function Content({searchParams}:{searchParams:Promise<Recor
+       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
+       <label>Status<select name="status" defaultValue={filter.status}>{['all','visible','hidden','trash','pinned'].map(v=><option key={v}>{v}</option>)}</select></label>
+       <label>Author ID<input name="author" maxLength={100} defaultValue={filter.author}/></label><label>Post ID (comments)<input name="post" maxLength={100} defaultValue={filter.post}/></label><label>Category (posts)<select name="category" defaultValue={filter.category}>{['','For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(v=><option key={v} value={v}>{v||'All categories'}</option>)}</select></label>
+-      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button">Filter content</button><Link className="admin-button" href={base}>Clear</Link>
++      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button admin-primary">Filter content</button><Link className="admin-button" data-tone="ghost" href={base}>Clear</Link>
+     </form><ContentTable key={JSON.stringify(filter)} items={data.items} resource={filter.resource} trash={filter.status==='trash'} role={actor.role}/>
+     <nav className="admin-pagination" aria-label="Content pagination">{filter.page>1?<Link href={pageLink(filter.page-1)}>Previous</Link>:<span/>}<span>Page {filter.page} of {Math.max(1,Math.ceil(data.total/50))}</span>{filter.page*50<data.total&&<Link href={pageLink(filter.page+1)}>Next</Link>}</nav>
+     <p className="admin-muted">Trash can be restored for 30 days. No automatic purge runs; only owners can permanently purge one confirmed item at a time. Unhidden is not necessarily public: expiry, private profiles and account trash also apply.</p>
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index 7067e14..1886349 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -4,9 +4,6 @@ import { hasPermission } from '@/lib/admin/permissions';
+ import type { AdminPermission } from '@/lib/admin/permissions';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { AdminNav, type AdminNavGroup, type AdminNavIcon } from '@/components/admin/admin-nav';
+-import './admin-tokens.css';
+-import './admin-shell.css';
+-import './admin-components.css';
+ import './admin.css';
+ 
+ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: { index: false, follow: false } };
+diff --git a/components/admin/actions.tsx b/components/admin/actions.tsx
+index 7c0a0db..588a9f5 100644
+--- a/components/admin/actions.tsx
++++ b/components/admin/actions.tsx
+@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
+ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+ import type { UserAction } from '@/lib/admin/users';
+ import type { UserFilters } from '@/lib/admin/queries';
++import { dangerTone } from './badge';
+ 
+ const labels: Record<UserAction, string> = { ban: 'Ban account', unban: 'Unban account', promote: 'Promote to admin', promoteModerator: 'Promote to moderator', demote: 'Demote to user', signout: 'Force sign-out', verify: 'Mark email verified', delete: 'Move account to trash', restore: 'Restore account', resetPassword: 'Send password reset' };
+ export function UserActions({ id, email, actions }: { id: string; email: string; actions: UserAction[] }) {
+@@ -27,7 +28,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+   }
+   return <div className="admin-actions">
+     <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+-    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
++    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={dangerTone(action)} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+     {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
+     {!selected && message && <p role="status">{message}</p>}
+     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
+diff --git a/components/admin/audit.tsx b/components/admin/audit.tsx
+index 1b848f8..058d220 100644
+--- a/components/admin/audit.tsx
++++ b/components/admin/audit.tsx
+@@ -12,7 +12,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
+   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
+   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
+   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
+-  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" href="/rstmcadmin/audit">Clear</a>
++  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a>
+  </form><button className="admin-button" disabled={busy} onClick={async()=>{
+   setBusy(true);setError('');
+   try{
+diff --git a/components/admin/badge.tsx b/components/admin/badge.tsx
+index 22f73ef..a3a283f 100644
+--- a/components/admin/badge.tsx
++++ b/components/admin/badge.tsx
+@@ -59,3 +59,12 @@ export function Badge({ tone, dot, children, className }: {
+ export function AutoBadge({ children, dot, className }: { children: string; dot?: boolean; className?: string }) {
+   return <Badge tone={toneFor(children)} dot={dot} className={className}>{children}</Badge>;
+ }
++
++/** Destructive operations get the danger button style (§8.1). The name comes
++ *  from the operation the button already performs; word boundaries keep
++ *  `unban` and `unhide` out of the danger set. No behaviour changes. */
++const DANGER_OPERATION = /\b(delete|purge|ban|trash|revoke|hide)\b/i;
++
++export function dangerTone(operation: string): 'danger' | undefined {
++  return DANGER_OPERATION.test(operation) ? 'danger' : undefined;
++}
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+index 78de7cb..3bf2468 100644
+--- a/components/admin/content.tsx
++++ b/components/admin/content.tsx
+@@ -10,6 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { ContentResource } from '@/lib/admin/content';
+ import type { Settings, AdminRole } from '@/lib/admin/config';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
++import { dangerTone } from './badge';
+ 
+ async function send(body:Record<string,unknown>) {
+   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+@@ -21,7 +22,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
+   const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
+   const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
+   const expected=['delete','purge'].includes(operation)&&ids.length===1?(targetNames[ids[0]]||ids[0]):ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
+-  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
++  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" data-tone={dangerTone(op)} disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
+     {!operation&&message&&<p role="status">{message}</p>}
+     <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
+       <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>
+diff --git a/components/admin/media.tsx b/components/admin/media.tsx
+index ef7c5fa..aead1af 100644
+--- a/components/admin/media.tsx
++++ b/components/admin/media.tsx
+@@ -22,9 +22,9 @@ export function StorageInventory({report,owner}:{report:Awaited<ReturnType<typeo
+  const url=(page:number)=>'/rstmcadmin/media?'+new URLSearchParams({...report.filter,page:String(page)}).toString();
+  const manage=(key:string,next:string)=>{setSelected(key);setAction(next);setConfirmation('');setReason('');setMessage('');};
+  return <section className="admin-card admin-confirm"><h2>Storage inventory</h2><p>Registered objects: {String(report.summary.assets)} · {formatBytes(Number(report.summary.bytes))} · retained originals: {formatBytes(Number(report.summary.retained_source_bytes))}. Quarantined: {String(report.summary.quarantined)} · Trash: {String(report.summary.trashed)}.</p><p>Active reservations: {String(report.pending.reservations)} · {formatBytes(Number(report.pending.reserved_bytes))} reserved, not confirmed storage. Totals include quarantine and trash. Bundled demo media and unrelated objects in a shared Blob store are excluded.</p>
+- <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button">Filter assets</button></form>
++ <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button admin-primary">Filter assets</button></form>
+  <p>Orphans have no references from any posts (including hidden, expired and trashed posts), avatars, account images or branding settings. Trash is restorable for 30 days. Permanent deletion requires an owner and a typed asset key. Quarantine blocks the application media URL immediately; already-known public Blob URLs and downloaded bytes cannot be recalled.</p>
+- <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
++ <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
+  {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}>Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next</Link>}</nav>
+  <h3>Storage by account (25 accounts per page)</h3><div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Owner ID</th><th>Assets</th><th>Bytes</th></tr></thead><tbody>{report.owners.map(item=><tr key={item.owner_id||'unknown'}><td>{item.owner_id||'Unknown'}</td><td>{String(item.assets)}</td><td>{formatBytes(Number(item.bytes))}</td></tr>)}</tbody></table></div>
+  <h3>Expired reservations (25 per page)</h3><p>Reconcile checks for an abandoned object from a known app reservation, then registers it in quarantine for safe cleanup. Missing objects are not reported as deleted. Unknown objects from other applications are never swept.</p>{report.expired.map(item=><div key={item.key} className="media-reservation"><code>{item.key}</code><span>{formatBytes(Number(item.expected_size))}</span><button className="admin-button" onClick={()=>manage(item.key,'reconcile')}>Reconcile reservation</button></div>)}{(report.owners.length===25||report.expired.length===25)&&<Link className="admin-button" href={url(report.filter.page+1)}>Next accounts / reservations</Link>}
+diff --git a/components/admin/moderation.tsx b/components/admin/moderation.tsx
+index a376a15..45c411f 100644
+--- a/components/admin/moderation.tsx
++++ b/components/admin/moderation.tsx
+@@ -39,6 +39,6 @@ function ReportCard({report,busy,actorId,role,onAssign,onSaveNotes,onAction,onLo
+  const [notes,setNotes]=useState(report.notes||''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(''),[banConfirm,setBanConfirm]=useState('');const target=report.target_type==='post'?report.target_author_id||report.target_id:report.target_id;const resolved=['actioned','dismissed'].includes(report.status);
+  return <article className="moderation-report"><header><div><strong>{report.reason.replaceAll('_',' ')}</strong> · {report.status} · {report.target_type}<p>From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p>Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
+  <label>Moderator notes<textarea rows={3} maxLength={2000} value={notes} disabled={resolved} onChange={e=>setNotes(e.target.value)}/></label><button className="admin-button" disabled={resolved||busy} onClick={()=>onSaveNotes(notes)}>Save notes</button>
+- {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" disabled={busy||!reason.trim()||confirm!==report.id} onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
++ {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||confirm!==report.id} onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
+  </article>;
+ }
+diff --git a/components/admin/ui.tsx b/components/admin/ui.tsx
+index bef13df..0066175 100644
+--- a/components/admin/ui.tsx
++++ b/components/admin/ui.tsx
+@@ -18,7 +18,7 @@ export function SearchBar({ filters }: { filters: UserFilters }) {
+     <label>Status<select name="status" defaultValue={filters.status}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
+     <label>Role<select name="role" defaultValue={filters.role}>{['all','user','moderator','admin','owner'].map(role => <option key={role}>{role}</option>)}</select></label>
+     <label>Per page<select name="limit" defaultValue={filters.limit}>{[25,50,100,200].map(limit => <option key={limit}>{limit}</option>)}</select></label>
+-    <button className="admin-button" type="submit">Apply filters</button>
++    <button className="admin-button admin-primary" type="submit">Apply filters</button>
+   </form>;
+ }
+ export function FilterChips({ filters }: { filters: UserFilters }) {
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index ebd39a3..884838a 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -649,7 +649,7 @@ Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
+ | Phase | Name | Status | Patch |
+ | --- | --- | --- | --- |
+ | 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
+-| 2 | Primitives — reusable admin control styling | Not started | `patches/phase-2-primitives.patch` |
++| 2 | Primitives — reusable admin control styling | Done locally; all four gates green | `patches/phase-2-primitives.patch` |
+ | 3 | Pages, polish and final QA | Not started | `patches/phase-3-pages-polish-qa.patch` |
+ 
+ ### Baseline measured before any redesign change
+@@ -760,3 +760,104 @@ markup rather than observed. Deployment-preview visual QA remains open.
+   `patches/phase-1-foundation.patch.txt`.
+ - Contains Phase 1 changes only, and verified with `git apply --check` against
+   a clean extraction of the `main` baseline `f6e3c37e`.
++
++## Phase 2 — Primitives
++
++Guide sections **§8.1–§8.15**. Visual only: no route, API, data, permission,
++copy, column, filter, field or ARIA change.
++
++### Stylesheet restructure
++
++`app/rstmcadmin/admin.css` is imported by the admin layout *and* by the two
++standalone two-factor screens outside `app/rstmcadmin/`. To give both the same
++tokens without editing files outside the allowed list, the old contents moved
++to `admin-legacy.css` (`git mv`) and `admin.css` became a short entry point
++that imports the layers in cascade order:
++
++1. `admin-legacy.css` — page styling no phase has replaced yet
++2. `admin-tokens.css` — §4 tokens, §5 typography
++3. `admin-shell.css` — §6 shell, §7 responsive
++4. `admin-components.css` — §8 primitives
++
++Later layers therefore win at equal specificity. Verified in the built
++stylesheet: legacy rules start at byte 469, tokens 9220, shell 18068,
++components 26132.
++
++### What was built
++
++| Section | Primitive |
++| --- | --- |
++| 8.1 | Buttons: default / `admin-primary` / `data-tone="danger"` / `data-tone="ghost"`, 44px hit area, 36px compact variant inside tables and action grids (44px preserved via a `::before` overlay) |
++| 8.2 | Text inputs, selects (inline SVG chevron), textareas, search fields (inline SVG magnifier), labels, help text |
++| 8.3 | Checkbox and radio: 20px box, accent fill, inline SVG check / dash, 44px wrapper |
++| 8.4 | Cards and stat cards: 1px border, `--adm-r-card`, `--adm-shadow`, hover lift; nested cards flattened |
++| 8.5 | Chips and filter pills |
++| 8.6 | Tables: sticky caption header, hover tint, `min-width:720px`, last row never clipped (`tbody tr:last-child td{border-bottom:0}` plus `overflow-y:visible`) |
++| 8.7 | Pagination |
++| 8.8 | Filter toolbar: aligned controls, primary submit, ghost clear |
++| 8.9 | Dialogs: 16px radius, blurred overlay, 44px close target, bottom sheet under 640px |
++| 8.10 | Avatars (seeded in Phase 1, reused here) |
++| 8.11 | Alerts: `[role="status"]` success, `[role="alert"]` / `.admin-error` danger, `.admin-note` info, each with a masked inline SVG icon that inherits the tone colour; empty live regions stay hidden |
++| 8.12 | Empty states on `td[colspan]` |
++| 8.13 | Drawer / `details` disclosure with rotating chevron |
++| 8.14 | Code and `pre` blocks |
++| 8.15 | Detail-page structure and key/value rows |
++
++### Icon tokens
++
++Seven inline `data:image/svg+xml` tokens were added to `admin-tokens.css`
++(`--adm-chevron`, `--adm-magnifier`, `--adm-check`, `--adm-dash`,
++`--adm-icon-success`, `--adm-icon-danger`, `--adm-icon-info`). No external
++image, CDN or font is referenced. The three alert icons are applied as
++`mask-image` with `background:currentColor`, so they follow the theme
++automatically; the chevron and magnifier are `background-image` (pseudo-
++elements are not available on `select` and `input`) and are therefore
++redefined per theme.
++
++The token blocks now also target `.admin-confirm-dialog`, because Radix
++portals the dialog to `<body>`, outside `.admin-shell`, where `--adm-*` would
++not otherwise inherit. `components/ui/dialog.tsx` is a prohibited file and was
++not modified; the dialog is styled entirely from CSS, using
++`.admin-confirm-dialog[data-slot="dialog-content"]` to outrank the utility
++classes already on the element, and `body:has(.admin-confirm-dialog)` to tint
++the shared overlay without affecting the public site.
++
++### Markup touched
++
++Class and attribute changes only — no action, handler, label or field changed.
++
++- `components/admin/badge.tsx` — new `dangerTone(operation)` helper, matching
++  `/\b(delete|purge|ban|trash|revoke|hide)\b/i`. Word boundaries deliberately
++  keep `unban`, `unhide` and `restore` neutral (verified against all 21
++  operation names in use).
++- `actions.tsx`, `content.tsx` — `data-tone={dangerTone(op)}` on the action grids.
++- `media.tsx`, `moderation.tsx` — `data-tone="danger"` on trash / purge / hide /
++  ban; `Filter assets` promoted to primary.
++- `ui.tsx`, `content/page.tsx`, `audit.tsx` — filter toolbars get a primary
++  submit and a ghost `Clear` (§8.8).
++
++### Superseded legacy rules removed
++
++`admin-legacy.css` dropped its button, input/select, search toolbar, chips,
++table, pagination, checkbox, dialog-close and card rules (now 28 lines, from
++37). Everything still referenced by a page that Phase 3 has not reached yet
++was kept.
++
++### Validation
++
++| Gate | Result |
++| --- | --- |
++| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
++| `npm run typecheck` | pass |
++| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
++| `npm run build` | pass |
++
++Live check against the PGlite fixture: all 15 admin routes plus `View site`
++return 200, every page renders exactly 16 nav links in the prescribed order,
++one page head, and `aria-current="page"` on the active entry only. `data-tone`
++renders as expected (`Hide` and `Move to trash` danger, `Unhide` and `Restore`
++neutral, `Clear` ghost).
++
++Patch: `patches/phase-2-primitives.patch` (identical copy at
++`patches/phase-2-primitives.patch.txt`), verified with `git apply --check`
++against a clean extraction of the Phase 1 commit `3f40375`.

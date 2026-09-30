@@ -131,3 +131,1109 @@
   background: rgba(248, 40, 90, .14);
   color: var(--adm-danger-text);
 }
+
+/* ==========================================================================
+   PHASE 2 — buttons, inputs, cards, tables, dialogs and the rest of §8.
+   ========================================================================== */
+
+/* ==========================================================================
+   Buttons (§8.1)
+   ========================================================================== */
+
+.admin-shell .admin-button,
+.admin-confirm-dialog .admin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--adm-s2);
+  min-height: 44px;
+  padding: 0 var(--adm-s4);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-card);
+  color: var(--adm-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--adm-dur) ease-out, border-color var(--adm-dur) ease-out, color var(--adm-dur) ease-out;
+}
+
+.admin-shell .admin-button:hover,
+.admin-confirm-dialog .admin-button:hover {
+  background: var(--adm-hover);
+  text-decoration: none;
+}
+
+.admin-shell .admin-button svg,
+.admin-confirm-dialog .admin-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+/* Primary. */
+.admin-shell .admin-button.admin-primary,
+.admin-confirm-dialog .admin-button.admin-primary {
+  border-color: var(--adm-accent);
+  background: var(--adm-accent);
+  color: var(--adm-on-accent);
+}
+
+.admin-shell .admin-button.admin-primary:hover,
+.admin-confirm-dialog .admin-button.admin-primary:hover {
+  border-color: var(--adm-accent-hover);
+  background: var(--adm-accent-hover);
+}
+
+/* Danger — derived from the existing operation name, never from new logic. */
+.admin-shell .admin-button[data-tone="danger"],
+.admin-shell .admin-button.admin-danger,
+.admin-confirm-dialog .admin-button[data-tone="danger"],
+.admin-confirm-dialog .admin-button.admin-danger {
+  border-color: var(--adm-danger);
+  background: transparent;
+  color: var(--adm-danger-text);
+}
+
+.admin-shell .admin-button[data-tone="danger"]:hover:not(:disabled),
+.admin-shell .admin-button.admin-danger:hover:not(:disabled),
+.admin-confirm-dialog .admin-button[data-tone="danger"]:hover:not(:disabled),
+.admin-confirm-dialog .admin-button.admin-danger:hover:not(:disabled) {
+  background: var(--adm-danger);
+  color: #fff;
+}
+
+/* Ghost. */
+.admin-shell .admin-button[data-tone="ghost"],
+.admin-confirm-dialog .admin-button[data-tone="ghost"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-button[data-tone="ghost"]:hover:not(:disabled),
+.admin-confirm-dialog .admin-button[data-tone="ghost"]:hover:not(:disabled) {
+  background: var(--adm-accent-soft);
+}
+
+.admin-shell .admin-button:disabled,
+.admin-confirm-dialog .admin-button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.admin-shell .admin-button:disabled:hover,
+.admin-confirm-dialog .admin-button:disabled:hover {
+  background: var(--adm-card);
+  color: var(--adm-text);
+}
+
+.admin-shell .admin-button.admin-primary:disabled:hover,
+.admin-confirm-dialog .admin-button.admin-primary:disabled:hover {
+  background: var(--adm-accent);
+  color: var(--adm-on-accent);
+}
+
+/* Compact variant: looks 36px, keeps a 44px hit area (§8.1, §1.4). */
+.admin-shell .admin-table-scroll .admin-button,
+.admin-shell .media-row-actions .admin-button,
+.admin-shell .admin-action-grid .admin-button {
+  position: relative;
+  min-height: 36px;
+  padding: 0 var(--adm-s3);
+}
+
+.admin-shell .admin-table-scroll .admin-button::before,
+.admin-shell .media-row-actions .admin-button::before,
+.admin-shell .admin-action-grid .admin-button::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+  min-height: 44px;
+}
+
+.admin-shell .admin-action-grid,
+.admin-shell .admin-button-row,
+.admin-shell .media-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--adm-s2);
+  margin: var(--adm-s4) 0 0;
+}
+
+/* ==========================================================================
+   Inputs, selects, textarea (§8.2)
+   ========================================================================== */
+
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea,
+.admin-confirm input,
+.admin-confirm select,
+.admin-confirm textarea,
+.admin-confirm-dialog input,
+.admin-confirm-dialog select,
+.admin-confirm-dialog textarea {
+  min-height: 44px;
+  width: 100%;
+  padding: 10px var(--adm-s3);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-card);
+  color: var(--adm-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  transition: border-color var(--adm-dur) ease-out, box-shadow var(--adm-dur) ease-out;
+}
+
+.admin-shell ::placeholder,
+.admin-confirm-dialog ::placeholder {
+  color: var(--adm-text-3);
+}
+
+.admin-shell input:hover:not(:disabled),
+.admin-shell select:hover:not(:disabled),
+.admin-shell textarea:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--adm-text-3) 60%, transparent);
+}
+
+.admin-shell input:focus,
+.admin-shell select:focus,
+.admin-shell textarea:focus,
+.admin-confirm-dialog input:focus,
+.admin-confirm-dialog select:focus,
+.admin-confirm-dialog textarea:focus {
+  border-color: var(--adm-accent);
+  box-shadow: 0 0 0 3px var(--adm-accent-soft);
+  outline: none;
+}
+
+.admin-shell [aria-invalid="true"],
+.admin-shell input:user-invalid,
+.admin-shell textarea:user-invalid {
+  border-color: var(--adm-danger);
+  box-shadow: 0 0 0 3px rgba(248, 40, 90, .14);
+}
+
+.admin-shell input:disabled,
+.admin-shell select:disabled,
+.admin-shell textarea:disabled,
+.admin-shell fieldset:disabled input,
+.admin-shell fieldset:disabled select,
+.admin-shell fieldset:disabled textarea {
+  background: var(--adm-muted-surface);
+  opacity: .6;
+}
+
+/* Select chevron: a theme-aware inline SVG (§8.2). */
+.admin-shell select,
+.admin-confirm-dialog select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: var(--adm-chevron);
+  background-repeat: no-repeat;
+  background-position: right var(--adm-s3) center;
+  background-size: 16px 16px;
+}
+
+.admin-shell textarea,
+.admin-confirm-dialog textarea {
+  min-height: 120px;
+  padding: var(--adm-s3);
+  resize: vertical;
+}
+
+.admin-shell input[type="file"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.admin-shell input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Labels sit above their field. */
+.admin-shell label,
+.admin-confirm label,
+.admin-confirm-dialog label {
+  min-width: 0;
+}
+
+.admin-shell .admin-search label,
+.admin-shell .admin-confirm label,
+.admin-shell .moderation-filters label,
+.admin-shell .media-filters label,
+.admin-shell .media-settings-grid label,
+.admin-confirm-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--adm-text);
+}
+
+/* Search fields get a magnifier inside the box (decoration only). */
+.admin-shell input[type="search"] {
+  padding-left: 40px;
+  background-image: var(--adm-magnifier);
+  background-repeat: no-repeat;
+  background-position: left var(--adm-s3) center;
+  background-size: 16px 16px;
+}
+
+/* ==========================================================================
+   Checkbox and radio (§8.3)
+   ========================================================================== */
+
+.admin-shell input[type="checkbox"],
+.admin-shell input[type="radio"],
+.admin-confirm-dialog input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: none;
+  padding: 0;
+  border: 1.5px solid var(--adm-border);
+  border-radius: 6px;
+  background: var(--adm-card);
+  cursor: pointer;
+  transition: background-color var(--adm-dur) ease-out, border-color var(--adm-dur) ease-out;
+}
+
+.admin-shell input[type="radio"] {
+  border-radius: var(--adm-r-pill);
+}
+
+.admin-shell input[type="checkbox"]:hover,
+.admin-shell input[type="radio"]:hover {
+  border-color: var(--adm-accent);
+}
+
+.admin-shell input[type="checkbox"]:checked,
+.admin-confirm-dialog input[type="checkbox"]:checked {
+  border-color: var(--adm-accent);
+  background: var(--adm-accent) var(--adm-check) center / 12px 12px no-repeat;
+}
+
+.admin-shell input[type="checkbox"]:indeterminate {
+  border-color: var(--adm-accent);
+  background: var(--adm-accent) var(--adm-dash) center / 12px 12px no-repeat;
+}
+
+.admin-shell input[type="radio"]:checked {
+  border-color: var(--adm-accent);
+  background: var(--adm-accent);
+  box-shadow: inset 0 0 0 4px var(--adm-card);
+}
+
+/* The wrappers that provide the 44px hit area stay untouched. */
+.admin-shell .content-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.admin-shell .feature-switch,
+.admin-shell .appearance-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+/* ==========================================================================
+   Cards (§8.4)
+   ========================================================================== */
+
+.admin-shell .admin-card,
+.admin-shell .admin-stat {
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-card);
+  background: var(--adm-card);
+  box-shadow: var(--adm-shadow);
+  padding: var(--adm-s6);
+  min-width: 0;
+  margin: 0;
+}
+
+.admin-shell .admin-card > h2:first-child,
+.admin-shell .admin-card > .admin-card-heading:first-child {
+  margin-bottom: var(--adm-s3);
+}
+
+.admin-shell .admin-card h2 + p {
+  margin-top: 0;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--adm-s4);
+  margin: 0;
+}
+
+.admin-shell .admin-stat p,
+.admin-shell .admin-stat > span {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-stat strong {
+  display: block;
+  margin: var(--adm-s2) 0 var(--adm-s1);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--adm-text);
+}
+
+.admin-shell .admin-stat small {
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--adm-text-3);
+}
+
+/* ==========================================================================
+   Chips (§8.5)
+   ========================================================================== */
+
+.admin-shell .admin-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--adm-s3);
+  margin: 0;
+  font-size: 13px;
+}
+
+.admin-shell .admin-chips span {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--adm-s3);
+  border: 1px solid var(--adm-border-subtle);
+  border-radius: var(--adm-s2);
+  background: var(--adm-muted-surface);
+  color: var(--adm-text-2);
+  font-size: 13px;
+  cursor: default;
+  overflow-wrap: anywhere;
+}
+
+/* "Clear filters" is a ghost action, not a chip. */
+.admin-shell .admin-chips a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--adm-s3);
+  border-radius: var(--adm-r-control);
+  color: var(--adm-accent-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.admin-shell .admin-chips a:hover {
+  background: var(--adm-accent-soft);
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   Tables (§8.6)
+   ========================================================================== */
+
+.admin-shell .admin-table-scroll {
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-card);
+  background: var(--adm-card);
+  box-shadow: var(--adm-shadow);
+  overflow-x: auto;
+  overflow-y: visible;   /* no fixed height: the last row is never clipped */
+}
+
+.admin-shell .admin-table-scroll table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+
+.admin-shell .admin-table-scroll caption {
+  position: sticky;
+  left: 0;
+  padding: var(--adm-s4) var(--adm-s5);
+  text-align: left;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--adm-text);
+}
+
+.admin-shell .admin-table-scroll th {
+  padding: var(--adm-s3) var(--adm-s5);
+  border-bottom: 1px solid var(--adm-border);
+  background: var(--adm-muted-surface);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--adm-text-2);
+  white-space: nowrap;
+}
+
+.admin-shell .admin-table-scroll td {
+  padding: 14px var(--adm-s5);
+  border-top: 0;
+  border-bottom: 1px solid var(--adm-border-subtle);
+  vertical-align: middle;
+  font-size: 14px;
+  line-height: 20px;
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-table-scroll tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-shell .admin-table-scroll tbody tr:hover td {
+  background: var(--adm-hover);
+}
+
+.admin-shell .admin-table-scroll td small {
+  display: block;
+  color: var(--adm-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Names in tables are links but never underlined (§5). */
+.admin-shell .admin-table-scroll td a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--adm-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-shell .admin-table-scroll td a:hover {
+  color: var(--adm-accent-text);
+  text-decoration: none;
+}
+
+/* Empty row (§8.6, §8.12). */
+.admin-shell .admin-table-scroll td[colspan] {
+  padding: var(--adm-s9) var(--adm-s5);
+  text-align: center;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-table-scroll tbody tr:hover td[colspan] {
+  background: transparent;
+}
+
+/* ==========================================================================
+   Pagination (§8.7)
+   ========================================================================== */
+
+.admin-shell .admin-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--adm-s4);
+  padding-top: var(--adm-s4);
+  margin: 0;
+}
+
+.admin-shell .admin-pagination > span:not(.admin-badge) {
+  font-size: 13px;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-pagination a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--adm-s2);
+  min-height: 44px;
+  padding: 0 var(--adm-s4);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-card);
+  color: var(--adm-text);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.admin-shell .admin-pagination a:hover {
+  background: var(--adm-hover);
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   Filter toolbar (§8.8)
+   ========================================================================== */
+
+.admin-shell .admin-search,
+.admin-shell .moderation-filters,
+.admin-shell .media-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+  gap: var(--adm-s4);
+  margin: 0;
+  padding: var(--adm-s5);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-card);
+  background: var(--adm-card);
+  box-shadow: var(--adm-shadow);
+}
+
+@media (min-width: 1024px) {
+  .admin-shell .admin-search > label:first-of-type {
+    grid-column: span 2;
+  }
+}
+
+/* A toolbar already inside a card must not draw a second card. */
+.admin-shell .admin-card .admin-search,
+.admin-shell .admin-card .moderation-filters,
+.admin-shell .admin-card .media-filters,
+.admin-shell .admin-drawer .admin-search {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.admin-shell .admin-search button,
+.admin-shell .admin-search .admin-button,
+.admin-shell .moderation-filters button,
+.admin-shell .media-filters button {
+  align-self: end;
+}
+
+@media (max-width: 479px) {
+
+  .admin-shell .admin-search,
+  .admin-shell .moderation-filters,
+  .admin-shell .media-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell .admin-search .admin-button,
+  .admin-shell .admin-search button {
+    width: 100%;
+  }
+}
+
+/* ==========================================================================
+   Alerts and messages (§8.11)
+   ========================================================================== */
+
+.admin-shell [role="status"],
+.admin-shell [role="alert"],
+.admin-confirm-dialog [role="status"],
+.admin-confirm-dialog [role="alert"] {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--adm-s2);
+  margin: 0;
+  padding: var(--adm-s3) var(--adm-s4);
+  border: 1px solid;
+  border-radius: var(--adm-r-control);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+/* The leading icon is decorative and inherits the banner's tone colour. */
+.admin-shell [role="status"]::before,
+.admin-shell [role="alert"]::before,
+.admin-confirm-dialog [role="status"]::before,
+.admin-confirm-dialog [role="alert"]::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 3px;
+  background: currentColor;
+  -webkit-mask: var(--adm-icon-info) center / 16px 16px no-repeat;
+  mask: var(--adm-icon-info) center / 16px 16px no-repeat;
+}
+
+.admin-shell [role="status"]::before,
+.admin-confirm-dialog [role="status"]::before {
+  -webkit-mask-image: var(--adm-icon-success);
+  mask-image: var(--adm-icon-success);
+}
+
+.admin-shell [role="alert"]::before,
+.admin-confirm-dialog [role="alert"]::before {
+  -webkit-mask-image: var(--adm-icon-danger);
+  mask-image: var(--adm-icon-danger);
+}
+
+/* An empty live region must not paint an empty banner. */
+.admin-shell [role="status"]:empty,
+.admin-shell [role="alert"]:empty,
+.admin-confirm-dialog [role="status"]:empty,
+.admin-confirm-dialog [role="alert"]:empty {
+  display: none;
+}
+
+.admin-shell [role="status"],
+.admin-confirm-dialog [role="status"] {
+  border-color: rgba(23, 198, 83, .3);
+  background-color: rgba(23, 198, 83, .1);
+  color: var(--adm-success-text);
+}
+
+.admin-shell [role="alert"],
+.admin-shell .admin-error,
+.admin-confirm-dialog [role="alert"] {
+  border-color: rgba(248, 40, 90, .3);
+  background-color: rgba(248, 40, 90, .1);
+  color: var(--adm-danger-text);
+}
+
+/* Informational note styling for non-live guidance text. */
+.admin-shell .admin-note {
+  display: flex;
+  gap: var(--adm-s2);
+  padding: var(--adm-s3) var(--adm-s4);
+  border: 1px solid rgba(27, 132, 255, .3);
+  border-radius: var(--adm-r-control);
+  background: rgba(27, 132, 255, .1);
+  color: var(--adm-text);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.admin-shell .admin-note::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 3px;
+  background: var(--adm-accent-text);
+  -webkit-mask: var(--adm-icon-info) center / 16px 16px no-repeat;
+  mask: var(--adm-icon-info) center / 16px 16px no-repeat;
+}
+
+/* ==========================================================================
+   Empty states (§8.12)
+   ========================================================================== */
+
+.admin-shell .admin-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--adm-s3);
+  padding: var(--adm-s9) var(--adm-s6);
+  text-align: center;
+  color: var(--adm-text-2);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.admin-shell .admin-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 1.5px dashed var(--adm-border);
+  border-radius: var(--adm-r-pill);
+  background: var(--adm-muted-surface);
+  color: var(--adm-text-3);
+}
+
+.admin-shell .admin-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+/* ==========================================================================
+   Details / drawer (§8.13)
+   ========================================================================== */
+
+.admin-shell .admin-drawer {
+  padding: 0;
+}
+
+.admin-shell .admin-drawer > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--adm-s3);
+  min-height: 44px;
+  padding: 18px var(--adm-s6);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--adm-text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.admin-shell .admin-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-shell .admin-drawer > summary::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: var(--adm-chevron) center / 18px 18px no-repeat;
+  transition: transform 150ms ease-out;
+}
+
+.admin-shell .admin-drawer[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.admin-shell .admin-drawer[open] > summary {
+  border-bottom: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .admin-drawer > summary ~ * {
+  margin-left: var(--adm-s6);
+  margin-right: var(--adm-s6);
+}
+
+.admin-shell .admin-drawer > summary ~ *:last-child {
+  margin-bottom: var(--adm-s6);
+}
+
+.admin-shell .admin-drawer > summary + * {
+  margin-top: var(--adm-s6);
+}
+
+/* ==========================================================================
+   Code, IDs, JSON (§8.14)
+   ========================================================================== */
+
+.admin-shell code,
+.admin-confirm-dialog code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--adm-muted-surface);
+  color: var(--adm-text);
+  font-family: var(--adm-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell pre {
+  max-height: 320px;
+  padding: var(--adm-s4);
+  border: 1px solid var(--adm-border-subtle);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-muted-surface);
+  font-family: var(--adm-mono);
+  font-size: 12px;
+  line-height: 18px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell pre code {
+  padding: 0;
+  background: none;
+}
+
+/* ==========================================================================
+   Detail pages — structural primitives (§8.15)
+   ========================================================================== */
+
+.admin-shell .admin-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--adm-s4);
+  align-items: start;
+}
+
+@media (max-width: 767px) {
+  .admin-shell .admin-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* main (1fr) + side (360px), used by the detail page recipes. */
+.admin-shell .admin-detail-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--adm-s5);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .admin-shell .admin-detail-split {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+
+/* Key/value rows. */
+.admin-shell .admin-drawer dl,
+.admin-shell .admin-definition-list,
+.admin-shell .admin-kv {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.admin-shell .admin-drawer dl dt,
+.admin-shell .admin-definition-list dt,
+.admin-shell .admin-kv dt {
+  padding: var(--adm-s3) 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-drawer dl dd,
+.admin-shell .admin-definition-list dd,
+.admin-shell .admin-kv dd {
+  margin: 0;
+  padding: 0 0 var(--adm-s3);
+  border-bottom: 1px solid var(--adm-border-subtle);
+  font-size: 14px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-drawer dl dd:last-child,
+.admin-shell .admin-definition-list dd:last-child,
+.admin-shell .admin-kv dd:last-child {
+  border-bottom: 0;
+}
+
+@media (min-width: 1024px) {
+
+  .admin-shell .admin-drawer dl,
+  .admin-shell .admin-definition-list,
+  .admin-shell .admin-kv {
+    grid-template-columns: 140px minmax(0, 1fr);
+    align-items: baseline;
+  }
+
+  .admin-shell .admin-drawer dl dt,
+  .admin-shell .admin-definition-list dt,
+  .admin-shell .admin-kv dt {
+    padding: var(--adm-s3) 0;
+    border-bottom: 1px solid var(--adm-border-subtle);
+  }
+
+  .admin-shell .admin-drawer dl dd,
+  .admin-shell .admin-definition-list dd,
+  .admin-shell .admin-kv dd {
+    padding: var(--adm-s3) 0;
+  }
+
+  .admin-shell .admin-drawer dl dt:last-of-type,
+  .admin-shell .admin-definition-list dt:last-of-type,
+  .admin-shell .admin-kv dt:last-of-type {
+    border-bottom: 0;
+  }
+}
+
+/* ==========================================================================
+   Forms inside confirmations (§8.9 body, §8.2 rows)
+   ========================================================================== */
+
+.admin-shell .admin-confirm,
+.admin-confirm-dialog .admin-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s4);
+  min-width: 0;
+}
+
+.admin-shell .admin-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s3);
+}
+
+/* ==========================================================================
+   Dialogs (§8.9)
+
+   The confirm dialog is portaled outside `.admin-shell`, so these rules are
+   keyed on `.admin-confirm-dialog` itself (which only ever appears on admin
+   dialogs) and, for the shared overlay, on `body:has(.admin-confirm-dialog)`.
+   `components/ui/dialog.tsx` is a prohibited file and is not modified; the
+   extra attribute selector simply outranks its utility classes.
+   ========================================================================== */
+
+body:has(.admin-confirm-dialog) [data-slot="dialog-overlay"] {
+  background: rgba(0, 0, 0, .6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.admin-confirm-dialog[data-slot="dialog-content"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: calc(100% - 32px);
+  max-width: 480px;
+  max-height: 90dvh;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--adm-border);
+  border-radius: 16px;
+  background: var(--adm-card);
+  color: var(--adm-text);
+  font-family: var(--adm-font);
+  box-shadow: var(--adm-dialog-shadow);
+}
+
+.admin-confirm-dialog [data-slot="dialog-title"] {
+  padding: var(--adm-s5) var(--adm-s6) var(--adm-s3);
+  padding-right: 60px;
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  color: var(--adm-text);
+}
+
+.admin-confirm-dialog [data-slot="dialog-description"] {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--adm-text-2);
+}
+
+/* Body: everything after the title. */
+.admin-confirm-dialog > form,
+.admin-confirm-dialog > .admin-confirm {
+  padding: 0 var(--adm-s6) var(--adm-s6);
+}
+
+/* Existing close button, resized to a 44x44 hit area. */
+.admin-confirm-dialog > button[data-slot="dialog-close"] {
+  position: absolute;
+  top: var(--adm-s2);
+  right: var(--adm-s2);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--adm-r-control);
+  color: var(--adm-text-2);
+  opacity: 1;
+}
+
+.admin-confirm-dialog > button[data-slot="dialog-close"]:hover {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+}
+
+.admin-confirm-dialog [data-slot="dialog-footer"] {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--adm-s3);
+  margin-top: var(--adm-s1);
+}
+
+.admin-confirm-dialog p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Typed-confirmation chip. */
+.admin-confirm-dialog code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--adm-muted-surface);
+  font-family: var(--adm-mono);
+  font-size: 12px;
+}
+
+/* --- Bottom sheet below 640px (§8.9) ------------------------------------- */
+@media (max-width: 639px) {
+  .admin-confirm-dialog[data-slot="dialog-content"] {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: 90dvh;
+    transform: none;
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-top: var(--adm-s3);
+  }
+
+  /* Decorative drag handle. */
+  .admin-confirm-dialog[data-slot="dialog-content"]::before {
+    content: "";
+    position: sticky;
+    top: 0;
+    align-self: center;
+    width: 36px;
+    height: 4px;
+    flex: none;
+    margin-bottom: var(--adm-s2);
+    border-radius: var(--adm-r-pill);
+    background: var(--adm-border);
+  }
+
+  .admin-confirm-dialog[data-slot="dialog-content"][data-state="open"] {
+    animation: adm-sheet-up var(--adm-dur-lg) var(--adm-ease);
+  }
+
+  .admin-confirm-dialog [data-slot="dialog-footer"] {
+    flex-direction: column-reverse;
+  }
+
+  .admin-confirm-dialog [data-slot="dialog-footer"] .admin-button {
+    width: 100%;
+  }
+}
+
+@keyframes adm-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-confirm-dialog[data-slot="dialog-content"][data-state="open"] {
+    animation: none;
+  }
+}

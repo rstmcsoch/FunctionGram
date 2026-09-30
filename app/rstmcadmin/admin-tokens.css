@@ -13,7 +13,8 @@
    A `.dark` class is honoured too, in case a later theme provider sets one.
    ========================================================================== */
 
-.admin-shell {
+.admin-shell,
+.admin-confirm-dialog {
   /* ---- Accent. Change ONLY this block to re-brand (brand pink = #eb456e) -- */
   --adm-accent: #1b84ff;
   --adm-accent-hover: #0f6fe0;
@@ -56,12 +57,21 @@
   --adm-s8: 32px;
   --adm-s9: 48px;
 
+  /* ---- Inline SVG decorations (no external asset, no CDN) -------------- */
+  --adm-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>");
+  --adm-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'><path d='M5 12h14'/></svg>");
+  /* Used as mask images, so the declared colour is irrelevant. */
+  --adm-icon-success: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='m9 12 2 2 4-4'/></svg>");
+  --adm-icon-danger: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 8v4'/><path d='M12 16h.01'/></svg>");
+  --adm-icon-info: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 16v-4'/><path d='M12 8h.01'/></svg>");
+
   /* The single remaining piece of brand pink: the wordmark dot (§6.2). */
   --adm-brand-dot: #eb456e;
 }
 
 /* ---- LIGHT (base) -------------------------------------------------------- */
-.admin-shell {
+.admin-shell,
+.admin-confirm-dialog {
   color-scheme: light;
   --adm-bg: #f3f4f6;
   --adm-panel: #fff;
@@ -82,11 +92,15 @@
   --adm-purple-text: #6234c7;
   --adm-cyan-text: #0e7490;             /* companion to --adm-cyan (§9.1) */
   --adm-dialog-shadow: 0 24px 64px rgba(16, 24, 40, .24);
+  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
 }
 
 /* ---- DARK (default look, matches the reference) -------------------------- */
 html[data-theme="dark"] .admin-shell,
-.dark .admin-shell {
+html[data-theme="dark"] .admin-confirm-dialog,
+.dark .admin-shell,
+.dark .admin-confirm-dialog {
   color-scheme: dark;
   --adm-bg: #0f0f12;                    /* page + sidebar */
   --adm-panel: #08080a;                 /* main panel */
@@ -107,10 +121,13 @@ html[data-theme="dark"] .admin-shell,
   --adm-purple-text: #a78bfa;
   --adm-cyan-text: #45d0e8;
   --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
 }
 
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme]) .admin-shell {
+  html:not([data-theme]) .admin-shell,
+  html:not([data-theme]) .admin-confirm-dialog {
     color-scheme: dark;
     --adm-bg: #0f0f12;
     --adm-panel: #08080a;
@@ -131,6 +148,8 @@ html[data-theme="dark"] .admin-shell,
     --adm-purple-text: #a78bfa;
     --adm-cyan-text: #45d0e8;
     --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
   }
 }
 

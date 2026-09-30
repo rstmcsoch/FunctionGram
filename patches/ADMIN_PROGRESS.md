@@ -649,7 +649,7 @@ Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
 | Phase | Name | Status | Patch |
 | --- | --- | --- | --- |
 | 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
-| 2 | Primitives — reusable admin control styling | Not started | `patches/phase-2-primitives.patch` |
+| 2 | Primitives — reusable admin control styling | Done locally; all four gates green | `patches/phase-2-primitives.patch` |
 | 3 | Pages, polish and final QA | Not started | `patches/phase-3-pages-polish-qa.patch` |
 
 ### Baseline measured before any redesign change
@@ -760,3 +760,104 @@ markup rather than observed. Deployment-preview visual QA remains open.
   `patches/phase-1-foundation.patch.txt`.
 - Contains Phase 1 changes only, and verified with `git apply --check` against
   a clean extraction of the `main` baseline `f6e3c37e`.
+
+## Phase 2 — Primitives
+
+Guide sections **§8.1–§8.15**. Visual only: no route, API, data, permission,
+copy, column, filter, field or ARIA change.
+
+### Stylesheet restructure
+
+`app/rstmcadmin/admin.css` is imported by the admin layout *and* by the two
+standalone two-factor screens outside `app/rstmcadmin/`. To give both the same
+tokens without editing files outside the allowed list, the old contents moved
+to `admin-legacy.css` (`git mv`) and `admin.css` became a short entry point
+that imports the layers in cascade order:
+
+1. `admin-legacy.css` — page styling no phase has replaced yet
+2. `admin-tokens.css` — §4 tokens, §5 typography
+3. `admin-shell.css` — §6 shell, §7 responsive
+4. `admin-components.css` — §8 primitives
+
+Later layers therefore win at equal specificity. Verified in the built
+stylesheet: legacy rules start at byte 469, tokens 9220, shell 18068,
+components 26132.
+
+### What was built
+
+| Section | Primitive |
+| --- | --- |
+| 8.1 | Buttons: default / `admin-primary` / `data-tone="danger"` / `data-tone="ghost"`, 44px hit area, 36px compact variant inside tables and action grids (44px preserved via a `::before` overlay) |
+| 8.2 | Text inputs, selects (inline SVG chevron), textareas, search fields (inline SVG magnifier), labels, help text |
+| 8.3 | Checkbox and radio: 20px box, accent fill, inline SVG check / dash, 44px wrapper |
+| 8.4 | Cards and stat cards: 1px border, `--adm-r-card`, `--adm-shadow`, hover lift; nested cards flattened |
+| 8.5 | Chips and filter pills |
+| 8.6 | Tables: sticky caption header, hover tint, `min-width:720px`, last row never clipped (`tbody tr:last-child td{border-bottom:0}` plus `overflow-y:visible`) |
+| 8.7 | Pagination |
+| 8.8 | Filter toolbar: aligned controls, primary submit, ghost clear |
+| 8.9 | Dialogs: 16px radius, blurred overlay, 44px close target, bottom sheet under 640px |
+| 8.10 | Avatars (seeded in Phase 1, reused here) |
+| 8.11 | Alerts: `[role="status"]` success, `[role="alert"]` / `.admin-error` danger, `.admin-note` info, each with a masked inline SVG icon that inherits the tone colour; empty live regions stay hidden |
+| 8.12 | Empty states on `td[colspan]` |
+| 8.13 | Drawer / `details` disclosure with rotating chevron |
+| 8.14 | Code and `pre` blocks |
+| 8.15 | Detail-page structure and key/value rows |
+
+### Icon tokens
+
+Seven inline `data:image/svg+xml` tokens were added to `admin-tokens.css`
+(`--adm-chevron`, `--adm-magnifier`, `--adm-check`, `--adm-dash`,
+`--adm-icon-success`, `--adm-icon-danger`, `--adm-icon-info`). No external
+image, CDN or font is referenced. The three alert icons are applied as
+`mask-image` with `background:currentColor`, so they follow the theme
+automatically; the chevron and magnifier are `background-image` (pseudo-
+elements are not available on `select` and `input`) and are therefore
+redefined per theme.
+
+The token blocks now also target `.admin-confirm-dialog`, because Radix
+portals the dialog to `<body>`, outside `.admin-shell`, where `--adm-*` would
+not otherwise inherit. `components/ui/dialog.tsx` is a prohibited file and was
+not modified; the dialog is styled entirely from CSS, using
+`.admin-confirm-dialog[data-slot="dialog-content"]` to outrank the utility
+classes already on the element, and `body:has(.admin-confirm-dialog)` to tint
+the shared overlay without affecting the public site.
+
+### Markup touched
+
+Class and attribute changes only — no action, handler, label or field changed.
+
+- `components/admin/badge.tsx` — new `dangerTone(operation)` helper, matching
+  `/\b(delete|purge|ban|trash|revoke|hide)\b/i`. Word boundaries deliberately
+  keep `unban`, `unhide` and `restore` neutral (verified against all 21
+  operation names in use).
+- `actions.tsx`, `content.tsx` — `data-tone={dangerTone(op)}` on the action grids.
+- `media.tsx`, `moderation.tsx` — `data-tone="danger"` on trash / purge / hide /
+  ban; `Filter assets` promoted to primary.
+- `ui.tsx`, `content/page.tsx`, `audit.tsx` — filter toolbars get a primary
+  submit and a ghost `Clear` (§8.8).
+
+### Superseded legacy rules removed
+
+`admin-legacy.css` dropped its button, input/select, search toolbar, chips,
+table, pagination, checkbox, dialog-close and card rules (now 28 lines, from
+37). Everything still referenced by a page that Phase 3 has not reached yet
+was kept.
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
+| `npm run build` | pass |
+
+Live check against the PGlite fixture: all 15 admin routes plus `View site`
+return 200, every page renders exactly 16 nav links in the prescribed order,
+one page head, and `aria-current="page"` on the active entry only. `data-tone`
+renders as expected (`Hide` and `Move to trash` danger, `Unhide` and `Restore`
+neutral, `Clear` ghost).
+
+Patch: `patches/phase-2-primitives.patch` (identical copy at
+`patches/phase-2-primitives.patch.txt`), verified with `git apply --check`
+against a clean extraction of the Phase 1 commit `3f40375`.

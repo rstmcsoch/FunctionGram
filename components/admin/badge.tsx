@@ -59,3 +59,12 @@ export function Badge({ tone, dot, children, className }: {
 export function AutoBadge({ children, dot, className }: { children: string; dot?: boolean; className?: string }) {
   return <Badge tone={toneFor(children)} dot={dot} className={className}>{children}</Badge>;
 }
+
+/** Destructive operations get the danger button style (§8.1). The name comes
+ *  from the operation the button already performs; word boundaries keep
+ *  `unban` and `unhide` out of the danger set. No behaviour changes. */
+const DANGER_OPERATION = /\b(delete|purge|ban|trash|revoke|hide)\b/i;
+
+export function dangerTone(operation: string): 'danger' | undefined {
+  return DANGER_OPERATION.test(operation) ? 'danger' : undefined;
+}

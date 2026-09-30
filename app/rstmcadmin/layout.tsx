@@ -4,9 +4,6 @@ import { hasPermission } from '@/lib/admin/permissions';
 import type { AdminPermission } from '@/lib/admin/permissions';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { AdminNav, type AdminNavGroup, type AdminNavIcon } from '@/components/admin/admin-nav';
-import './admin-tokens.css';
-import './admin-shell.css';
-import './admin-components.css';
 import './admin.css';
 
 export const metadata: Metadata = { title: 'RSTMC — Administration', robots: { index: false, follow: false } };
