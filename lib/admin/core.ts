@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
 import { AdminError, validateSetting } from './validation';
+import { requirePermission } from './permissions';
 
 export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) => Promise<T>): Promise<T> {
   const db = await pool.connect();
@@ -21,7 +22,7 @@ export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) =
 export async function authorizeAdmin(db: QueryExecutor, userId: string | null, ownerOnly = false): Promise<AdminActor> {
   if (!userId) throw new AdminError('Sign in to continue.', 401);
   // Read current state, not claims or cached role/email from a session cookie.
-  const { rows: [user] } = await db.query('SELECT id, email, role, banned, "banExpires", deleted_at, "emailVerified" FROM "user" WHERE id=$1', [userId]);
+  const { rows: [user] } = await db.query('SELECT id, email, role, banned, "banExpires", deleted_at, "emailVerified", "twoFactorEnabled" FROM "user" WHERE id=$1', [userId]);
   if (!user || user.emailVerified !== true || !accountEnabled(user) || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
     throw new AdminError('Administrator access required.', 403);
   }
@@ -80,6 +81,7 @@ export async function saveSetting(pool: PoolLike, userId: string, key: string, i
   const value = validateSetting(key, input);
   await transaction(pool, async db => {
     const actor = await authorizeAdmin(db, userId);
+    requirePermission(actor,'settings.manage');
     // Includes the absent-row case, so concurrent first writes have correct before values.
     await db.query('SELECT pg_advisory_xact_lock(67291006)');
     // Same ordering boundary as post/profile attachment and storage cleanup.

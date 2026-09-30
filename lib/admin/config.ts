@@ -1,7 +1,7 @@
 // Route directory must match this constant; changing paths requires a redeploy.
 export const ADMIN_BASE_PATH = '/rstmcadmin';
 export const ADMIN_BOOTSTRAP_ENV = 'ADMIN_BOOTSTRAP_EMAIL';
-export const ADMIN_ROLES = ['admin', 'owner'] as const;
+export const ADMIN_ROLES = ['owner', 'admin', 'moderator'] as const;
 export type AdminRole = typeof ADMIN_ROLES[number];
 export type AdminActor = { userId: string; email: string; role: AdminRole };
 

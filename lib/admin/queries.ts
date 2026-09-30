@@ -4,7 +4,7 @@ import { AdminError } from './validation';
 export type UserFilters = { q: string; status: string; role: string; page: number; limit: number };
 export function userFilters(input: Record<string, unknown>): UserFilters {
   const q = input.q ?? '', status = input.status ?? 'all', role = input.role ?? 'all';
-  if (typeof q !== 'string' || q.length > 100 || !['all','active','banned','verified','unverified','deleted','demo','real'].includes(String(status)) || !['all','user','admin','owner'].includes(String(role))) throw new AdminError('Invalid user filters.');
+  if (typeof q !== 'string' || q.length > 100 || !['all','active','banned','verified','unverified','deleted','demo','real'].includes(String(status)) || !['all','user','moderator','admin','owner'].includes(String(role))) throw new AdminError('Invalid user filters.');
   const page = Number(input.page ?? 1), limit = Number(input.limit ?? 50);
   if (!Number.isSafeInteger(page) || page < 1 || page > 10000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new AdminError('Invalid pagination (maximum 200 rows).');
   return { q: q.trim(), status: String(status), role: String(role), page, limit };

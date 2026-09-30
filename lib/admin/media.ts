@@ -2,6 +2,7 @@ import type {PoolLike,QueryExecutor} from '../postgres';
 import {localDevDatabase} from '../postgres';
 import {transaction,authorizeAdmin,insertAudit} from './core';
 import {AdminError} from './validation';
+import {requirePermission} from './permissions';
 import {MEDIA_LOCK,readMediaConfig,checkUploadInput} from '../media-policy';
 import {localAssetPath} from '../media-storage';
 import {del} from '@vercel/blob';
@@ -31,7 +32,7 @@ export async function changeMedia(pool:PoolLike,actorId:string,body:Record<strin
  if(body.confirmation!==key)throw new AdminError('Type the full asset key to confirm.');
  const reason=typeof body.reason==='string'?body.reason.trim():'';if(reason.length>500||(action==='quarantine'&&!reason))throw new AdminError('A quarantine reason is required (up to 500 characters).');
  return transaction(pool,async db=>{
-  const actor=await authorizeAdmin(db,actorId,action==='purge');await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
+  const actor=await authorizeAdmin(db,actorId,action==='purge');requirePermission(actor,'media.manage');await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
   const {rows:[asset]}=await db.query(`SELECT a.*,${referencedAsset()} referenced FROM assets a WHERE a.key=$1 FOR UPDATE`,[key]);if(!asset)throw new AdminError('Asset not found.',404);
   let status=asset.status,deleted=asset.deleted_at,origin=asset.trash_origin;
   if(action==='quarantine'){if(status!=='ready')throw new AdminError('Choose a ready asset.');status='quarantined';}
@@ -60,13 +61,13 @@ export async function purgeMedia(pool:PoolLike,actorId:string,body:Record<string
 /** Recover abandoned *known application reservations*, not arbitrary objects in a shared Blob store. */
 export async function reconcileReservation(pool:PoolLike,actorId:string,body:Record<string,unknown>,inspect:(key:string)=>Promise<{url:string;size:number}>){
  const key=String(body.key||'');if(!/^[a-f0-9-]{36}$/.test(key)||body.confirmation!==key)throw new AdminError('Type the full reservation key to confirm.');
- await authorizeAdmin(pool,actorId);
+ const initialActor=await authorizeAdmin(pool,actorId);requirePermission(initialActor,'media.manage');
  const {rows:[claim]}=await pool.query('SELECT * FROM upload_claims WHERE key=$1 AND completed=false',[key]);
  if(!claim||Number(claim.created_at)>Date.now()-3600000||Number(claim.processing_at||0)>Date.now()-300000)throw new AdminError('Only expired, idle reservations can be reconciled.');
  let object:{url:string;size:number};try{object=await inspect(key);}catch{throw new AdminError('No readable stored object was found. Nothing was deleted or registered.',409);}
  if(object.size<1||object.size>100*1024*1024)throw new AdminError('Object size exceeds the managed inspection limit.');
  await transaction(pool,async db=>{
-  const actor=await authorizeAdmin(db,actorId);await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[claim.owner_id]);await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
+  const actor=await authorizeAdmin(db,actorId);requirePermission(actor,'media.manage');await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[claim.owner_id]);await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
   const {rows:[current]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!current||current.completed||Number(current.processing_at||0)>Date.now()-300000)throw new AdminError('Reservation changed. Please reload.',409);
   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,verified,reason) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',false,'Abandoned upload; not verified')`,[key,claim.owner_id,claim.mime,object.size,claim.created_at,object.url]);
   await db.query('UPDATE upload_claims SET completed=true,completed_at=created_at,processing_at=NULL WHERE key=$1',[key]);

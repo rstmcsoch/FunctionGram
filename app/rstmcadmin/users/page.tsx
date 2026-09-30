@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireAdminPage } from '@/lib/admin/guard';
+import { assertAdminPagePermission,requireAdminPage } from '@/lib/admin/guard';
 import { getPool } from '@/lib/postgres';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { listUsers, userFilters } from '@/lib/admin/queries';
@@ -7,7 +7,7 @@ import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui'
 import { ExportUsers } from '@/components/admin/actions';
 
 export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireAdminPage();
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
   let filters;
   try { filters = userFilters(await searchParams); }
   catch { return <section className="admin-card"><h1>Invalid filters</h1><p role="alert">Use a search up to 100 characters and a page size from 1 to 200.</p><Link className="admin-button" href={ADMIN_BASE_PATH + '/users'}>Reset filters</Link></section>; }

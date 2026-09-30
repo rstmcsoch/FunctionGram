@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
 const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
 async function fixture() {
   const db = new PGlite();
-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements]) await db.exec(sql);
+  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements]) await db.exec(sql);
   const pool = serializedPool({ async query(sql, values) {
     const result = await db.query(sql, values);
     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
@@ -26,12 +26,12 @@ async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = tru
   await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
 }
 
-test('migrations 5–9 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
+test('migrations 5–10 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
   const db = new PGlite();
   try {
     for (const sql of old) await db.exec(sql);
     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements]) await db.exec(sql);
+    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements]) await db.exec(sql);
     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
     assert.deepEqual(existing, { role: 'user', banned: false });
     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
@@ -40,8 +40,8 @@ test('migrations 5–9 are additive/idempotent on fresh and populated PGlite; pl
       const columns = new Set(rows.map(row => row.column_name));
       for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
     }
-    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9]);
-    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10]);
+    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
   } finally { await db.close(); }
 });
 
@@ -50,10 +50,12 @@ test('guard denies guests, users, missing/blank roles, unverified/banned admins;
   try {
     await assert.rejects(authorizeAdmin(pool, null), { status: 401 });
     await assert.rejects(authorizeAdmin(pool, 'missing'), { status: 403 });
-    for (const role of ['user', '', 'moderator', 'admin,owner']) {
+    for (const role of ['user', '', 'admin,owner']) {
       await user(pool, `role-${role}`, role);
       await assert.rejects(authorizeAdmin(pool, `role-${role}`), { status: 403 });
     }
+    await user(pool,'role-moderator','moderator');
+    assert.equal((await authorizeAdmin(pool,'role-moderator')).role,'moderator');
     await user(pool, 'unverified', 'admin', false);
     await user(pool, 'banned', 'admin', true, true);
     for (const id of ['unverified', 'banned']) await assert.rejects(authorizeAdmin(pool, id), { status: 403 });
@@ -168,7 +170,7 @@ test('PGlite standalone queries cannot join an open transaction', async () => {
 });
 
 // Set ONLY to a disposable PostgreSQL database. Never use a production URL.
-test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 7', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
+test('managed PostgreSQL upgrades an isolated schema through migration 10', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL });
   const client = await pool.connect();
   try {
@@ -176,7 +178,7 @@ test('managed PostgreSQL upgrades an isolated schema from migrations 1–4 to 7'
     await client.query('CREATE SCHEMA admin_phase_one_test');
     await client.query('SET LOCAL search_path TO admin_phase_one_test');
     for (const sql of old) await client.query(sql);
-    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements]) await client.query(sql);
+    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements]) await client.query(sql);
     assert.equal(Number((await client.query('SELECT COUNT(*) FROM app_settings')).rows[0].count), 0);
   } finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
 });
@@ -185,7 +187,7 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
   try {
     await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
-    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements]) await pool.query(sql);
+    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements]) await pool.query(sql);
     await user(pool, 'first', 'user');
     await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
     assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);

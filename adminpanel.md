@@ -329,8 +329,8 @@ index 0000000..1deabd3
 +Layer 1  Vercel Deployment Protection (previews)         — deployment level
 +Layer 2  ADMIN_IP_ALLOWLIST (optional, env)              — middleware/route-level
 +Layer 3  better-auth session, emailVerified === true     — lib/auth.ts getAppUser()
-+Layer 4  role ∈ {admin, owner} read from the DB          — lib/admin/guard.ts requireAdmin()
-+Layer 5  2FA challenge satisfied (Phase 9)               — requireAdmin({ require2fa: true })
++Layer 4  role ∈ {owner, admin, moderator} read from DB   — lib/admin/guard.ts requireAdmin()
++Layer 5  TOTP/recovery challenge + 12h admin session     — requireAdmin() checks the DB 2FA flag and session age
 +```
 +
 +Implementation notes:
@@ -1411,8 +1411,8 @@ index 0000000..1deabd3
 +Layer 1  Vercel Deployment Protection (previews)         — deployment level
 +Layer 2  ADMIN_IP_ALLOWLIST (optional, env)              — middleware/route-level
 +Layer 3  better-auth session, emailVerified === true     — lib/auth.ts getAppUser()
-+Layer 4  role ∈ {admin, owner} read from the DB          — lib/admin/guard.ts requireAdmin()
-+Layer 5  2FA challenge satisfied (Phase 9)               — requireAdmin({ require2fa: true })
++Layer 4  role ∈ {owner, admin, moderator} read from DB   — lib/admin/guard.ts requireAdmin()
++Layer 5  TOTP/recovery challenge + 12h admin session     — requireAdmin() checks the DB 2FA flag and session age
 +```
 +
 +Implementation notes:

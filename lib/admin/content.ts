@@ -3,6 +3,8 @@ import {MIB} from '../media-config';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
 import { AdminError } from './validation';
+import { requirePermission } from './permissions';
+import { contentConfirmationName } from './content-label';
 import { checkReelDuration } from '../reel-duration';
 
 export type ContentResource = 'posts' | 'comments';
@@ -93,11 +95,15 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   if(!['hide','unhide','delete','restore','purge','pin','unpin','expire','highlight','edit','counters'].includes(action))throw new AdminError('Unknown content operation.');
   const ids=body.ids;
   if(!Array.isArray(ids)||!ids.length||ids.length>50||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id||id.length>100))throw new AdminError('Select 1–50 unique items.');
-  if(body.confirmation!==(ids.length===1?ids[0]:`CONFIRM ${ids.length}`))throw new AdminError('Confirmation does not match the selection.');
+  if(['delete','purge'].includes(action)){
+    if(ids.length!==1)throw new AdminError('Trash or permanently purge one item at a time; type its name to confirm.');
+  }else if(body.confirmation!==(ids.length===1?ids[0]:`CONFIRM ${ids.length}`))throw new AdminError('Confirmation does not match the selection.');
   if(action==='hide'&&!reason)throw new AdminError('A reason is required to hide content.');
   if(['edit','purge','counters'].includes(action)&&ids.length!==1)throw new AdminError('Edit and purge require one item at a time.');
   if(resource==='comments'&&['pin','unpin','expire','highlight','counters'].includes(action))throw new AdminError('This operation is only for posts.');
-  await authorizeAdmin(pool,actorId,action==='purge');
+  const initialActor=await authorizeAdmin(pool,actorId,action==='purge');
+  requirePermission(initialActor,'content.moderate');
+  if(initialActor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
   // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
   // compare the row again under lock so a concurrent edit cannot be overwritten.
   let original:Record<string,unknown>|undefined,patch:Record<string,unknown>|undefined;
@@ -108,12 +114,15 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   }
   return transaction(pool,async db=>{
     const actor=await authorizeAdmin(db,actorId,action==='purge');
+    requirePermission(actor,'content.moderate');
+    if(actor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
     if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
     if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
     // Always lock in ID order to avoid deadlocks between overlapping bulk selections.
     const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[ids]);
     if(rows.length!==ids.length)throw new AdminError('An item no longer exists. Nothing was changed.',404);
     for(const row of rows) {
+      if(['delete','purge'].includes(action)&&body.confirmation!==contentConfirmationName(row))throw new AdminError('Type the exact content name shown above to confirm.');
       if(row.deleted_at!=null&&!['restore','purge'].includes(action))throw new AdminError('Restore trashed content before changing it.');
       if(action==='restore'&&(row.deleted_at==null||Date.now()-Number(row.deleted_at)>30*86400000))throw new AdminError('Restore is available only within 30 days of deletion.',409);
       if(action==='purge'&&row.deleted_at==null)throw new AdminError('Move content to trash before permanent deletion.');
