@@ -1,0 +1,936 @@
+From bff9708580a5df8bcf55cd57c9cb31cc0adef044 Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 05:43:09 +0000
+Subject: [PATCH] =?UTF-8?q?redesign(admin):=20phase=201=20foundation=20?=
+ =?UTF-8?q?=E2=80=94=20tokens,=20typography=20and=20app=20shell?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Visual-only redesign of /rstmcadmin following the admin panel guide:
+- .admin-shell design tokens (accent, surfaces, borders, tones, avatar tints)
+  with the existing data-theme / prefers-color-scheme switches
+- app shell grid: 272/240px sidebar, 76px icon rail, mobile top bar + drawer
+- grouped navigation with icons, active detection, account card
+- page head, panel, footer, skip link, reduced-motion and focus rules
+- page-head wrapper applied to every admin page; no text, route or logic change
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ app/rstmcadmin/admin.css               |  12 +-
+ app/rstmcadmin/analytics/page.tsx      |   3 +-
+ app/rstmcadmin/appearance/page.tsx     |   5 +-
+ app/rstmcadmin/audit/page.tsx          |   5 +-
+ app/rstmcadmin/communications/page.tsx |   5 +-
+ app/rstmcadmin/content/[id]/page.tsx   |   5 +-
+ app/rstmcadmin/content/page.tsx        |   5 +-
+ app/rstmcadmin/exports/page.tsx        |   3 +-
+ app/rstmcadmin/features/page.tsx       |   3 +-
+ app/rstmcadmin/guide/page.tsx          |   3 +-
+ app/rstmcadmin/labels/page.tsx         |   5 +-
+ app/rstmcadmin/layout.tsx              |  56 +++--
+ app/rstmcadmin/media/page.tsx          |   5 +-
+ app/rstmcadmin/moderation/page.tsx     |   5 +-
+ app/rstmcadmin/page.tsx                |   4 +-
+ app/rstmcadmin/security/page.tsx       |   3 +-
+ app/rstmcadmin/shell.css               | 311 +++++++++++++++++++++++++
+ app/rstmcadmin/system/page.tsx         |   3 +-
+ app/rstmcadmin/users/[id]/page.tsx     |   5 +-
+ app/rstmcadmin/users/page.tsx          |   5 +-
+ components/admin/admin-nav.tsx         |  96 ++++++++
+ components/admin/avatar.tsx            |  26 +++
+ components/admin/page-head.tsx         |  14 ++
+ 23 files changed, 544 insertions(+), 43 deletions(-)
+ create mode 100644 app/rstmcadmin/shell.css
+ create mode 100644 components/admin/admin-nav.tsx
+ create mode 100644 components/admin/avatar.tsx
+ create mode 100644 components/admin/page-head.tsx
+
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index b536042..53c94c5 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -1,16 +1,14 @@
+-.admin-shell{min-height:100vh;background:var(--canvas);color:var(--foreground);padding:24px;--admin-max:1200px}
+-.admin-header,.admin-main{width:min(100%,var(--admin-max));margin:auto}
+-.admin-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;border:1px solid var(--border);background:var(--card);border-radius:26px;padding:16px 24px;box-shadow:var(--shadow-1)}
+-.admin-header .brand{font-size:27px}.admin-header nav{display:flex;gap:8px;flex-wrap:wrap}.admin-header a,.admin-pagination a{display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border-radius:18px;background:var(--secondary)}
+-.admin-main{padding:32px 0}.admin-main h1{font-size:clamp(26px,4vw,36px);letter-spacing:-1px}.admin-main h2{font-size:20px;font-weight:650}.admin-main p{line-height:1.65;overflow-wrap:anywhere}.admin-main h1+p{color:var(--muted-foreground);margin-top:6px}.admin-eyebrow{text-transform:uppercase;letter-spacing:2px;font-size:12px;color:var(--primary);margin-bottom:8px}
++@import "./shell.css";
++
++/* Legacy component rules: replaced step by step by primitives.css and pages.css. */
+ .admin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.admin-stat,.admin-card{border:1px solid var(--border);border-radius:20px;background:var(--card);padding:24px;min-width:0}.admin-stat p,.admin-stat small,.admin-muted{color:var(--muted-foreground)}.admin-stat strong{display:block;font-size:32px;margin:8px 0}.admin-stat small{font-size:12px}.admin-card{margin-top:20px}.admin-card h2{margin-bottom:12px}
+ .admin-search{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:24px 0 12px}.admin-search label:first-child{flex:1 1 240px}.admin-search label,.admin-confirm label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;min-width:0}
+ .admin-shell input,.admin-shell select,.admin-confirm input,.admin-confirm textarea{min-height:44px;width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}
+ .admin-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);color:var(--foreground);font-weight:600;cursor:pointer;font-size:14px;line-height:1.4}.admin-primary{background:var(--primary);color:var(--primary-foreground)}.admin-button:disabled{opacity:.5;cursor:wait}
+-.admin-shell :focus-visible,.admin-confirm :focus-visible{outline:2px solid var(--ring);outline-offset:3px}.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
++.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
+ .admin-table-scroll{overflow-x:auto;max-width:100%;border:1px solid var(--border);border-radius:16px;margin:20px 0;background:var(--card)}.admin-table-scroll table{border-collapse:collapse;width:100%;text-align:left;min-width:700px;font-size:14px}.admin-table-scroll caption{text-align:left;padding:16px;color:var(--muted-foreground);font-size:13px}.admin-table-scroll th{color:var(--muted-foreground);font-size:12px;text-transform:uppercase;letter-spacing:.6px}.admin-table-scroll th,.admin-table-scroll td{padding:14px 16px;border-top:1px solid var(--border);max-width:340px;overflow-wrap:anywhere}.admin-table-scroll td a{display:inline-flex;min-height:44px;align-items:center;text-decoration:underline}.admin-table-scroll td small{display:block;color:var(--muted-foreground)}
+ .admin-pagination{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap}.admin-drawer summary{cursor:pointer;min-height:44px;font-weight:650}.admin-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.admin-detail dl{display:grid;gap:10px}.admin-detail dt{color:var(--muted-foreground);font-size:12px}.admin-detail dd{overflow-wrap:anywhere;margin:0 0 8px}.admin-action-grid{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.admin-confirm{display:flex;flex-direction:column;gap:16px}.admin-confirm-dialog{max-height:90dvh;overflow:auto}.admin-confirm-dialog p{overflow-wrap:anywhere}.admin-confirm textarea{min-height:80px}
+-@media(max-width:700px){.admin-shell{padding:12px}.admin-header{padding:12px 16px;border-radius:20px}.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-main{padding:24px 0}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
++@media(max-width:700px){.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
+ .admin-two-factor-page{min-height:calc(100vh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
+ 
+ .admin-confirm-dialog>button{min-width:44px;min-height:44px;top:4px;right:4px;display:grid;place-items:center}
+diff --git a/app/rstmcadmin/analytics/page.tsx b/app/rstmcadmin/analytics/page.tsx
+index 41977e8..56d8eaa 100644
+--- a/app/rstmcadmin/analytics/page.tsx
++++ b/app/rstmcadmin/analytics/page.tsx
+@@ -2,10 +2,11 @@ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { getPool } from '@/lib/postgres';
+ import { dashboardAnalytics } from '@/lib/admin/analytics';
+ import { AnalyticsDashboard } from '@/components/admin/analytics';
++import { PageHead } from '@/components/admin/page-head';
+ export const dynamic = 'force-dynamic';
+ export default async function AnalyticsPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'analytics.read');
+   const initial = await dashboardAnalytics(await getPool(), 14);
+-  return <><p className="admin-eyebrow">Control room / Analytics</p><h1>Community insights</h1><AnalyticsDashboard initial={initial}/></>;
++  return <><PageHead breadcrumb="Control room / Analytics" title="Community insights" /><AnalyticsDashboard initial={initial}/></>;
+ }
+diff --git a/app/rstmcadmin/appearance/page.tsx b/app/rstmcadmin/appearance/page.tsx
+index 9bc8729..087158a 100644
+--- a/app/rstmcadmin/appearance/page.tsx
++++ b/app/rstmcadmin/appearance/page.tsx
+@@ -3,7 +3,10 @@ import {readSettings} from '@/lib/admin/settings';
+ import {appearanceFromSettings} from '@/lib/appearance';
+ import {localDevDatabase} from '@/lib/postgres';
+ import {AppearanceEditor} from '@/components/admin/appearance';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function AppearancePage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');const value=appearanceFromSettings(await readSettings());
+- return <><p className="admin-eyebrow">Control room / Appearance</p><h1>Make this space yours</h1><p>Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default.</p><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
++ return <><PageHead breadcrumb="Control room / Appearance" title="Make this space yours">
++  <p>Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default.</p>
++  </PageHead><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
+ }
+diff --git a/app/rstmcadmin/audit/page.tsx b/app/rstmcadmin/audit/page.tsx
+index f66ee41..1b29d40 100644
+--- a/app/rstmcadmin/audit/page.tsx
++++ b/app/rstmcadmin/audit/page.tsx
+@@ -4,6 +4,7 @@ import {auditFilters,listAudit} from '@/lib/admin/audit';
+ import {AuditTable,AuditTools} from '@/components/admin/audit';
+ import {ADMIN_BASE_PATH} from '@/lib/admin/config';
+ import Link from 'next/link';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AuditPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'audit.read');
+@@ -11,5 +12,7 @@ export default async function AuditPage({searchParams}:{searchParams:Promise<Rec
+  try{filters=auditFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid audit filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/audit'}>Clear filters</Link></section>;}
+  const result=await listAudit(await getPool(),filters),pages=Math.max(1,Math.ceil(result.total/filters.limit));
+  const pageLink=(page:number)=>ADMIN_BASE_PATH+'/audit?'+new URLSearchParams({...Object.fromEntries(Object.entries(filters).map(([key,value])=>[key,String(value)])),page:String(page)});
+- return <><p className="admin-eyebrow">Control room / Security</p><h1>Administrator audit log</h1><p>{result.total.toLocaleString('en-IN')} matching historical events. Older records remain readable. This viewer is read-only; no edit or delete action exists.</p><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}>Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next</Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
++ return <><PageHead breadcrumb="Control room / Security" title="Administrator audit log">
++  <p>{result.total.toLocaleString('en-IN')} matching historical events. Older records remain readable. This viewer is read-only; no edit or delete action exists.</p>
++  </PageHead><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}>Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next</Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
+ }
+diff --git a/app/rstmcadmin/communications/page.tsx b/app/rstmcadmin/communications/page.tsx
+index 724871f..0b27cdf 100644
+--- a/app/rstmcadmin/communications/page.tsx
++++ b/app/rstmcadmin/communications/page.tsx
+@@ -1,6 +1,9 @@
+ import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
+ import { CommunicationCenter } from '@/components/admin/communications';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function CommunicationsPage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'messages.read');
+- return <><p className="admin-eyebrow">Control room / Communications</p><h1>Messages, notifications &amp; CMS</h1><p>Private message content is access-controlled and audited. Campaign sends are paused by default, capped, and require an explicit dry-run confirmation.</p><CommunicationCenter/></>;
++ return <><PageHead breadcrumb="Control room / Communications" title="Messages, notifications & CMS">
++  <p>Private message content is access-controlled and audited. Campaign sends are paused by default, capped, and require an explicit dry-run confirmation.</p>
++  </PageHead><CommunicationCenter/></>;
+ }
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+index c8828d4..5fa572f 100644
+--- a/app/rstmcadmin/content/[id]/page.tsx
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -8,6 +8,7 @@ import { AdminError } from '@/lib/admin/validation';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentActions, ContentEditor } from '@/components/admin/content';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function ContentItem({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{resource?:string}>}) {
+   const actor=await requireAdminPage();const {id}=await params;const query=await searchParams;
+@@ -15,7 +16,9 @@ export default async function ContentItem({params,searchParams}:{params:Promise<
+   const item=await contentDetail(await getPool(),resource,id).catch(error=>{if(error instanceof AdminError&&error.status===404)notFound();throw error;});
+   const operations=actor.role==='moderator'?(item.deleted_at?[]:['hide','unhide']):item.deleted_at?['restore',...actor.role==='owner'?['purge']:[]]:['hide','unhide','delete',...resource==='posts'?['pin','unpin',...item.kind==='story'?['expire','highlight']:[]]:[]];
+   const counts=item.counts as Record<string,unknown>|undefined;
+-  return <><p className="admin-eyebrow">Control room / {resource}</p><h1>{resource==='posts'?String(item.kind)+' detail':'Comment detail'}</h1><p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
++  return <><PageHead breadcrumb={'Control room / ' + resource} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'}>
++    <p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
++    </PageHead>
+     <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
+     {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
+     {resource==='posts'&&actor.role!=='moderator'&&<section className="admin-card"><h2>Counter baselines</h2><CounterEditor key={String(item.base_likes)+':'+String(item.base_comments)+':'+String(item.base_views)} id={id} likes={Number(item.base_likes)} comments={Number(item.base_comments)} views={Number(item.base_views)} disabled={!!item.deleted_at}/></section>}
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index aae4519..2c9eeb1 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -6,13 +6,16 @@ import { readSettings } from '@/lib/admin/settings';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentSettings, ContentTable } from '@/components/admin/content';
+ import { hasPermission } from '@/lib/admin/permissions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
+   const actor=await requireAdminPage();let filter;
+   try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
+   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
+   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
+-  return <><p className="admin-eyebrow">Control room / Content</p><h1>Content & moderation</h1><p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
++  return <><PageHead breadcrumb="Control room / Content" title="Content & moderation">
++    <p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
++    </PageHead>
+     {settings&&hasPermission(actor.role,'settings.manage')&&<ContentSettings settings={settings}/>}<form className="admin-search" action={base}>
+       <label>Search text<input name="q" maxLength={100} defaultValue={filter.q}/></label><label>Resource<select name="resource" defaultValue={filter.resource}><option value="posts">Posts, reels, stories</option><option value="comments">Comments</option></select></label>
+       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
+diff --git a/app/rstmcadmin/exports/page.tsx b/app/rstmcadmin/exports/page.tsx
+index 892c35a..d835aae 100644
+--- a/app/rstmcadmin/exports/page.tsx
++++ b/app/rstmcadmin/exports/page.tsx
+@@ -1,7 +1,8 @@
+ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { ExportManager } from '@/components/admin/exports';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function ExportsPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'exports.read');
+-  return <><p className="admin-eyebrow">Control room / Exports</p><h1>Bounded data exports</h1><ExportManager/></>;
++  return <><PageHead breadcrumb="Control room / Exports" title="Bounded data exports" /><ExportManager/></>;
+ }
+diff --git a/app/rstmcadmin/features/page.tsx b/app/rstmcadmin/features/page.tsx
+index 53cc452..9083b3c 100644
+--- a/app/rstmcadmin/features/page.tsx
++++ b/app/rstmcadmin/features/page.tsx
+@@ -3,4 +3,5 @@ import {loadSettings} from '@/lib/admin/core';
+ import {getPool} from '@/lib/postgres';
+ import {featureConfig} from '@/lib/features';
+ import {FeatureEditor} from '@/components/admin/features';
+-export default async function FeaturePage(){const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');return <><p className="admin-eyebrow">Control room / Features</p><h1>Features & availability</h1><FeatureEditor initial={featureConfig(await loadSettings(await getPool()))}/></>;}
++import { PageHead } from '@/components/admin/page-head';
++export default async function FeaturePage(){const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');return <><PageHead breadcrumb="Control room / Features" title="Features & availability" /><FeatureEditor initial={featureConfig(await loadSettings(await getPool()))}/></>;}
+diff --git a/app/rstmcadmin/guide/page.tsx b/app/rstmcadmin/guide/page.tsx
+index 9282d1b..e65c465 100644
+--- a/app/rstmcadmin/guide/page.tsx
++++ b/app/rstmcadmin/guide/page.tsx
+@@ -1,12 +1,13 @@
+ import Link from 'next/link';
+ import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AdminGuidePage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'system.read');
+   return <>
+-    <p className="admin-eyebrow">Control room / Operator guide</p><h1>Operations guide</h1>
++    <PageHead breadcrumb="Control room / Operator guide" title="Operations guide" />
+     <section className="admin-card admin-guide"><h2>Analytics and exports</h2><p>Analytics uses UTC day buckets. “Active sign-in proxy” counts distinct accounts whose Better Auth session was refreshed that day; it is not a per-request DAU event. Uploaded storage is the sum of asset bytes added during the chosen window, not a historical snapshot of retained storage. The signup funnel counts non-demo member accounts with at least one non-deleted post; stories and reels are not counted as first posts.</p><p>Exports are streamed and capped at 1,000 records. User exports contain email addresses, report exports can include moderation details, and audit exports include recorded network/client metadata. Save and share these files only with a justified operational need.</p>
+       <p><Link href={ADMIN_BASE_PATH+'/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH+'/exports'}>Open exports</Link></p></section>
+     <section className="admin-card admin-guide"><h2>Migration status and cache</h2><p>The system page compares applied migration versions with the application registry; it does not apply migrations. Run migrations through the normal deployment process. Cache invalidation clears the tagged settings cache and revalidates the public root layout; it cannot clear a browser cache or a third-party CDN.</p><p>Environment inspection reports booleans only. Keep credentials in deployment environment settings, never in the database-backed site settings.</p></section>
+diff --git a/app/rstmcadmin/labels/page.tsx b/app/rstmcadmin/labels/page.tsx
+index f1a793a..3978ce9 100644
+--- a/app/rstmcadmin/labels/page.tsx
++++ b/app/rstmcadmin/labels/page.tsx
+@@ -3,8 +3,11 @@ import {loadSettings} from '@/lib/admin/core';
+ import {getPool} from '@/lib/postgres';
+ import {labelsFromSettings} from '@/lib/admin/labels';
+ import {LabelsEditor} from '@/components/admin/labels';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function LabelsPage(){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');
+  const initial=labelsFromSettings(await loadSettings(await getPool()));
+- return <><p className="admin-eyebrow">Control room / Copy</p><h1>Labels &amp; copy</h1><p>English-first plain-text labels. Changes are audited and appear on the next public page load, with server-rendered first paint. Existing open tabs must reload.</p><LabelsEditor initial={initial}/></>;
++ return <><PageHead breadcrumb="Control room / Copy" title="Labels & copy">
++  <p>English-first plain-text labels. Changes are audited and appear on the next public page load, with server-rendered first paint. Existing open tabs must reload.</p>
++  </PageHead><LabelsEditor initial={initial}/></>;
+ }
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index c66872f..4be03ec 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -1,31 +1,49 @@
+ import type { Metadata } from 'next';
+-import Link from 'next/link';
+ import { requireAdminPage } from '@/lib/admin/guard';
+ import { hasPermission } from '@/lib/admin/permissions';
+ import type { AdminPermission } from '@/lib/admin/permissions';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++import { AdminNav, type AdminNavItem } from '@/components/admin/admin-nav';
+ import './admin.css';
+ 
+ export const metadata: Metadata = { title: 'RSTMC — Administration', robots: { index: false, follow: false } };
+ export const dynamic = 'force-dynamic';
+-const navigation: {label:string;path:string;permission:AdminPermission}[] = [
+-  {label:'Overview',path:'',permission:'dashboard.read'},
+-  {label:'Users',path:'/users',permission:'users.read'},
+-  {label:'Content',path:'/content',permission:'content.read'},
+-  {label:'Appearance',path:'/appearance',permission:'settings.manage'},
+-  {label:'Features',path:'/features',permission:'settings.manage'},
+-  {label:'Labels',path:'/labels',permission:'settings.manage'},
+-  {label:'Media',path:'/media',permission:'media.manage'},
+-  {label:'Safety',path:'/moderation',permission:'moderation.read'},
+-  {label:'Audit',path:'/audit',permission:'audit.read'},
+-  {label:'Security & roles',path:'/security',permission:'security.read'},
+-  {label:'Communications',path:'/communications',permission:'messages.read'},
+-  {label:'Analytics',path:'/analytics',permission:'analytics.read'},
+-  {label:'Exports',path:'/exports',permission:'exports.read'},
+-  {label:'System tools',path:'/system',permission:'system.read'},
+-  {label:'Operator guide',path:'/guide',permission:'system.read'},
++const navigation: { label: string; path: string; permission?: AdminPermission; icon: string; group: string; external?: boolean }[] = [
++  { label: 'Overview', path: '', permission: 'dashboard.read', icon: 'LayoutDashboard', group: 'MANAGE' },
++  { label: 'Users', path: '/users', permission: 'users.read', icon: 'Users', group: 'MANAGE' },
++  { label: 'Content', path: '/content', permission: 'content.read', icon: 'FileText', group: 'MANAGE' },
++  { label: 'Appearance', path: '/appearance', permission: 'settings.manage', icon: 'Palette', group: 'CUSTOMIZE' },
++  { label: 'Features', path: '/features', permission: 'settings.manage', icon: 'ToggleRight', group: 'CUSTOMIZE' },
++  { label: 'Labels', path: '/labels', permission: 'settings.manage', icon: 'Tags', group: 'CUSTOMIZE' },
++  { label: 'Media', path: '/media', permission: 'media.manage', icon: 'Images', group: 'CUSTOMIZE' },
++  { label: 'Safety', path: '/moderation', permission: 'moderation.read', icon: 'ShieldAlert', group: 'PROTECT' },
++  { label: 'Audit', path: '/audit', permission: 'audit.read', icon: 'ScrollText', group: 'PROTECT' },
++  { label: 'Security & roles', path: '/security', permission: 'security.read', icon: 'ShieldCheck', group: 'PROTECT' },
++  { label: 'Communications', path: '/communications', permission: 'messages.read', icon: 'Megaphone', group: 'REACH & INSIGHT' },
++  { label: 'Analytics', path: '/analytics', permission: 'analytics.read', icon: 'BarChart3', group: 'REACH & INSIGHT' },
++  { label: 'Exports', path: '/exports', permission: 'exports.read', icon: 'Download', group: 'REACH & INSIGHT' },
++  { label: 'System tools', path: '/system', permission: 'system.read', icon: 'Wrench', group: 'SYSTEM' },
++  { label: 'Operator guide', path: '/guide', permission: 'system.read', icon: 'BookOpen', group: 'SYSTEM' },
++  { label: 'View site', path: '/', icon: 'ExternalLink', group: 'SYSTEM', external: true },
+ ];
++
+ export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+-  const actor=await requireAdminPage();
+-  return <div className="admin-shell"><header className="admin-header"><span className="brand">RSTMC<span>.</span></span><nav aria-label="Admin navigation">{navigation.filter(item=>hasPermission(actor.role,item.permission)).map(item=><Link key={item.path} href={ADMIN_BASE_PATH+item.path}>{item.label}</Link>)}<Link href="/">View site</Link></nav></header><main className="admin-main">{children}</main></div>;
++  const actor = await requireAdminPage();
++  const items: AdminNavItem[] = navigation
++    .filter(item => !item.permission || hasPermission(actor.role, item.permission))
++    .map(item => ({
++      label: item.label,
++      href: item.external ? '/' : ADMIN_BASE_PATH + item.path,
++      icon: item.icon,
++      group: item.group,
++      ...(item.external ? { external: true } : {}),
++    }));
++  return <div className="admin-shell">
++    <a className="admin-skip-link" href="#admin-main">Skip to main content</a>
++    <AdminNav items={items} email={actor.email} role={actor.role} homeHref={ADMIN_BASE_PATH} />
++    <div className="admin-panel">
++      <main id="admin-main" className="admin-main">{children}</main>
++      <footer className="admin-footer">© {new Date().getFullYear()} RSTMC.</footer>
++    </div>
++  </div>;
+ }
+diff --git a/app/rstmcadmin/media/page.tsx b/app/rstmcadmin/media/page.tsx
+index a51d81d..679ada8 100644
+--- a/app/rstmcadmin/media/page.tsx
++++ b/app/rstmcadmin/media/page.tsx
+@@ -3,7 +3,10 @@ import {getPool} from '@/lib/postgres';
+ import {readMediaConfig} from '@/lib/media-policy';
+ import {MediaEditor,StorageInventory} from '@/components/admin/media';
+ import {mediaReport} from '@/lib/admin/media';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function MediaPage({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'media.manage');const pool=await getPool();const report=await mediaReport(pool,await searchParams);
+- return <><p className="admin-eyebrow">Control room / Media</p><h1>Media &amp; storage</h1><p>Verified uploads, current limits and safe storage cleanup. Existing posts stay intact when limits change; new attachment requests are revalidated.</p><MediaEditor initial={await readMediaConfig(pool)}/><StorageInventory report={report} owner={actor.role==='owner'}/></>;
++ return <><PageHead breadcrumb="Control room / Media" title="Media & storage">
++  <p>Verified uploads, current limits and safe storage cleanup. Existing posts stay intact when limits change; new attachment requests are revalidated.</p>
++  </PageHead><MediaEditor initial={await readMediaConfig(pool)}/><StorageInventory report={report} owner={actor.role==='owner'}/></>;
+ }
+diff --git a/app/rstmcadmin/moderation/page.tsx b/app/rstmcadmin/moderation/page.tsx
+index 15de2d2..d89533e 100644
+--- a/app/rstmcadmin/moderation/page.tsx
++++ b/app/rstmcadmin/moderation/page.tsx
+@@ -4,8 +4,11 @@ import {moderationConfig,DEFAULT_MODERATION} from '@/lib/moderation-policy';
+ import {readSettings} from '@/lib/admin/settings';
+ import {reportQueue,rateLimitQueue} from '@/lib/admin/moderation';
+ import {ModerationConsole} from '@/components/admin/moderation';
++import { PageHead } from '@/components/admin/page-head';
+ export default async function ModerationPage({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
+  const actor=await requireAdminPage(),pool=await getPool(),filters=await searchParams;
+  const [reports,config,rates]=await Promise.all([reportQueue(pool,filters),actor.role==='moderator'?Promise.resolve(DEFAULT_MODERATION):readSettings().then(moderationConfig),actor.role==='moderator'?Promise.resolve({page:1,total:0,hits:0,items:[]}):rateLimitQueue(pool,1)]);
+- return <><p className="admin-eyebrow">Control room / Safety</p><h1>Reports &amp; moderation</h1><p>Review user reports, apply policy filters, manage account-specific restrictions, and clear rate-limit buckets. Sensitive IP addresses are never shown.</p><ModerationConsole actorId={actor.userId} role={actor.role} initialReports={reports} initialConfig={config} initialRates={rates}/></>;
++ return <><PageHead breadcrumb="Control room / Safety" title="Reports & moderation">
++  <p>Review user reports, apply policy filters, manage account-specific restrictions, and clear rate-limit buckets. Sensitive IP addresses are never shown.</p>
++  </PageHead><ModerationConsole actorId={actor.userId} role={actor.role} initialReports={reports} initialConfig={config} initialRates={rates}/></>;
+ }
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+index e68b1ee..eb69e6e 100644
+--- a/app/rstmcadmin/page.tsx
++++ b/app/rstmcadmin/page.tsx
+@@ -4,6 +4,7 @@ import { getPool } from '@/lib/postgres';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { dashboard } from '@/lib/admin/queries';
+ import { StatCard, bytes } from '@/components/admin/ui';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AdminHome() {
+   const actor = await requireAdminPage();
+@@ -12,8 +13,9 @@ export default async function AdminHome() {
+   const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
+   const number = (key: string) => Number(stats[key]).toLocaleString('en-IN');
+   return <>
+-    <p className="admin-eyebrow">Control room / Overview</p><h1>A pulse on your community.</h1>
++    <PageHead breadcrumb="Control room / Overview" title="A pulse on your community.">
+     <p>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</p>
++    </PageHead>
+     <section className="admin-stats" aria-label="Community statistics">
+       <StatCard label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
+       <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
+diff --git a/app/rstmcadmin/security/page.tsx b/app/rstmcadmin/security/page.tsx
+index c6ac36b..76fcc69 100644
+--- a/app/rstmcadmin/security/page.tsx
++++ b/app/rstmcadmin/security/page.tsx
+@@ -3,6 +3,7 @@ import {getPool} from '@/lib/postgres';
+ import {ADMIN_ROLES} from '@/lib/admin/config';
+ import {ROLE_PERMISSIONS,ADMIN_PERMISSIONS} from '@/lib/admin/permissions';
+ import {parseAdminIpAllowlist} from '@/lib/admin/network';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ const labels:Record<string,string>={
+  'admin.access':'Open admin panel','dashboard.read':'View dashboard','content.read':'Read content','content.moderate':'Hide or unhide content','users.read':'Read accounts','users.manage':'Manage non-role account actions','roles.manage':'Grant or revoke roles','settings.manage':'Manage site settings and moderation policy','media.manage':'Manage media','moderation.read':'Read reports','moderation.triage':'Assign, note, dismiss or hide reports','moderation.accounts':'Apply account safety restrictions','moderation.rates':'Inspect and clear rate limits','audit.read':'Read and export audit history','security.read':'Read security policy',
+@@ -15,7 +16,7 @@ export default async function SecurityPage(){
+   pool.query('SELECT COUNT(*) total,COUNT(*) FILTER(WHERE "twoFactorEnabled"=true) secured FROM "user" WHERE role=\'owner\' AND "emailVerified"=true AND (banned=false OR "banExpires"<=now()) AND deleted_at IS NULL'),
+  ]);
+  const allowlist=parseAdminIpAllowlist(process.env.ADMIN_IP_ALLOWLIST);
+- return <><p className="admin-eyebrow">Control room / Security</p><h1>Security &amp; administrator roles</h1>
++ return <><PageHead breadcrumb="Control room / Security" title="Security & administrator roles" />
+   <section className="admin-card"><h2>Enforced account policy</h2><dl className="admin-definition-list"><dt>Your role</dt><dd>{actor.role}</dd><dt>Two-factor authentication</dt><dd>{user?.twoFactorEnabled?'Enabled — required on every admin request':'Setup required'}</dd><dt>Admin session lifetime</dt><dd>12 hours absolute; public account session settings are unchanged.</dd><dt>Optional IP allowlist</dt><dd>{allowlist.length?`Enabled (${allowlist.length} configured network${allowlist.length===1?'':'s'})`:'Disabled — ADMIN_IP_ALLOWLIST is unset.'}</dd><dt>Verified owners with 2FA</dt><dd>{Number(owners.secured)} of {Number(owners.total)}</dd></dl><p>Administrator accounts cannot disable 2FA through the account endpoint. An owner account must never be left with password-only panel access. Configure optional networks as comma-separated IPv4/IPv6 addresses or CIDRs in the deployment environment; this page deliberately does not reveal the configured addresses.</p></section>
+   <section className="admin-card"><h2>Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}>{role}</th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role}>{ROLE_PERMISSIONS[role].includes(permission)?'Allowed':'—'}</td>)}</tr>)}</tbody></table></div></section>
+   <section className="admin-card"><h2>Known sign-in devices for your account</h2><p>Only an HMAC fingerprint is stored. A new IP/browser tuple generates a security email and an audit event; raw device details are not persisted in the device registry.</p><div className="admin-table-scroll"><table><thead><tr><th>Fingerprint (partial)</th><th>First seen (UTC)</th><th>Last seen (UTC)</th></tr></thead><tbody>{devices.map(device=><tr key={device.fingerprint_hash}><td><code>{String(device.fingerprint_hash).slice(0,16)}…</code></td><td>{new Date(Number(device.first_seen)).toISOString()}</td><td>{new Date(Number(device.last_seen)).toISOString()}</td></tr>)}{!devices.length&&<tr><td colSpan={3}>No device fingerprints recorded. The current network may not provide an IP or browser identifier.</td></tr>}</tbody></table></div></section>
+diff --git a/app/rstmcadmin/shell.css b/app/rstmcadmin/shell.css
+new file mode 100644
+index 0000000..50dabe5
+--- /dev/null
++++ b/app/rstmcadmin/shell.css
+@@ -0,0 +1,311 @@
++/* ============================================================
++   Admin shell foundation: tokens, typography, layout, navigation
++   Scoped to .admin-shell so the public site is never affected.
++   ============================================================ */
++
++.admin-shell {
++  /* Accent. Change ONLY this block to re-brand (brand pink = #eb456e). */
++  --adm-accent: #1b84ff;
++  --adm-accent-hover: #0f6fe0;
++  --adm-accent-soft: rgba(27, 132, 255, .14);
++  --adm-on-accent: #fff;
++
++  --adm-success: #17c653; --adm-warning: #f6b100; --adm-danger: #f8285a;
++  --adm-purple: #7239ea;  --adm-cyan: #06b6d4;
++
++  --adm-r-panel: 20px; --adm-r-card: 14px; --adm-r-control: 10px; --adm-r-pill: 999px;
++  --adm-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++  --adm-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
++  --adm-ease: cubic-bezier(.2, .8, .2, 1);
++  --adm-sidebar-w: 272px;
++
++  /* DARK (default look, matches the reference) */
++  --adm-bg: #0f0f12;          /* page + sidebar */
++  --adm-panel: #08080a;       /* main panel */
++  --adm-card: #0c0c0f;
++  --adm-muted-surface: #131317; /* table header, chips, code */
++  --adm-hover: #17171c;
++  --adm-border: #222228;
++  --adm-border-subtle: #1a1a1f;
++  --adm-text: #f5f5f7;
++  --adm-text-2: #a1a1aa;      /* secondary */
++  --adm-text-3: #71717a;      /* hints */
++  --adm-accent-text: #4da3ff; /* links + active nav text */
++  --adm-active-bg: #000;
++  --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
++  --adm-success-text: #3ddc84; --adm-warning-text: #ffc933;
++  --adm-danger-text: #ff5c85;  --adm-purple-text: #a78bfa;
++
++  /* Deterministic avatar tints (section 8.10) */
++  --adm-tint-blue-bg: rgba(27, 132, 255, .16);  --adm-tint-blue-fg: #7bbcff;
++  --adm-tint-green-bg: rgba(23, 198, 83, .16);  --adm-tint-green-fg: #4fd98a;
++  --adm-tint-purple-bg: rgba(114, 57, 234, .18); --adm-tint-purple-fg: #b39bfb;
++  --adm-tint-amber-bg: rgba(246, 177, 0, .16);  --adm-tint-amber-fg: #f0b64e;
++  --adm-tint-red-bg: rgba(248, 40, 90, .16);    --adm-tint-red-fg: #ff8098;
++  --adm-tint-cyan-bg: rgba(6, 182, 212, .16);   --adm-tint-cyan-fg: #4fd1e5;
++
++  display: grid;
++  grid-template-columns: var(--adm-sidebar-w) minmax(0, 1fr);
++  min-height: 100dvh;
++  background: var(--adm-bg);
++  color: var(--adm-text);
++  font-family: var(--adm-font);
++  font-size: 14px;
++  line-height: 22px;
++  color-scheme: dark;
++  -webkit-font-smoothing: antialiased;
++}
++
++/* LIGHT — same switches the rest of the app already uses. */
++html[data-theme="light"] .admin-shell,
++html[data-theme="light"] body .admin-shell {
++  --adm-bg: #f3f4f6; --adm-panel: #fff; --adm-card: #fff;
++  --adm-muted-surface: #f7f8fa; --adm-hover: #f1f3f6;
++  --adm-border: #e4e6eb; --adm-border-subtle: #eceef2;
++  --adm-text: #15161a; --adm-text-2: #5b606c; --adm-text-3: #8a8f9b;
++  --adm-accent-text: #0f63d6;          /* passes AA on white */
++  --adm-active-bg: var(--adm-accent-soft);
++  --adm-shadow: 0 1px 2px rgba(16, 24, 40, .06);
++  --adm-success-text: #0d8a3c; --adm-warning-text: #a15c07;
++  --adm-danger-text: #d61f4c;  --adm-purple-text: #6234c7;
++  --adm-tint-blue-bg: rgba(27, 132, 255, .14);  --adm-tint-blue-fg: #0f63d6;
++  --adm-tint-green-bg: rgba(23, 198, 83, .14);  --adm-tint-green-fg: #0d8a3c;
++  --adm-tint-purple-bg: rgba(114, 57, 234, .14); --adm-tint-purple-fg: #6234c7;
++  --adm-tint-amber-bg: rgba(246, 177, 0, .16);  --adm-tint-amber-fg: #8a5b00;
++  --adm-tint-red-bg: rgba(248, 40, 90, .12);    --adm-tint-red-fg: #d61f4c;
++  --adm-tint-cyan-bg: rgba(6, 182, 212, .14);   --adm-tint-cyan-fg: #0b7285;
++  color-scheme: light;
++}
++
++@media (prefers-color-scheme: light) {
++  html:not([data-theme]) .admin-shell {
++    --adm-bg: #f3f4f6; --adm-panel: #fff; --adm-card: #fff;
++    --adm-muted-surface: #f7f8fa; --adm-hover: #f1f3f6;
++    --adm-border: #e4e6eb; --adm-border-subtle: #eceef2;
++    --adm-text: #15161a; --adm-text-2: #5b606c; --adm-text-3: #8a8f9b;
++    --adm-accent-text: #0f63d6;
++    --adm-active-bg: var(--adm-accent-soft);
++    --adm-shadow: 0 1px 2px rgba(16, 24, 40, .06);
++    --adm-success-text: #0d8a3c; --adm-warning-text: #a15c07;
++    --adm-danger-text: #d61f4c;  --adm-purple-text: #6234c7;
++    --adm-tint-blue-bg: rgba(27, 132, 255, .14);  --adm-tint-blue-fg: #0f63d6;
++    --adm-tint-green-bg: rgba(23, 198, 83, .14);  --adm-tint-green-fg: #0d8a3c;
++    --adm-tint-purple-bg: rgba(114, 57, 234, .14); --adm-tint-purple-fg: #6234c7;
++    --adm-tint-amber-bg: rgba(246, 177, 0, .16);  --adm-tint-amber-fg: #8a5b00;
++    --adm-tint-red-bg: rgba(248, 40, 90, .12);    --adm-tint-red-fg: #d61f4c;
++    --adm-tint-cyan-bg: rgba(6, 182, 212, .14);   --adm-tint-cyan-fg: #0b7285;
++    color-scheme: light;
++  }
++}
++
++/* ---------- Typography ---------- */
++
++.admin-shell h1 { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.01em; margin: 0; }
++.admin-shell h2 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 0; }
++.admin-shell h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 0; }
++.admin-shell p { line-height: 1.57; overflow-wrap: anywhere; margin: 0; }
++.admin-shell a { color: var(--adm-accent-text); text-decoration: none; }
++.admin-shell a:hover, .admin-shell a:focus-visible { text-decoration: underline; }
++.admin-shell strong { font-weight: 600; }
++.admin-shell :focus-visible, .admin-confirm :focus-visible { outline: 2px solid var(--adm-accent); outline-offset: 2px; }
++.admin-shell ::selection, .admin-shell *::selection { background: color-mix(in srgb, var(--adm-accent) 30%, transparent); }
++
++/* ---------- Skip link ---------- */
++
++.admin-skip-link {
++  position: fixed; top: 8px; left: 8px; z-index: 100;
++  padding: 10px 16px; border-radius: var(--adm-r-control);
++  background: var(--adm-accent); color: var(--adm-on-accent);
++  font-size: 14px; font-weight: 600; text-decoration: none;
++  transform: translateY(-200%);
++}
++.admin-skip-link:focus { transform: none; text-decoration: none; }
++
++/* ---------- Top bar (mobile only) ---------- */
++
++.admin-topbar { display: none; }
++.admin-menu-button {
++  display: inline-flex; align-items: center; justify-content: center;
++  width: 44px; height: 44px; flex: none;
++  border: 1px solid transparent; border-radius: var(--adm-r-control);
++  background: transparent; color: var(--adm-text); cursor: pointer;
++}
++.admin-menu-button:hover { background: var(--adm-hover); }
++.admin-menu-button svg { width: 20px; height: 20px; }
++.admin-drawer-close { display: none; }
++
++/* ---------- Sidebar ---------- */
++
++.admin-sidebar {
++  display: flex; flex-direction: column;
++  min-height: 0; min-width: 0;
++  padding: 16px 12px;
++  background: var(--adm-bg);
++  overflow-y: auto; overscroll-behavior: contain;
++}
++.admin-sidebar-head { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 12px; flex: none; }
++.admin-wordmark { font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--adm-text); white-space: nowrap; }
++.admin-wordmark-dot { color: #eb456e; }
++
++.admin-nav { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0; }
++.admin-nav-group { display: flex; flex-direction: column; gap: 2px; }
++.admin-nav-group-label {
++  padding: 16px 12px 6px; margin: 0;
++  font-size: 11px; line-height: 16px; font-weight: 600;
++  letter-spacing: .08em; text-transform: uppercase; color: var(--adm-text-3);
++}
++.admin-nav-link {
++  position: relative; display: flex; align-items: center; gap: 12px;
++  height: 44px; padding: 0 12px; border-radius: var(--adm-r-control);
++  color: var(--adm-text-2); font-size: 14px; line-height: 20px; font-weight: 500; text-decoration: none;
++  transition: background-color .15s ease-out, color .15s ease-out;
++}
++.admin-nav-link:hover { background: var(--adm-hover); color: var(--adm-text); text-decoration: none; }
++.admin-nav-icon { width: 18px; height: 18px; flex: none; color: var(--adm-text-3); }
++.admin-nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.admin-nav-external { width: 14px; height: 14px; margin-left: auto; flex: none; color: var(--adm-text-3); }
++.admin-nav-link[aria-current="page"] { background: var(--adm-active-bg); color: var(--adm-accent-text); font-weight: 600; }
++.admin-nav-link[aria-current="page"] .admin-nav-icon,
++.admin-nav-link[aria-current="page"] .admin-nav-external { color: var(--adm-accent-text); }
++.admin-nav-link[aria-current="page"]::before {
++  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
++  width: 3px; height: 18px; border-radius: 2px; background: var(--adm-accent);
++}
++
++/* ---------- Account card ---------- */
++
++.admin-account {
++  display: flex; align-items: center; gap: 12px; min-width: 0; flex: none;
++  margin-top: 16px; padding: 12px;
++  border: 1px solid var(--adm-border-subtle); border-radius: 12px; background: var(--adm-muted-surface);
++}
++.admin-account-text { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
++.admin-account-email {
++  max-width: 100%; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--adm-text);
++  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
++}
++.admin-badge {
++  display: inline-flex; align-items: center; gap: 6px;
++  height: 24px; padding: 0 10px; border-radius: var(--adm-r-pill);
++  font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap;
++}
++.admin-badge-primary { background: var(--adm-accent-soft); color: var(--adm-accent-text); }
++
++/* ---------- Avatar ---------- */
++
++.admin-avatar {
++  display: inline-flex; align-items: center; justify-content: center; flex: none;
++  width: var(--adm-avatar-size, 36px); height: var(--adm-avatar-size, 36px);
++  border-radius: var(--adm-r-pill);
++  font-size: 13px; line-height: 1; font-weight: 600; letter-spacing: .01em; user-select: none;
++}
++.admin-avatar-blue { background: var(--adm-tint-blue-bg); color: var(--adm-tint-blue-fg); }
++.admin-avatar-green { background: var(--adm-tint-green-bg); color: var(--adm-tint-green-fg); }
++.admin-avatar-purple { background: var(--adm-tint-purple-bg); color: var(--adm-tint-purple-fg); }
++.admin-avatar-amber { background: var(--adm-tint-amber-bg); color: var(--adm-tint-amber-fg); }
++.admin-avatar-red { background: var(--adm-tint-red-bg); color: var(--adm-tint-red-fg); }
++.admin-avatar-cyan { background: var(--adm-tint-cyan-bg); color: var(--adm-tint-cyan-fg); }
++
++/* ---------- Panel, main and footer ---------- */
++
++.admin-panel {
++  display: flex; flex-direction: column; min-width: 0;
++  margin: 16px 16px 16px 0; min-height: calc(100dvh - 32px);
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-panel);
++  background: var(--adm-panel); box-shadow: var(--adm-shadow);
++  overflow-y: auto; overscroll-behavior: contain; scroll-padding-top: 96px;
++}
++.admin-main { flex: 1 1 auto; width: 100%; max-width: 1360px; min-width: 0; margin: 0 auto; padding: 24px 28px 32px; }
++.admin-footer {
++  padding: 20px 28px; border-top: 1px solid var(--adm-border-subtle);
++  font-size: 12px; line-height: 16px; color: var(--adm-text-3);
++}
++
++/* ---------- Page header ---------- */
++
++.admin-page-head {
++  position: sticky; top: 0; z-index: 20;
++  margin: -24px -28px 24px; padding: 24px 28px 16px;
++  background: color-mix(in srgb, var(--adm-panel) 85%, transparent);
++  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
++  border-bottom: 1px solid var(--adm-border-subtle);
++}
++.admin-page-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
++.admin-page-head-text { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; min-width: 0; }
++.admin-breadcrumb { margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--adm-text-2); }
++.admin-page-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
++.admin-page-head-intro { max-width: 68ch; margin-top: 6px; font-size: 14px; line-height: 22px; color: var(--adm-text-2); }
++.admin-eyebrow { margin: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--adm-text-2); }
++
++/* ---------- Scrollbars (admin only) ---------- */
++
++.admin-sidebar, .admin-panel { scrollbar-width: thin; scrollbar-color: var(--adm-border) transparent; }
++.admin-sidebar::-webkit-scrollbar, .admin-panel::-webkit-scrollbar { width: 8px; height: 8px; }
++.admin-sidebar::-webkit-scrollbar-thumb, .admin-panel::-webkit-scrollbar-thumb { background: var(--adm-border); border-radius: 4px; }
++.admin-sidebar::-webkit-scrollbar-track, .admin-panel::-webkit-scrollbar-track { background: transparent; }
++
++/* ---------- Motion ---------- */
++
++@keyframes admin-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
++@media (prefers-reduced-motion: no-preference) {
++  .admin-main { animation: admin-rise .2s ease-out both; }
++  .admin-sidebar { animation: admin-rise .2s ease-out both; }
++}
++
++/* ---------- Responsive ---------- */
++
++@media (max-width: 1279px) { .admin-shell { --adm-sidebar-w: 240px; } }
++
++/* Icon rail: labels stay in the DOM for assistive technology. */
++@media (min-width: 768px) and (max-width: 1023px) {
++  .admin-shell { grid-template-columns: 76px minmax(0, 1fr); }
++  .admin-nav-label, .admin-account-text {
++    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
++    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
++  }
++  .admin-nav-link { justify-content: center; padding: 0; }
++  .admin-nav-external { display: none; }
++  .admin-nav-group-label { height: 1px; padding: 0; margin: 12px 10px; font-size: 0; line-height: 0; overflow: hidden; border-top: 1px solid var(--adm-border); }
++  .admin-account { justify-content: center; padding: 8px; }
++  .admin-main { padding: 24px 20px 28px; }
++  .admin-page-head { margin: -24px -20px 24px; padding: 20px 20px 14px; }
++  .admin-footer { padding: 18px 20px; }
++}
++
++@media (max-width: 1023px) {
++  .admin-shell { grid-template-columns: minmax(0, 1fr); }
++}
++
++@media (max-width: 767px) {
++  .admin-shell { display: block; min-height: 100dvh; overflow: visible; }
++  .admin-topbar {
++    display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 60;
++    height: 56px; padding: env(safe-area-inset-top) 12px 0; box-sizing: content-box;
++    background: var(--adm-bg); border-bottom: 1px solid var(--adm-border);
++  }
++  .admin-sidebar {
++    position: fixed; inset: 0 auto 0 0; z-index: 80;
++    width: min(296px, 86vw); padding-top: calc(16px + env(safe-area-inset-top));
++    background: var(--adm-bg); border-right: 1px solid var(--adm-border);
++    box-shadow: 24px 0 64px rgba(0, 0, 0, .35);
++    transform: translateX(-102%);
++    transition: transform .24s var(--adm-ease);
++  }
++  .admin-sidebar.is-open { transform: none; }
++  .admin-drawer-close { display: inline-flex; }
++  .admin-drawer-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
++  .admin-panel { margin: 0; min-height: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
++  .admin-main { padding: 16px 16px 24px; }
++  .admin-page-head { position: static; margin: -16px -16px 16px; padding: 16px 16px 12px; backdrop-filter: none; }
++  .admin-page-head-text { flex-direction: column; align-items: flex-start; gap: 2px; }
++  .admin-shell h1 { font-size: 22px; line-height: 28px; }
++  .admin-page-head-actions { width: 100%; }
++  .admin-footer { padding: 16px; }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .admin-shell *, .admin-shell *::before, .admin-shell *::after,
++  .admin-confirm-dialog, .admin-confirm-dialog * {
++    transition: none !important; animation: none !important; scroll-behavior: auto !important;
++  }
++}
+diff --git a/app/rstmcadmin/system/page.tsx b/app/rstmcadmin/system/page.tsx
+index 071b73d..b6c82d5 100644
+--- a/app/rstmcadmin/system/page.tsx
++++ b/app/rstmcadmin/system/page.tsx
+@@ -3,10 +3,11 @@ import { hasPermission } from '@/lib/admin/permissions';
+ import { getPool } from '@/lib/postgres';
+ import { systemOverview } from '@/lib/admin/system';
+ import { SystemTools } from '@/components/admin/system';
++import { PageHead } from '@/components/admin/page-head';
+ export const dynamic = 'force-dynamic';
+ export default async function SystemPage() {
+   const actor = await requireAdminPage();
+   assertAdminPagePermission(actor, 'system.read');
+   const initial = await systemOverview(await getPool());
+-  return <><p className="admin-eyebrow">Control room / System tools</p><h1>Health and safe power tools</h1><SystemTools initial={initial} canOwnerTools={hasPermission(actor.role,'system.sql')&&hasPermission(actor.role,'system.demo')} canPrune={hasPermission(actor.role,'system.prune')}/></>;
++  return <><PageHead breadcrumb="Control room / System tools" title="Health and safe power tools" /><SystemTools initial={initial} canOwnerTools={hasPermission(actor.role,'system.sql')&&hasPermission(actor.role,'system.demo')} canPrune={hasPermission(actor.role,'system.prune')}/></>;
+ }
+diff --git a/app/rstmcadmin/users/[id]/page.tsx b/app/rstmcadmin/users/[id]/page.tsx
+index 62ff14d..c06f539 100644
+--- a/app/rstmcadmin/users/[id]/page.tsx
++++ b/app/rstmcadmin/users/[id]/page.tsx
+@@ -6,6 +6,7 @@ import { AdminError } from '@/lib/admin/validation';
+ import { USER_ACTIONS, type UserAction } from '@/lib/admin/users';
+ import { Drawer, DataTable, bytes } from '@/components/admin/ui';
+ import { UserActions } from '@/components/admin/actions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
+   const actor = await requireAdminPage(); assertAdminPagePermission(actor,'users.read'); const { id } = await params;
+@@ -17,7 +18,9 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
+   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
+   else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
+   const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
+-  return <><p className="admin-eyebrow">Control room / Account detail</p><h1>{user.name}</h1><p>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</p>
++  return <><PageHead breadcrumb="Control room / Account detail" title={user.name}>
++    <p>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</p>
++    </PageHead>
+     <div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
+     <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
+     <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+diff --git a/app/rstmcadmin/users/page.tsx b/app/rstmcadmin/users/page.tsx
+index 8da4832..c4f60e4 100644
+--- a/app/rstmcadmin/users/page.tsx
++++ b/app/rstmcadmin/users/page.tsx
+@@ -5,6 +5,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { listUsers, userFilters } from '@/lib/admin/queries';
+ import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui';
+ import { ExportUsers } from '@/components/admin/actions';
++import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+   const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
+@@ -14,7 +15,9 @@ export default async function Users({ searchParams }: { searchParams: Promise<Re
+   const result = await listUsers(await getPool(), filters);
+   const pages = Math.max(1, Math.ceil(result.total / filters.limit));
+   const pageLink = (page: number) => ADMIN_BASE_PATH + '/users?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([k,v]) => [k,String(v)])), page: String(page) });
+-  return <><p className="admin-eyebrow">Control room / People</p><h1>Users & accounts</h1><p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
++  return <><PageHead breadcrumb="Control room / People" title="Users & accounts">
++    <p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
++    </PageHead>
+     <SearchBar filters={filters} /><FilterChips filters={filters} /><ExportUsers filters={filters} />
+     <DataTable caption={`Accounts · page ${filters.page} of ${pages}. CSV exports only this page (maximum 200).`} headings={['Account','Role','Email','Access','Storage']}>
+       {result.users.map(user => <tr key={user.id}><td><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></td><td>{user.role}</td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</td><td>{bytes(user.storage_bytes)}</td></tr>)}
+diff --git a/components/admin/admin-nav.tsx b/components/admin/admin-nav.tsx
+new file mode 100644
+index 0000000..1a9e9b7
+--- /dev/null
++++ b/components/admin/admin-nav.tsx
+@@ -0,0 +1,96 @@
++'use client';
++
++import Link from 'next/link';
++import { usePathname } from 'next/navigation';
++import { useCallback, useEffect, useRef, useState } from 'react';
++import {
++  BarChart3, BookOpen, Download, ExternalLink, FileText, Images, LayoutDashboard, Megaphone,
++  Menu, Palette, ScrollText, ShieldAlert, ShieldCheck, Tags, ToggleRight, Users, Wrench, X,
++} from 'lucide-react';
++import { Avatar } from './avatar';
++
++export type AdminNavItem = { label: string; href: string; icon: string; group: string; external?: boolean };
++
++const ICONS = {
++  LayoutDashboard, Users, FileText, Palette, ToggleRight, Tags, Images, ShieldAlert, ScrollText,
++  ShieldCheck, Megaphone, BarChart3, Download, Wrench, BookOpen, ExternalLink,
++} as const;
++type IconName = keyof typeof ICONS;
++
++function Wordmark() {
++  return <span className="admin-wordmark">RSTMC<span className="admin-wordmark-dot">.</span></span>;
++}
++
++export function AdminNav({ items, email, role, homeHref }: { items: AdminNavItem[]; email: string; role: string; homeHref: string }) {
++  const pathname = usePathname() || homeHref;
++  const [open, setOpen] = useState(false);
++  const menuButton = useRef<HTMLButtonElement | null>(null);
++  const closeButton = useRef<HTMLButtonElement | null>(null);
++  const groups = items.reduce<{ label: string; items: AdminNavItem[] }[]>((all, item) => {
++    const group = all.find((entry) => entry.label === item.group);
++    if (group) group.items.push(item);
++    else all.push({ label: item.group, items: [item] });
++    return all;
++  }, []);
++
++  const close = useCallback((returnFocus = true) => {
++    setOpen(false);
++    if (returnFocus) menuButton.current?.focus();
++  }, []);
++
++  // The drawer is a navigation surface: Escape always closes it and the page
++  // behind it must not scroll while it covers the screen.
++  useEffect(() => {
++    if (!open) return;
++    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
++    document.addEventListener('keydown', onKeyDown);
++    const previous = document.body.style.overflow;
++    document.body.style.overflow = 'hidden';
++    closeButton.current?.focus();
++    return () => {
++      document.removeEventListener('keydown', onKeyDown);
++      document.body.style.overflow = previous;
++    };
++  }, [open, close]);
++
++  const isActive = (item: AdminNavItem) => item.href === homeHref ? pathname === homeHref : pathname === item.href || pathname.startsWith(item.href + '/');
++
++  return <>
++    <div className="admin-topbar">
++      <button ref={menuButton} type="button" className="admin-menu-button" aria-label="Open navigation" aria-expanded={open} aria-controls="admin-navigation" onClick={() => setOpen(true)}>
++        <Menu aria-hidden="true" focusable="false" />
++      </button>
++      <Wordmark />
++    </div>
++    {open ? <div className="admin-drawer-backdrop" onClick={() => close()} aria-hidden="true" /> : null}
++    <aside id="admin-navigation" className={`admin-sidebar${open ? ' is-open' : ''}`}>
++      <div className="admin-sidebar-head">
++        <Wordmark />
++        <button ref={closeButton} type="button" className="admin-menu-button admin-drawer-close" aria-label="Close navigation" onClick={() => close()}>
++          <X aria-hidden="true" focusable="false" />
++        </button>
++      </div>
++      <nav className="admin-nav" aria-label="Admin navigation">
++        {groups.map(group => <div className="admin-nav-group" role="group" aria-label={group.label} key={group.label}>
++          <p className="admin-nav-group-label">{group.label}</p>
++          {group.items.map(item => {
++            const Icon = ICONS[(item.icon as IconName) in ICONS ? (item.icon as IconName) : 'FileText'];
++            const active = isActive(item);
++            return <Link key={item.href} href={item.href} className="admin-nav-link" aria-current={active ? 'page' : undefined} aria-label={item.label} title={item.label} onClick={() => { if (open) setOpen(false); }}>
++              <Icon className="admin-nav-icon" strokeWidth={1.75} aria-hidden="true" focusable="false" />
++              <span className="admin-nav-label">{item.label}</span>
++              {item.external ? <ExternalLink className="admin-nav-external" strokeWidth={1.75} aria-hidden="true" focusable="false" /> : null}
++            </Link>;
++          })}
++        </div>)}
++      </nav>
++      <div className="admin-account">
++        <Avatar seed={email} size={40} />
++        <div className="admin-account-text">
++          <p className="admin-account-email">{email}</p>
++          <span className="admin-badge admin-badge-primary">{role}</span>
++        </div>
++      </div>
++    </aside>
++  </>;
++}
+diff --git a/components/admin/avatar.tsx b/components/admin/avatar.tsx
+new file mode 100644
+index 0000000..a8c5d32
+--- /dev/null
++++ b/components/admin/avatar.tsx
+@@ -0,0 +1,26 @@
++import type { CSSProperties } from 'react';
++
++export type AvatarSize = 28 | 36 | 40 | 64;
++const TINTS = ['blue', 'green', 'purple', 'amber', 'red', 'cyan'] as const;
++
++function tintIndex(seed: string) {
++  let hash = 0;
++  for (let index = 0; index < seed.length; index += 1) hash = (hash * 31 + seed.charCodeAt(index)) | 0;
++  return Math.abs(hash) % TINTS.length;
++}
++
++/** First letters of the first two words; falls back to the first two characters. */
++export function initialsFor(name: string) {
++  const parts = name.trim().split(/\s+/).filter(Boolean);
++  const letters = parts.slice(0, 2).map((part) => [...part][0] ?? '').join('');
++  if (letters) return letters.toUpperCase();
++  const fallback = [...name.trim()].filter((character) => /[\p{L}\p{N}]/u.test(character)).slice(0, 2).join('');
++  return (fallback || '?').toUpperCase();
++}
++
++/** Display-only avatar. Decorative: the real name and email stay next to it. */
++export function Avatar({ name, seed, size = 36 }: { name?: string | null; seed?: string | null; size?: AvatarSize }) {
++  const label = (name || seed || '').trim();
++  const style = { '--adm-avatar-size': `${size}px` } as CSSProperties;
++  return <span className={`admin-avatar admin-avatar-${TINTS[tintIndex(seed || label)]}`} style={style} aria-hidden="true">{initialsFor(label)}</span>;
++}
+diff --git a/components/admin/page-head.tsx b/components/admin/page-head.tsx
+new file mode 100644
+index 0000000..1cba24d
+--- /dev/null
++++ b/components/admin/page-head.tsx
+@@ -0,0 +1,14 @@
++import type { ReactNode } from 'react';
++
++export function PageHead({ breadcrumb, title, actions, children }: { breadcrumb: string; title: string; actions?: ReactNode; children?: ReactNode }) {
++  return <header className="admin-page-head">
++    <div className="admin-page-head-row">
++      <div className="admin-page-head-text">
++        <h1>{title}</h1>
++        <p className="admin-breadcrumb">{breadcrumb}</p>
++      </div>
++      {actions ? <div className="admin-page-head-actions">{actions}</div> : null}
++    </div>
++    {children ? <div className="admin-page-head-intro">{children}</div> : null}
++  </header>;
++}
+-- 
+2.39.5
+

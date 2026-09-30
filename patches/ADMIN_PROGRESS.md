@@ -632,3 +632,83 @@ Completed the local documentation, recovery, HTTP, migration-fixture, and synthe
 - `node --import tsx scripts/phase12-perf.mts` passed on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets): median **124 ms**, max **150 ms** over 7 warmed 14-day dashboard runs on this host (author reported 65/76 ms; local benchmark only, not a production SLA).
 - The `docs/ADMIN_PANEL.md` recovery transaction was executed against migrated PGlite with substituted placeholders: it promoted the exact eligible account to owner, revoked its sessions, wrote one `admin.owner.recovery` audit row, and returned zero rows for an unverified account without weakening predicates. No Neon editor or production database was used.
 - `scripts/phase12-browser.mjs` was not executed here (no `.local/browser-tools` install in this checkout); viewport/theme/keyboard/screen-reader passes and deployment-preview acceptance remain deployment-owner tasks per the Phase 12 handover notes. No production data, credentials, or provider delivery was touched.
+
+---
+
+## Visual redesign (FunctionGram_Admin_Panel_3_Phase_AI_Builder_Guide.md)
+
+A separate, strictly visual redesign of `/rstmcadmin`, executed in the three phases
+the guide defines. It follows the guide's execution contract, not the feature
+phases 1-12 above: no feature, visible word, route, API, authentication rule,
+database object, migration, setting semantic or public-site behaviour changes.
+
+| Redesign phase | Name | Status | Artifact |
+| --- | --- | --- | --- |
+| 1 | Foundation: tokens, typography, app shell | Done locally | `phase-1-foundation.patch` |
+| 2 | Primitives: reusable component styling | Pending | `phase-2-primitives.patch` |
+| 3 | Pages + polish + QA | Pending | `phase-3-pages-polish-qa.patch` |
+
+### Phase 1 — Foundation: done locally
+
+**Guide sections implemented:** 4 (design tokens), 5 (typography), 6 (app shell),
+7 (responsive rules), the shell portion of 11 (motion, reduced motion, focus,
+landmarks, touch targets), and shell-level items 3, 4, 8, 9, 10, 11, 12 of section 10.
+
+#### Files changed
+
+- `app/rstmcadmin/shell.css` (new) — `.admin-shell` token layer exactly as section 4
+  specifies, the `html[data-theme="light"]` and `prefers-color-scheme: light` switches
+  that mirror `app/globals.css`, the grid shell (272 / 240 / 76px sidebar), the panel,
+  sidebar, grouped navigation, account card, avatar, mobile top bar, drawer, page
+  header, footer, skip link, focus ring, reduced-motion and admin scrollbars.
+- `app/rstmcadmin/admin.css` — now imports `shell.css`; the superseded shell rules
+  (`.admin-header*`, the old `.admin-shell` box, the old focus ring) are removed.
+  All remaining component rules are untouched and are replaced in phases 2 and 3.
+- `app/rstmcadmin/layout.tsx` — shell markup only: skip link, `AdminNav`, the panel,
+  `<main id="admin-main">` and the footer. The same 16 links, order, labels, routes
+  and permission filter as before; `View site` stays unfiltered and last.
+- `components/admin/admin-nav.tsx` (new, client) — grouped navigation, lucide icons
+  marked `aria-hidden`, exact active match for Overview and prefix matching for the
+  rest, mobile drawer with Escape, backdrop, scroll lock and focus return to the menu
+  button. One `<nav>` in the DOM at every width.
+- `components/admin/avatar.tsx` (new) — deterministic initials avatar from existing
+  email/id data only; no images and no new data.
+- `components/admin/page-head.tsx` (new) — page-head wrapper (title, breadcrumb,
+  existing actions, intro).
+- The 16 `app/rstmcadmin/**/page.tsx` files — the old `admin-eyebrow` paragraph, `h1`
+  and intro paragraph are now wrapped in `PageHead`. Identical text, no logic change.
+
+#### Validation actually run
+
+- `npm run lint` — passed, 0 errors and the same 7 pre-existing public `<img>` warnings.
+- `npm run typecheck` — passed.
+- `npm run test:vercel` — 116 tests, 113 passed, 0 failed, 3 optional managed-PostgreSQL
+  tests skipped (no managed database URL supplied). Same as the pre-change baseline.
+- `npm run build` — passed; all admin routes are in the production manifest.
+- Local HTTP QA against an isolated PGlite fixture (`scripts/admin-check.mts seed`,
+  `next dev`): 17 admin pages return 200 for an active administrator, and a local-only
+  checker confirmed on every page that there is exactly one admin `<nav>` with all 16
+  links in the original order and targets, five labelled groups, exactly one
+  `aria-current="page"` link matching the route, the skip link first in the shell, one
+  `<main id="admin-main">`, one page head, the footer, and no leftover `admin-header` or
+  `admin-eyebrow` markup.
+- Visible-text regression: a local snapshot of the rendered text of all 17 admin pages
+  was captured before the change and re-run after it. The only diff is a line-splitting
+  artifact of the snapshot tool; the rendered breadcrumb text is identical
+  (`Control room / posts`).
+
+#### Not verified locally
+
+No browser engine is available in this sandbox (the Chromium download and its system
+libraries are unavailable), so the 320 / 390 / 768 / 1024 / 1440 px screenshots, the
+measured 44px hit areas, the drawer interaction and the light/dark visual comparison
+could not be captured here. The responsive and drawer behaviour is implemented to the
+guide's numbers and verified in the served CSS and markup, but a real-browser pass is
+still owed before release.
+
+#### Patch
+
+`patches/phase-1-foundation.patch` (identical `.patch.txt` copy) contains only the
+Phase 1 changes and passes `git apply --check` against a clean copy of `main`
+(`f6e3c37`). This progress document is updated after the patch is generated, so it is
+committed beside the patch rather than inside it.
