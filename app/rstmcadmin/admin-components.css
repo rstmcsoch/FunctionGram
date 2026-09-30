@@ -656,6 +656,101 @@
 }
 
 /* ==========================================================================
+   Table overflow and resilient cell content
+
+   Tables stay tabular at every viewport. The scroll container owns the
+   overflow so the admin page itself never develops sideways scrolling.
+   ========================================================================== */
+
+.admin-shell .admin-table-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--adm-border) transparent;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--adm-border);
+  border-radius: 4px;
+}
+
+.admin-shell .admin-table-scroll table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.admin-shell .admin-table-scroll th,
+.admin-shell .admin-table-scroll td {
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-table-scroll td.admin-cell-time,
+.admin-shell .admin-table-scroll td.time-cell,
+.admin-shell .admin-table-scroll td.status-cell,
+.admin-shell .admin-table-scroll td.action-cell {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.admin-shell .admin-table-scroll td.email-cell,
+.admin-shell .admin-table-scroll td.id-cell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-shell .admin-actor-cell,
+.admin-shell .admin-cell-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-shell .admin-actor-cell > *,
+.admin-shell .admin-cell-identity > div {
+  min-width: 0;
+}
+
+.admin-shell .admin-actor-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-shell .admin-actor-name {
+  font-weight: 600;
+  color: var(--adm-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-shell .admin-actor-email {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--adm-text-2);
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-table-scroll .admin-action-btn,
+.admin-shell .admin-table-scroll .admin-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
    Pagination (§8.7)
    ========================================================================== */
 
