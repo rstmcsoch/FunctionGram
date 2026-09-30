@@ -1,0 +1,579 @@
+From 5107396764a1b461310557a5478ddf8a19dd7e82 Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 05:50:12 +0000
+Subject: [PATCH] =?UTF-8?q?redesign(admin):=20phase=202=20primitives=20?=
+ =?UTF-8?q?=E2=80=94=20controls,=20cards,=20tables,=20dialogs?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Visual-only pass over the reusable admin patterns (guide section 8):
+- buttons (primary/ghost/danger via data-tone), inputs, selects, checkbox/radio
+- cards, stat cards with icon tiles, badges and chips from a tone mapping
+- tables as bordered cards with a muted header, row hover, scroll shadows and
+  no clipped final row; pagination, filter toolbar, dialogs and bottom sheets
+- alerts, empty states, details/drawer, code blocks, detail-page key-value rows
+No behaviour, label, action or data change.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ app/rstmcadmin/admin.css        |  18 +-
+ app/rstmcadmin/primitives.css   | 369 ++++++++++++++++++++++++++++++++
+ components/admin/actions.tsx    |   4 +-
+ components/admin/admin-nav.tsx  |   3 +-
+ components/admin/badge.tsx      |  22 ++
+ components/admin/content.tsx    |   4 +-
+ components/admin/media.tsx      |   2 +-
+ components/admin/moderation.tsx |   2 +-
+ components/admin/ui.tsx         |   4 +-
+ 9 files changed, 405 insertions(+), 23 deletions(-)
+ create mode 100644 app/rstmcadmin/primitives.css
+ create mode 100644 components/admin/badge.tsx
+
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 53c94c5..bdad891 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -1,19 +1,9 @@
+ @import "./shell.css";
++@import "./primitives.css";
+ 
+-/* Legacy component rules: replaced step by step by primitives.css and pages.css. */
+-.admin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.admin-stat,.admin-card{border:1px solid var(--border);border-radius:20px;background:var(--card);padding:24px;min-width:0}.admin-stat p,.admin-stat small,.admin-muted{color:var(--muted-foreground)}.admin-stat strong{display:block;font-size:32px;margin:8px 0}.admin-stat small{font-size:12px}.admin-card{margin-top:20px}.admin-card h2{margin-bottom:12px}
+-.admin-search{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:24px 0 12px}.admin-search label:first-child{flex:1 1 240px}.admin-search label,.admin-confirm label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;min-width:0}
+-.admin-shell input,.admin-shell select,.admin-confirm input,.admin-confirm textarea{min-height:44px;width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}
+-.admin-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);color:var(--foreground);font-weight:600;cursor:pointer;font-size:14px;line-height:1.4}.admin-primary{background:var(--primary);color:var(--primary-foreground)}.admin-button:disabled{opacity:.5;cursor:wait}
+-.admin-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:20px}.admin-chips span{padding:6px 12px;border-radius:16px;background:var(--secondary);overflow-wrap:anywhere}.admin-chips a{min-height:44px;display:inline-flex;align-items:center;text-decoration:underline;padding:8px}
+-.admin-table-scroll{overflow-x:auto;max-width:100%;border:1px solid var(--border);border-radius:16px;margin:20px 0;background:var(--card)}.admin-table-scroll table{border-collapse:collapse;width:100%;text-align:left;min-width:700px;font-size:14px}.admin-table-scroll caption{text-align:left;padding:16px;color:var(--muted-foreground);font-size:13px}.admin-table-scroll th{color:var(--muted-foreground);font-size:12px;text-transform:uppercase;letter-spacing:.6px}.admin-table-scroll th,.admin-table-scroll td{padding:14px 16px;border-top:1px solid var(--border);max-width:340px;overflow-wrap:anywhere}.admin-table-scroll td a{display:inline-flex;min-height:44px;align-items:center;text-decoration:underline}.admin-table-scroll td small{display:block;color:var(--muted-foreground)}
+-.admin-pagination{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap}.admin-drawer summary{cursor:pointer;min-height:44px;font-weight:650}.admin-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.admin-detail dl{display:grid;gap:10px}.admin-detail dt{color:var(--muted-foreground);font-size:12px}.admin-detail dd{overflow-wrap:anywhere;margin:0 0 8px}.admin-action-grid{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.admin-confirm{display:flex;flex-direction:column;gap:16px}.admin-confirm-dialog{max-height:90dvh;overflow:auto}.admin-confirm-dialog p{overflow-wrap:anywhere}.admin-confirm textarea{min-height:80px}
+-@media(max-width:700px){.admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.admin-stat,.admin-card{padding:16px}.admin-stat strong{font-size:26px}.admin-detail{grid-template-columns:1fr}.admin-search label{flex:1 1 100px}}
++/* Page-level rules left from the previous stylesheet. Section 9 recipes replace them in phase 3. */
+ .admin-two-factor-page{min-height:calc(100vh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
+ 
+-.admin-confirm-dialog>button{min-width:44px;min-height:44px;top:4px;right:4px;display:grid;place-items:center}
+-.admin-content-editor select{min-height:44px;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}
+-.content-checkbox{display:flex;align-items:center;justify-content:center;min-height:44px;min-width:44px}.admin-shell .content-checkbox input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
+ .content-media{min-width:0;border:0;padding:0}.content-media p{color:var(--muted-foreground);margin:12px 0}.content-media-item{padding:12px 0;border-bottom:1px solid var(--border)}.content-media-item img,.content-media-item video{max-width:100%;width:auto;max-height:320px;object-fit:contain;background:var(--secondary);border-radius:12px}.content-media-item code,.admin-content-editor code{overflow-wrap:anywhere;word-break:break-word;display:block;font-size:12px}.admin-content-editor textarea{min-height:120px}.admin-content-editor .admin-button{align-self:start}
+ 
+ .admin-content-fields{min-width:0;border:0;margin:0;padding:0}
+@@ -22,7 +12,7 @@
+ .labels-editor{max-width:100%}.labels-rows{display:grid;gap:1rem}.label-row{min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--border);border-radius:12px}.label-row legend,.label-row code,.label-row p{overflow-wrap:anywhere;white-space:pre-wrap}.label-row label{display:grid;gap:.5rem}.label-row textarea{width:100%;min-height:72px;resize:vertical}.labels-toolbar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}.labels-toolbar input[type=file]{max-width:100%;min-width:0}.labels-toolbar label{display:grid;gap:.5rem}
+ .label-row label,.label-row textarea{min-width:0;max-width:100%}.label-row legend{max-width:100%}.labels-editor .admin-card{min-width:0}
+ .label-row label{grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
+-.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}.admin-table td small{display:block}.media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
++.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
+ .moderation-console{display:grid;gap:20px;min-width:0}.moderation-tabs,.moderation-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.moderation-filters label{display:grid;gap:7px;flex:1 1 190px;min-width:min(100%,190px)}.moderation-report-list{display:grid;gap:14px}.moderation-report{display:grid;gap:12px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--background)}.moderation-report header{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;align-items:start}.moderation-report header p{margin:6px 0}.moderation-report p,.moderation-report code{overflow-wrap:anywhere}.moderation-report label{display:grid;gap:6px}.moderation-report textarea{width:100%;max-width:100%;min-width:0;min-height:80px;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-report input{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-console .admin-table-scroll{min-width:0;max-width:100%;overflow:auto}.moderation-console .admin-table{min-width:680px}.moderation-console .admin-card{min-width:0}
+-.admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;min-height:100px;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
++.admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
+ .analytics-dashboard,.system-tools{display:grid;gap:18px}.analytics-controls,.admin-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.analytics-controls label{min-width:150px}.analytics-controls h2,.analytics-controls p{margin-top:0}.analytics-summary{margin:0}.analytics-summary .admin-stat strong{font-size:clamp(20px,3vw,30px)}.analytics-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analytics-chart{min-width:0}.analytics-chart h3{margin:0 0 14px;font-size:15px}.analytics-bars{height:112px;display:flex;align-items:end;gap:3px;padding:4px 2px;border-bottom:1px solid var(--line);overflow:hidden}.analytics-bars span{flex:1 1 0;min-width:2px;background:var(--primary);border-radius:3px 3px 0 0;opacity:.82}.analytics-axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:12px}.analytics-caption{max-width:340px;max-height:4.5em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.analytics-ranked-list p{display:flex;justify-content:space-between;gap:12px;padding:7px 0;margin:0;border-bottom:1px solid var(--line)}.analytics-funnel-bar{height:18px;margin:16px 0 10px;background:var(--canvas);border-radius:999px;overflow:hidden}.analytics-funnel-bar span{display:block;height:100%;background:var(--primary);border-radius:inherit}.analytics-funnel strong{display:block}.migration-chips{display:flex;flex-wrap:wrap;gap:8px}.migration-chips span{padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}.migration-chips .is-applied{border-color:#21835d}.migration-chips .is-pending{border-color:#b45309;color:#b45309}.system-env-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:0 20px;margin:0}.system-env-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.system-env-list dt{font-weight:600}.system-env-list dd{margin:0;color:var(--muted)}.system-sql textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:150px}.system-sql-result{max-height:480px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);white-space:pre-wrap;overflow-wrap:anywhere}.admin-button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.admin-guide{max-width:900px}.admin-guide h2{margin-top:0}.export-manager .admin-detail{align-items:end}@media(max-width:700px){.analytics-chart-grid{grid-template-columns:minmax(0,1fr)}.analytics-controls,.admin-card-heading{flex-direction:column}.analytics-controls label{width:100%}.analytics-bars{height:90px}}
+diff --git a/app/rstmcadmin/primitives.css b/app/rstmcadmin/primitives.css
+new file mode 100644
+index 0000000..5d46345
+--- /dev/null
++++ b/app/rstmcadmin/primitives.css
+@@ -0,0 +1,369 @@
++/* ============================================================
++   Admin primitives: buttons, forms, cards, badges, tables,
++   pagination, filter toolbar, dialogs, alerts, empty states,
++   details, code blocks and detail-page structure.
++   ============================================================ */
++
++/* ---------- 8.1 Buttons ---------- */
++
++.admin-button {
++  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
++  min-height: 44px; padding: 0 16px; border: 1px solid var(--adm-border); border-radius: var(--adm-r-control);
++  background: var(--adm-card); color: var(--adm-text);
++  font-family: inherit; font-size: 14px; line-height: 20px; font-weight: 500; text-decoration: none;
++  cursor: pointer; transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, transform .1s ease-out;
++}
++.admin-button:hover { background: var(--adm-hover); color: var(--adm-text); text-decoration: none; }
++.admin-button:active { transform: scale(.98); }
++.admin-button svg { width: 16px; height: 16px; flex: none; }
++.admin-primary, .admin-button.admin-primary { background: var(--adm-accent); border-color: var(--adm-accent); color: var(--adm-on-accent); }
++.admin-primary:hover, .admin-button.admin-primary:hover { background: var(--adm-accent-hover); border-color: var(--adm-accent-hover); color: var(--adm-on-accent); }
++.admin-button[data-tone="ghost"], .admin-button.admin-ghost { background: transparent; border-color: transparent; color: var(--adm-accent-text); }
++.admin-button[data-tone="ghost"]:hover, .admin-button.admin-ghost:hover { background: var(--adm-accent-soft); border-color: transparent; }
++.admin-button.admin-danger, .admin-button[data-tone="danger"] { background: transparent; border-color: var(--adm-danger); color: var(--adm-danger-text); }
++.admin-button.admin-danger:hover, .admin-button[data-tone="danger"]:hover { background: var(--adm-danger); border-color: var(--adm-danger); color: #fff; }
++.admin-button:disabled, .admin-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
++.admin-action-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
++.admin-actions { min-width: 0; }
++/* Compact table/toolbar buttons keep a 44px hit area without a 44px box. */
++.admin-compact { position: relative; min-height: 36px; }
++.admin-compact::before { content: ""; position: absolute; inset: -4px 0; }
++
++/* ---------- 8.2 Inputs, selects, textarea ---------- */
++
++.admin-shell input, .admin-shell select, .admin-confirm input, .admin-confirm select, .admin-confirm textarea {
++  min-height: 44px; width: 100%; padding: 10px 12px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-control);
++  background: var(--adm-card); color: var(--adm-text);
++  font-family: inherit; font-size: 14px; line-height: 22px;
++  transition: border-color .15s ease-out, box-shadow .15s ease-out;
++}
++.admin-shell input::placeholder, .admin-confirm input::placeholder, .admin-confirm textarea::placeholder { color: var(--adm-text-3); }
++.admin-shell input:hover, .admin-shell select:hover, .admin-confirm input:hover, .admin-confirm select:hover { border-color: color-mix(in srgb, var(--adm-text-3) 60%, transparent); }
++.admin-shell input:focus, .admin-shell select:focus, .admin-confirm input:focus, .admin-confirm select:focus, .admin-confirm textarea:focus {
++  border-color: var(--adm-accent); box-shadow: 0 0 0 3px var(--adm-accent-soft); outline: none;
++}
++.admin-shell input[aria-invalid="true"], .admin-confirm input:user-invalid, .admin-confirm textarea:user-invalid {
++  border-color: var(--adm-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--adm-danger) 14%, transparent);
++}
++.admin-shell input:disabled, .admin-shell select:disabled, .admin-confirm input:disabled, .admin-confirm select:disabled, .admin-confirm textarea:disabled {
++  background: var(--adm-muted-surface); opacity: .6; cursor: not-allowed;
++}
++.admin-shell select, .admin-confirm select {
++  appearance: none; padding-right: 36px; cursor: pointer;
++  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a8f9b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
++  background-repeat: no-repeat; background-position: right 12px center; background-size: 16px 16px;
++}
++.admin-shell input[type="date"], .admin-shell input[type="datetime-local"], .admin-confirm input[type="date"], .admin-confirm input[type="datetime-local"] { color-scheme: inherit; }
++.admin-confirm textarea, .admin-shell textarea { min-height: 120px; padding: 12px; resize: vertical; }
++.admin-shell label, .admin-confirm label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--adm-text); }
++.admin-shell input[type="search"] { padding-left: 40px;
++  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a8f9b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
++  background-repeat: no-repeat; background-position: left 14px center; background-size: 16px 16px;
++}
++
++/* ---------- 8.3 Checkbox and radio ---------- */
++
++.content-checkbox { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
++.admin-shell input[type="checkbox"], .admin-shell input[type="radio"] {
++  appearance: none; -webkit-appearance: none; flex: none; cursor: pointer;
++  width: 20px; height: 20px; min-height: 20px; padding: 0;
++  border: 1.5px solid var(--adm-border); border-radius: 6px; background: var(--adm-card);
++  display: inline-grid; place-content: center;
++  transition: border-color .15s ease-out, background-color .15s ease-out;
++}
++.admin-shell input[type="radio"] { border-radius: 50%; }
++.admin-shell input[type="checkbox"]:hover, .admin-shell input[type="radio"]:hover { border-color: var(--adm-accent); }
++.admin-shell input[type="checkbox"]::after {
++  content: ""; width: 12px; height: 12px; transform: scale(0); background: var(--adm-on-accent);
++  transition: transform .15s ease-out;
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M13.4 4.6 6.6 11.4 2.6 7.4' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M13.4 4.6 6.6 11.4 2.6 7.4' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-shell input[type="checkbox"]:checked, .admin-shell input[type="checkbox"]:indeterminate { background: var(--adm-accent); border-color: var(--adm-accent); }
++.admin-shell input[type="checkbox"]:checked::after, .admin-shell input[type="checkbox"]:indeterminate::after { transform: scale(1); }
++.admin-shell input[type="checkbox"]:indeterminate::after {
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-shell input[type="radio"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--adm-on-accent); transform: scale(0); transition: transform .15s ease-out; }
++.admin-shell input[type="radio"]:checked { background: var(--adm-accent); border-color: var(--adm-accent); }
++.admin-shell input[type="radio"]:checked::after { transform: scale(1); }
++
++/* ---------- 8.4 Cards ---------- */
++
++.admin-card {
++  min-width: 0; margin-top: 20px; padding: 24px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
++  background: var(--adm-card); box-shadow: var(--adm-shadow);
++}
++.admin-card h2 { margin-bottom: 8px; }
++.admin-card p { color: var(--adm-text-2); }
++.admin-card p + p { margin-top: 8px; }
++.admin-muted { color: var(--adm-text-2); }
++.admin-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
++.admin-stat {
++  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 24px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
++  background: var(--adm-card); box-shadow: var(--adm-shadow);
++}
++.admin-stat p { color: var(--adm-text-2); font-size: 13px; line-height: 20px; font-weight: 500; }
++.admin-stat strong { display: block; font-size: 30px; line-height: 36px; font-weight: 600; font-variant-numeric: tabular-nums; }
++.admin-stat small { color: var(--adm-text-3); font-size: 12px; line-height: 16px; }
++.admin-icon-tile {
++  display: inline-flex; align-items: center; justify-content: center; flex: none;
++  width: 40px; height: 40px; border-radius: 12px;
++  background: var(--adm-accent-soft); color: var(--adm-accent-text);
++}
++.admin-icon-tile svg { width: 20px; height: 20px; }
++.admin-icon-tile-green { background: color-mix(in srgb, var(--adm-success) 14%, transparent); color: var(--adm-success-text); }
++.admin-icon-tile-purple { background: color-mix(in srgb, var(--adm-purple) 16%, transparent); color: var(--adm-purple-text); }
++.admin-icon-tile-amber { background: color-mix(in srgb, var(--adm-warning) 16%, transparent); color: var(--adm-warning-text); }
++.admin-icon-tile-red { background: color-mix(in srgb, var(--adm-danger) 14%, transparent); color: var(--adm-danger-text); }
++.admin-icon-tile-cyan { background: color-mix(in srgb, var(--adm-cyan) 16%, transparent); color: var(--adm-cyan-text, #4fd1e5); }
++
++/* ---------- 8.5 Badges and chips ---------- */
++
++.admin-badge-neutral { background: var(--adm-muted-surface); color: var(--adm-text-2); }
++.admin-badge-primary { background: var(--adm-accent-soft); color: var(--adm-accent-text); }
++.admin-badge-purple { background: color-mix(in srgb, var(--adm-purple) 16%, transparent); color: var(--adm-purple-text); --adm-dot: var(--adm-purple); }
++.admin-badge-warning { background: color-mix(in srgb, var(--adm-warning) 16%, transparent); color: var(--adm-warning-text); --adm-dot: var(--adm-warning); }
++.admin-badge-success { background: color-mix(in srgb, var(--adm-success) 14%, transparent); color: var(--adm-success-text); --adm-dot: var(--adm-success); }
++.admin-badge-danger { background: color-mix(in srgb, var(--adm-danger) 14%, transparent); color: var(--adm-danger-text); --adm-dot: var(--adm-danger); }
++.admin-badge-dot::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--adm-dot, currentColor); flex: none; }
++.admin-chips { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
++.admin-chips span {
++  display: inline-flex; align-items: center; height: 32px; padding: 0 12px;
++  border: 1px solid var(--adm-border-subtle); border-radius: 8px;
++  background: var(--adm-muted-surface); color: var(--adm-text-2);
++  font-size: 13px; line-height: 20px; cursor: default; overflow-wrap: anywhere;
++}
++.admin-chips a {
++  display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px;
++  border-radius: var(--adm-r-control); color: var(--adm-accent-text); font-size: 14px; text-decoration: none;
++}
++.admin-chips a:hover { background: var(--adm-accent-soft); text-decoration: none; }
++
++/* ---------- 8.6 Tables ---------- */
++
++.admin-table-scroll {
++  position: relative; max-width: 100%; margin: 20px 0;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
++  background: var(--adm-card); box-shadow: var(--adm-shadow);
++  overflow-x: auto; overflow-y: visible;
++  background-image:
++    linear-gradient(to right, var(--adm-card), rgba(0, 0, 0, 0)),
++    linear-gradient(to left, var(--adm-card), rgba(0, 0, 0, 0)),
++    linear-gradient(to right, rgba(0, 0, 0, .18), rgba(0, 0, 0, 0)),
++    linear-gradient(to left, rgba(0, 0, 0, .18), rgba(0, 0, 0, 0));
++  background-position: 0 0, 100% 0, 0 0, 100% 0;
++  background-repeat: no-repeat;
++  background-size: 32px 100%, 32px 100%, 14px 100%, 14px 100%;
++  background-attachment: local, local, scroll, scroll;
++}
++.admin-table-scroll table { width: 100%; min-width: 720px; border-collapse: collapse; text-align: left; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
++.admin-table-scroll caption {
++  caption-side: top; padding: 16px 20px; text-align: left;
++  border-bottom: 1px solid var(--adm-border-subtle);
++  font-size: 14px; line-height: 20px; font-weight: 500; color: var(--adm-text);
++}
++.admin-table-scroll th {
++  padding: 12px 20px; text-align: left; background: var(--adm-muted-surface);
++  border-bottom: 1px solid var(--adm-border); color: var(--adm-text-2);
++  font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap;
++}
++.admin-table-scroll td {
++  padding: 14px 20px; vertical-align: middle;
++  border-bottom: 1px solid var(--adm-border-subtle); color: var(--adm-text); overflow-wrap: anywhere;
++}
++.admin-table-scroll tbody tr:last-child td { border-bottom: 0; }
++.admin-table-scroll tbody tr:hover td { background: var(--adm-hover); }
++.admin-table-scroll td small { display: block; color: var(--adm-text-3); font-size: 12px; line-height: 16px; }
++.admin-table-scroll td a { display: inline-flex; align-items: center; min-height: 44px; color: var(--adm-text); font-weight: 600; text-decoration: none; }
++.admin-table-scroll td a:hover { color: var(--adm-accent-text); text-decoration: none; }
++.admin-table-scroll .is-numeric { text-align: right; }
++.admin-table-scroll .is-empty { padding: 48px 24px; text-align: center; color: var(--adm-text-2); }
++.admin-table-scroll .is-empty::before {
++  content: ""; display: block; width: 32px; height: 32px; margin: 0 auto 12px; opacity: .5;
++  background: var(--adm-text-3);
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7h18v12H3z'/%3E%3Cpath d='M3 11h18'/%3E%3Cpath d='M8 7V5h8v2'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7h18v12H3z'/%3E%3Cpath d='M3 11h18'/%3E%3Cpath d='M8 7V5h8v2'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-storage-bar { display: block; width: 72px; height: 4px; margin-left: auto; border-radius: 999px; background: var(--adm-muted-surface); overflow: hidden; }
++.admin-storage-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--adm-accent); }
++.admin-table-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
++.admin-table-name-text { min-width: 0; display: flex; flex-direction: column; }
++
++/* ---------- 8.7 Pagination ---------- */
++
++.admin-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 16px; }
++.admin-pagination span { font-size: 13px; line-height: 20px; color: var(--adm-text-2); }
++.admin-pagination a {
++  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-control);
++  background: var(--adm-card); color: var(--adm-text);
++  font-size: 14px; line-height: 20px; font-weight: 500; text-decoration: none;
++  transition: background-color .15s ease-out;
++}
++.admin-pagination a:hover { background: var(--adm-hover); text-decoration: none; }
++.admin-pagination a svg { width: 16px; height: 16px; }
++
++/* ---------- 8.8 Filter toolbar ---------- */
++
++.admin-search {
++  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: end;
++  margin: 20px 0; padding: 20px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
++  background: var(--adm-card); box-shadow: var(--adm-shadow);
++}
++.admin-search > .admin-button, .admin-search > a.admin-button { height: 44px; }
++@media (min-width: 1024px) {
++  .admin-search > label:first-of-type { grid-column: span 2; }
++}
++
++/* ---------- 8.9 Dialogs ---------- */
++
++body .admin-confirm-dialog {
++  display: flex; flex-direction: column; gap: 0; padding: 0; max-width: 480px; width: calc(100% - 32px);
++  max-height: 90dvh; overflow: hidden;
++  border: 1px solid var(--adm-border); border-radius: 16px;
++  background: var(--adm-card); color: var(--adm-text);
++  box-shadow: 0 24px 64px rgba(0, 0, 0, .5);
++}
++body .admin-confirm-dialog::before {
++  content: ""; display: none; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
++  width: 36px; height: 4px; border-radius: 999px; background: var(--adm-border);
++}
++body .admin-confirm-dialog [data-slot="dialog-title"] { padding: 20px 24px 0; font-size: 18px; line-height: 24px; font-weight: 600; color: var(--adm-text); }
++body .admin-confirm-dialog [data-slot="dialog-description"] { font-size: 14px; line-height: 22px; color: var(--adm-text-2); }
++body .admin-confirm-dialog > button[data-slot="dialog-close"] {
++  display: grid; place-items: center; top: 12px; right: 12px; width: 44px; height: 44px; min-width: 44px; min-height: 44px;
++  border-radius: var(--adm-r-control); color: var(--adm-text-2); opacity: 1; background: transparent; border: 1px solid transparent;
++}
++body .admin-confirm-dialog > button[data-slot="dialog-close"]:hover { background: var(--adm-hover); color: var(--adm-text); opacity: 1; }
++body .admin-confirm-dialog > button[data-slot="dialog-close"] svg { width: 18px; height: 18px; }
++body [data-slot="dialog-overlay"] { background: rgba(0, 0, 0, .6); backdrop-filter: blur(4px); }
++.admin-confirm { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px 24px 24px; overflow-y: auto; }
++.admin-confirm p { color: var(--adm-text-2); font-size: 14px; line-height: 22px; overflow-wrap: anywhere; }
++.admin-confirm [data-slot="dialog-footer"] { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
++.admin-confirm code, .admin-content-editor code, .media-confirm code, .media-reservation code {
++  display: inline-block; padding: 2px 6px; border-radius: 6px; background: var(--adm-muted-surface);
++  font-family: var(--adm-mono); font-size: 12px; line-height: 18px; overflow-wrap: anywhere;
++}
++@media (max-width: 639px) {
++  body .admin-confirm-dialog {
++    top: auto; bottom: 0; left: 0; transform: none; max-width: none; width: 100%;
++    max-height: 92dvh; border-radius: 20px 20px 0 0; border-bottom: 0;
++    padding-bottom: env(safe-area-inset-bottom);
++    animation: admin-sheet-up .24s var(--adm-ease);
++  }
++  body .admin-confirm-dialog::before { display: block; }
++}
++@keyframes admin-sheet-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
++
++/* ---------- 8.11 Alerts and messages ---------- */
++
++.admin-shell p[role="status"], .admin-shell p[role="alert"], .admin-confirm p[role="status"], .admin-confirm p[role="alert"] {
++  display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px;
++  border: 1px solid color-mix(in srgb, var(--adm-accent) 30%, transparent);
++  border-radius: 10px; background: color-mix(in srgb, var(--adm-accent) 10%, transparent);
++  color: var(--adm-text); font-size: 14px; line-height: 22px;
++}
++.admin-shell p[role="status"]::before, .admin-confirm p[role="status"]::before {
++  content: ""; width: 16px; height: 16px; flex: none; margin-top: 3px; background: var(--adm-accent-text);
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8.5 12.5 2.5 2.5 4.5-5'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8.5 12.5 2.5 2.5 4.5-5'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-shell p[role="alert"], .admin-confirm p[role="alert"] {
++  border-color: color-mix(in srgb, var(--adm-danger) 30%, transparent);
++  background: color-mix(in srgb, var(--adm-danger) 10%, transparent);
++}
++.admin-shell p[role="alert"]::before, .admin-confirm p[role="alert"]::before {
++  background: var(--adm-danger-text);
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5'/%3E%3Cpath d='M12 16.5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5'/%3E%3Cpath d='M12 16.5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++
++/* ---------- 8.12 Empty states ---------- */
++
++.admin-empty {
++  display: flex; flex-direction: column; align-items: center; gap: 16px;
++  padding: 48px 24px; text-align: center; color: var(--adm-text-2);
++}
++.admin-empty-icon {
++  display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%;
++  border: 1.5px dashed var(--adm-border); background: var(--adm-muted-surface); color: var(--adm-text-3);
++}
++.admin-empty-icon svg { width: 40px; height: 40px; }
++
++/* ---------- 8.13 Details / drawer ---------- */
++
++.admin-drawer { padding: 0; }
++.admin-drawer > summary {
++  display: flex; align-items: center; justify-content: space-between; gap: 12px;
++  min-height: 44px; padding: 18px 24px; list-style: none; cursor: pointer;
++  font-size: 16px; line-height: 24px; font-weight: 600; color: var(--adm-text);
++}
++.admin-drawer > summary::-webkit-details-marker { display: none; }
++.admin-drawer > summary::after {
++  content: ""; width: 16px; height: 16px; flex: none;
++  background: var(--adm-text-3); transition: transform .15s ease-out;
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-drawer[open] > summary::after { transform: rotate(180deg); }
++.admin-drawer > div { padding: 20px 24px 24px; border-top: 1px solid var(--adm-border-subtle); }
++
++/* ---------- 8.14 Code, IDs, JSON ---------- */
++
++.admin-shell code, .admin-confirm code {
++  padding: 2px 6px; border-radius: 6px; background: var(--adm-muted-surface);
++  font-family: var(--adm-mono); font-size: 12px; line-height: 18px; overflow-wrap: anywhere;
++}
++.admin-shell pre, .admin-confirm pre {
++  max-height: 320px; overflow: auto; margin: 8px 0; padding: 16px;
++  border: 1px solid var(--adm-border-subtle); border-radius: 10px; background: var(--adm-muted-surface);
++  font-family: var(--adm-mono); font-size: 12px; line-height: 18px;
++  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--adm-text);
++}
++.admin-shell pre code, .admin-confirm pre code { padding: 0; background: none; }
++
++/* ---------- 8.15 Detail pages ---------- */
++
++.admin-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
++.admin-detail > * { margin-top: 0; }
++.admin-detail dl { display: grid; gap: 0; margin: 0; }
++.admin-detail dt { padding: 12px 140px 12px 0; color: var(--adm-text-2); font-size: 13px; line-height: 20px; }
++.admin-detail dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--adm-border-subtle); color: var(--adm-text); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
++.admin-detail dd:last-of-type { border-bottom: 0; }
++.admin-detail > div > dl > div, .admin-definition-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
++.admin-definition-list { display: grid; margin: 0; }
++.admin-definition-list dt { padding: 12px 0; color: var(--adm-text-2); font-size: 13px; line-height: 20px; }
++.admin-definition-list dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--adm-border-subtle); text-align: right; overflow-wrap: anywhere; }
++@media (min-width: 1024px) {
++  .admin-detail-columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
++}
++@media (max-width: 1023px) {
++  .admin-detail { grid-template-columns: minmax(0, 1fr); }
++  .admin-detail dt { padding-right: 16px; }
++}
++
++/* ---------- Responsive primitives ---------- */
++
++@media (max-width: 1023px) {
++  .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
++  .admin-stat strong { font-size: 26px; line-height: 32px; }
++}
++@media (max-width: 479px) {
++  .admin-card, .admin-stat { padding: 16px; }
++  .admin-stats { gap: 10px; }
++  .admin-stat strong { font-size: 24px; line-height: 30px; }
++  .admin-icon-tile { width: 32px; height: 32px; border-radius: 10px; }
++  .admin-icon-tile svg { width: 16px; height: 16px; }
++  .admin-search { grid-template-columns: minmax(0, 1fr); padding: 16px; }
++  .admin-search > label:first-of-type { grid-column: auto; }
++  .admin-search > .admin-button, .admin-search > a.admin-button { width: 100%; }
++}
++@media (max-width: 339px) {
++  .admin-stats { grid-template-columns: minmax(0, 1fr); }
++}
+diff --git a/components/admin/actions.tsx b/components/admin/actions.tsx
+index 7c0a0db..622817d 100644
+--- a/components/admin/actions.tsx
++++ b/components/admin/actions.tsx
+@@ -27,7 +27,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+   }
+   return <div className="admin-actions">
+     <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+-    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
++    <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={['ban', 'delete'].includes(action) ? 'danger' : undefined} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+     {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
+     {!selected && message && <p role="status">{message}</p>}
+     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
+@@ -39,7 +39,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+         <label>Reason {selected === 'ban' ? '(required)' : '(optional)'}<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500} required={['ban','promote','promoteModerator','demote'].includes(String(selected))} /></label>
+         {selected === 'ban' && <label>Ban until (your local time; blank means indefinite)<input type="datetime-local" value={expires} onChange={e => setExpires(e.target.value)} /></label>}
+         {message && <p role="alert">{message}</p>}
+-        <DialogFooter><button className="admin-button" type="button" disabled={pending} onClick={() => setSelected(null)}>Cancel</button><button className="admin-button admin-primary" type="submit" disabled={pending || confirmation !== email}>{pending ? 'Saving…' : 'Confirm action'}</button></DialogFooter>
++        <DialogFooter><button className="admin-button" type="button" disabled={pending} onClick={() => setSelected(null)}>Cancel</button><button className="admin-button admin-primary" data-tone={selected && ['ban', 'delete'].includes(selected) ? 'danger' : undefined} type="submit" disabled={pending || confirmation !== email}>{pending ? 'Saving…' : 'Confirm action'}</button></DialogFooter>
+       </form>
+     </ConfirmDialog>
+   </div>;
+diff --git a/components/admin/admin-nav.tsx b/components/admin/admin-nav.tsx
+index 1a9e9b7..c2e642a 100644
+--- a/components/admin/admin-nav.tsx
++++ b/components/admin/admin-nav.tsx
+@@ -8,6 +8,7 @@ import {
+   Menu, Palette, ScrollText, ShieldAlert, ShieldCheck, Tags, ToggleRight, Users, Wrench, X,
+ } from 'lucide-react';
+ import { Avatar } from './avatar';
++import { Badge } from './badge';
+ 
+ export type AdminNavItem = { label: string; href: string; icon: string; group: string; external?: boolean };
+ 
+@@ -88,7 +89,7 @@ export function AdminNav({ items, email, role, homeHref }: { items: AdminNavItem
+         <Avatar seed={email} size={40} />
+         <div className="admin-account-text">
+           <p className="admin-account-email">{email}</p>
+-          <span className="admin-badge admin-badge-primary">{role}</span>
++          <Badge tone="primary">{role}</Badge>
+         </div>
+       </div>
+     </aside>
+diff --git a/components/admin/badge.tsx b/components/admin/badge.tsx
+new file mode 100644
+index 0000000..f364ca0
+--- /dev/null
++++ b/components/admin/badge.tsx
+@@ -0,0 +1,22 @@
++import type { ReactNode } from 'react';
++
++export type BadgeTone = 'neutral' | 'primary' | 'purple' | 'warning' | 'success' | 'danger';
++
++/** Visual meaning only. It never changes the text it wraps. */
++const TONES: Record<string, BadgeTone> = {
++  user: 'neutral', post: 'neutral', 'in trash': 'neutral', comment: 'neutral', 'dismissed': 'neutral', 'in triage': 'warning',
++  admin: 'primary', pinned: 'primary',
++  owner: 'purple', reel: 'purple',
++  moderator: 'warning', hidden: 'warning', story: 'warning', unverified: 'warning', triage: 'warning',
++  active: 'success', unhidden: 'success', verified: 'success', resolved: 'warning', ready: 'success', released: 'success',
++  banned: 'danger', trash: 'danger', 'new report': 'danger', new: 'danger', failed: 'danger', quarantined: 'warning', purging: 'danger',
++};
++
++export function toneFor(text: string): BadgeTone {
++  return TONES[text.trim().toLowerCase()] || 'neutral';
++}
++
++export function Badge({ children, tone, dot }: { children: ReactNode; tone?: BadgeTone; dot?: boolean }) {
++  const resolved = tone || (typeof children === 'string' ? toneFor(children) : 'neutral');
++  return <span className={`admin-badge admin-badge-${resolved}${dot ?? ['active', 'unhidden', 'verified', 'banned', 'trash', 'new', 'failed'].includes(String(children).toLowerCase()) ? ' admin-badge-dot' : ''}`}>{children}</span>;
++}
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+index 78de7cb..8dc122f 100644
+--- a/components/admin/content.tsx
++++ b/components/admin/content.tsx
+@@ -21,7 +21,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
+   const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
+   const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
+   const expected=['delete','purge'].includes(operation)&&ids.length===1?(targetNames[ids[0]]||ids[0]):ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
+-  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
++  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" data-tone={['delete','purge','hide'].includes(op)?'danger':undefined} disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
+     {!operation&&message&&<p role="status">{message}</p>}
+     <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
+       <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>
+@@ -29,7 +29,7 @@ export function ContentActions({ids,resource,operations,targetNames={},onDone}:{
+         <label>Type {['delete','purge'].includes(operation)?'the exact content name':'the selection confirmation'} <code>{expected}</code> to confirm<input aria-label="Content confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
+         <label>Moderation reason {operation==='hide'?'(required)':'(optional)'}<textarea maxLength={500} required={operation==='hide'} value={reason} onChange={event=>setReason(event.target.value)} /></label>
+         {message&&<p role="alert">{message}</p>}
+-        <button className="admin-button admin-primary" disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
++        <button className="admin-button admin-primary" data-tone={['delete','purge','hide'].includes(operation)?'danger':undefined} disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
+       </form>
+     </ConfirmDialog>
+   </>;
+diff --git a/components/admin/media.tsx b/components/admin/media.tsx
+index ef7c5fa..c6a8e39 100644
+--- a/components/admin/media.tsx
++++ b/components/admin/media.tsx
+@@ -24,7 +24,7 @@ export function StorageInventory({report,owner}:{report:Awaited<ReturnType<typeo
+  return <section className="admin-card admin-confirm"><h2>Storage inventory</h2><p>Registered objects: {String(report.summary.assets)} · {formatBytes(Number(report.summary.bytes))} · retained originals: {formatBytes(Number(report.summary.retained_source_bytes))}. Quarantined: {String(report.summary.quarantined)} · Trash: {String(report.summary.trashed)}.</p><p>Active reservations: {String(report.pending.reservations)} · {formatBytes(Number(report.pending.reserved_bytes))} reserved, not confirmed storage. Totals include quarantine and trash. Bundled demo media and unrelated objects in a shared Blob store are excluded.</p>
+  <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button">Filter assets</button></form>
+  <p>Orphans have no references from any posts (including hidden, expired and trashed posts), avatars, account images or branding settings. Trash is restorable for 30 days. Permanent deletion requires an owner and a typed asset key. Quarantine blocks the application media URL immediately; already-known public Blob URLs and downloaded bytes cannot be recalled.</p>
+- <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
++ <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
+  {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}>Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next</Link>}</nav>
+  <h3>Storage by account (25 accounts per page)</h3><div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Owner ID</th><th>Assets</th><th>Bytes</th></tr></thead><tbody>{report.owners.map(item=><tr key={item.owner_id||'unknown'}><td>{item.owner_id||'Unknown'}</td><td>{String(item.assets)}</td><td>{formatBytes(Number(item.bytes))}</td></tr>)}</tbody></table></div>
+  <h3>Expired reservations (25 per page)</h3><p>Reconcile checks for an abandoned object from a known app reservation, then registers it in quarantine for safe cleanup. Missing objects are not reported as deleted. Unknown objects from other applications are never swept.</p>{report.expired.map(item=><div key={item.key} className="media-reservation"><code>{item.key}</code><span>{formatBytes(Number(item.expected_size))}</span><button className="admin-button" onClick={()=>manage(item.key,'reconcile')}>Reconcile reservation</button></div>)}{(report.owners.length===25||report.expired.length===25)&&<Link className="admin-button" href={url(report.filter.page+1)}>Next accounts / reservations</Link>}
+diff --git a/components/admin/moderation.tsx b/components/admin/moderation.tsx
+index a376a15..a080ac4 100644
+--- a/components/admin/moderation.tsx
++++ b/components/admin/moderation.tsx
+@@ -39,6 +39,6 @@ function ReportCard({report,busy,actorId,role,onAssign,onSaveNotes,onAction,onLo
+  const [notes,setNotes]=useState(report.notes||''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(''),[banConfirm,setBanConfirm]=useState('');const target=report.target_type==='post'?report.target_author_id||report.target_id:report.target_id;const resolved=['actioned','dismissed'].includes(report.status);
+  return <article className="moderation-report"><header><div><strong>{report.reason.replaceAll('_',' ')}</strong> · {report.status} · {report.target_type}<p>From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p>Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
+  <label>Moderator notes<textarea rows={3} maxLength={2000} value={notes} disabled={resolved} onChange={e=>setNotes(e.target.value)}/></label><button className="admin-button" disabled={resolved||busy} onClick={()=>onSaveNotes(notes)}>Save notes</button>
+- {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" disabled={busy||!reason.trim()||confirm!==report.id} onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
++ {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" disabled={busy||!reason.trim()||confirm!==report.id} data-tone="danger" onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
+  </article>;
+ }
+diff --git a/components/admin/ui.tsx b/components/admin/ui.tsx
+index bef13df..fe897d9 100644
+--- a/components/admin/ui.tsx
++++ b/components/admin/ui.tsx
+@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { UserFilters } from '@/lib/admin/queries';
+ 
+-export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+-  return <article className="admin-stat"><p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
++export function StatCard({ label, value, hint, icon }: { label: string; value: string; hint?: string; icon?: ReactNode }) {
++  return <article className="admin-stat">{icon ? <span className="admin-icon-tile">{icon}</span> : null}<p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
+ }
+ export function DataTable({ caption, headings, children }: { caption: string; headings: string[]; children: ReactNode }) {
+   return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label={caption}><table><caption>{caption}</caption><thead><tr>{headings.map(heading => <th scope="col" key={heading}>{heading}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+-- 
+2.39.5
+

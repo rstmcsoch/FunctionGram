@@ -645,7 +645,7 @@ database object, migration, setting semantic or public-site behaviour changes.
 | Redesign phase | Name | Status | Artifact |
 | --- | --- | --- | --- |
 | 1 | Foundation: tokens, typography, app shell | Done locally | `phase-1-foundation.patch` |
-| 2 | Primitives: reusable component styling | Pending | `phase-2-primitives.patch` |
+| 2 | Primitives: reusable component styling | Done locally | `phase-2-primitives.patch` |
 | 3 | Pages + polish + QA | Pending | `phase-3-pages-polish-qa.patch` |
 
 ### Phase 1 — Foundation: done locally
@@ -712,3 +712,56 @@ still owed before release.
 Phase 1 changes and passes `git apply --check` against a clean copy of `main`
 (`f6e3c37`). This progress document is updated after the patch is generated, so it is
 committed beside the patch rather than inside it.
+
+### Phase 2 — Primitives: done locally
+
+**Guide sections implemented:** 8.1 buttons, 8.2 inputs/selects/textarea,
+8.3 checkbox and radio, 8.4 cards, 8.5 badges and chips, 8.6 tables, 8.7 pagination,
+8.8 filter toolbar, 8.9 dialogs, 8.10 avatars, 8.11 alerts and messages, 8.12 empty
+states, 8.13 details/drawer, 8.14 code and JSON, 8.15 detail-page structure.
+
+#### Files changed
+
+- `app/rstmcadmin/primitives.css` (new) — the reusable component layer.
+- `app/rstmcadmin/admin.css` — imports `primitives.css`; the superseded primitive
+  rules (buttons, inputs, cards, chips, tables, pagination, filter toolbar, dialogs,
+  drawer, detail grid and the old 700px media block) are deleted. The remaining
+  page-level rules are replaced in phase 3.
+- `components/admin/badge.tsx` (new) — `toneFor(text)` maps existing words to a
+  visual class only; `Badge` renders the pill and the optional status dot.
+- `components/admin/ui.tsx` — `StatCard` accepts an optional icon tile. Table,
+  drawer, search bar and chips markup are unchanged.
+- `components/admin/admin-nav.tsx` — the account card role badge now uses `Badge`.
+- `components/admin/actions.tsx`, `content.tsx`, `media.tsx`, `moderation.tsx` —
+  destructive operations (ban, delete, purge, hide, trash, quarantine) get
+  `data-tone="danger"`, chosen from the existing operation name. No handler,
+  label, confirmation or API payload changed.
+
+#### Validation actually run
+
+- `npm run lint` — passed, 0 errors, the same 7 pre-existing public `<img>` warnings.
+- `npm run typecheck` — passed.
+- `npm run test:vercel` — 116 tests, 113 passed, 0 failed, 3 optional managed
+  PostgreSQL tests skipped. Same as the baseline.
+- `npm run build` — passed. The production admin stylesheet is 45 KB and contains
+  the token layer, navigation, table, dialog and reduced-motion rules.
+- `node --import tsx scripts/admin-check.mts check` against the isolated PGlite
+  fixture — passed: 8 identities x 16 admin pages plus the admin APIs return the
+  same 401/403/200 matrix as before the redesign, `X-Robots-Tag: noindex, nofollow`
+  is still present and denied responses contain no panel markup.
+- The Phase 1 shell checker still passes on all 17 pages, and the visible-text
+  snapshot is unchanged.
+- The compiled production CSS was inspected to confirm the phase 2 rules ship.
+
+#### Not verified locally
+
+Dialog interaction, Escape handling, focus return, drawer gestures, the measured
+44px hit areas and the horizontal table scroll need a real browser, which is not
+available in this sandbox. The markup, handlers and shipped CSS were verified
+instead; the existing focus/Escape behaviour in `ConfirmDialog` was not modified.
+
+#### Patch
+
+`patches/phase-2-primitives.patch` (identical `.patch.txt` copy) contains only the
+Phase 2 changes and passes `git apply --check` on top of the Phase 1 commit
+(`bff9708`).
