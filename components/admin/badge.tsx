@@ -68,3 +68,12 @@ const DANGER_OPERATION = /\b(delete|purge|ban|trash|revoke|hide)\b/i;
 export function dangerTone(operation: string): 'danger' | undefined {
   return DANGER_OPERATION.test(operation) ? 'danger' : undefined;
 }
+
+/** Audit action tone (§9.6). Derived from the action name already shown. */
+export function auditTone(action: string): Tone {
+  const value = String(action || '').toLowerCase();
+  if (/\.(delete|purge|ban|revoke|trash)\b/.test(value)) return 'danger';
+  if (/\.(hide|quarantine|expire|demote)\b/.test(value)) return 'warning';
+  if (/\.(edit|update|promote|create|grant)\b/.test(value)) return 'primary';
+  return 'neutral';
+}

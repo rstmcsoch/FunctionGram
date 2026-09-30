@@ -9,6 +9,7 @@
      2. admin-tokens.css     §4 design tokens and §5 typography
      3. admin-shell.css      §6 app shell and §7 responsive rules
      4. admin-components.css §8 reusable primitives
+     5. admin-pages.css      §9 page recipes and §10 designer touches
 
    Later layers must win at equal specificity, so they are imported last.
    ========================================================================== */
@@ -17,3 +18,4 @@
 @import './admin-tokens.css';
 @import './admin-shell.css';
 @import './admin-components.css';
+@import './admin-pages.css';

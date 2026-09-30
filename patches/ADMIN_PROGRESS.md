@@ -650,7 +650,7 @@ Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
 | --- | --- | --- | --- |
 | 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
 | 2 | Primitives — reusable admin control styling | Done locally; all four gates green | `patches/phase-2-primitives.patch` |
-| 3 | Pages, polish and final QA | Not started | `patches/phase-3-pages-polish-qa.patch` |
+| 3 | Pages, polish and final QA | Done locally; all four gates green | `patches/phase-3-pages-polish-qa.patch` |
 
 ### Baseline measured before any redesign change
 
@@ -861,3 +861,90 @@ neutral, `Clear` ghost).
 Patch: `patches/phase-2-primitives.patch` (identical copy at
 `patches/phase-2-primitives.patch.txt`), verified with `git apply --check`
 against a clean extraction of the Phase 1 commit `3f40375`.
+
+## Phase 3 — Pages + polish + QA
+
+Guide sections **§9.1–§9.13**, the remaining **§10** designer touches, the
+remaining **§11** motion and accessibility items, and the **§13** checklist.
+Applied in the order the guide prescribes.
+
+New layer `app/rstmcadmin/admin-pages.css`, imported last by `admin.css`.
+
+### Page recipes
+
+| § | Page | Applied |
+| --- | --- | --- |
+| 9.1 | Overview | Gradient banner card with ambient glow and an inline hex lattice (hidden under 640px); the six stat cards keep their labels, order and captions and gain 40px icon tiles (Users/UserPlus/Activity/LayoutGrid/Flag/HardDrive in blue/green/purple/amber/red/cyan); People & accounts and System status become feature cards with a 48px tile, and System status renders label/value rows with ok/warning status dots |
+| 9.2 | Users list | `Export this page (CSV)` moved into the page head, avatar + name identity cell, role and access badges, and a §10.5 storage meter sized against the largest row on the page. The note was already the table caption |
+| 9.3 | User detail | 64px avatar in the page head, email/role/handle/verified/trash as badges, and both muted notes promoted to the info alert style |
+| 9.4 | Content | Four-column filter grid from 1024px, a bulk bar with the count left and actions right, kind badge + id in `code`, status badges, 96×96 contained media previews in bordered rows that stack under 640px, and five engagement tiles |
+| 9.5 | Settings pages | Card per group, responsive field grids, textareas spanning both columns, 44px colour swatches, one row per feature flag, and two-column label rows |
+| 9.6 | Audit | Muted tabular timestamps, actor avatar 28 + email, the action as a monospace badge toned by `auditTone()`, target id in `code`, snapshots already collapsed in `details` |
+| 9.7 | Safety | Reason as a neutral badge, status and target type as meaning-toned badges |
+| 9.8 | Security & roles | Role badges, and the permission matrix as a green check or a muted dash with the original `Allowed` / `—` text kept for screen readers via `.admin-visually-hidden` |
+| 9.9 | Analytics | Bars with 6px rounded tops in `--adm-accent`, accent-hover on hover, dashed baseline, 12px tabular axis labels, funnel bar and ranked lists restyled |
+| 9.10 | Exports | Two-column field grid from 768px |
+| 9.11 | System tools | Key/value environment rows, applied/pending migration chips, and any card containing a destructive control gets a `--adm-danger` 40% border |
+| 9.12 | Operator guide | 760px centred article column with the prescribed prose scale |
+| 9.13 | Errors inside admin | The two invalid-filter cards become centred 480px state cards with a ghost action |
+
+### Remaining §10 and §11
+
+Ambient glow, hex pattern, storage meter, tabular numerals, scroll shadows on
+table containers, and the reduced-motion guard for the new chart transition.
+The active nav bar, glass page head, deterministic avatar tints, skip link,
+selection colour, custom scrollbars and press feedback landed in Phase 1.
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
+| `npm run build` | pass; all 17 `/rstmcadmin*` routes still dynamic |
+
+### §13 visible-text comparison
+
+The pre-redesign commit `f6e3c37e` was checked out into a second worktree and
+served on port 3001 against a copy of the same PGlite fixture, while the
+redesigned branch served port 3000. Every one of the 15 admin routes was
+fetched from both, the shell markup stripped, and the word multisets compared.
+
+**Result: zero words removed on any route.** The only additions are the
+Phase 1 shell elements — the skip link, the `RSTMC.` wordmark, the five nav
+group headings and the account card. Counts (old → new): Overview 145→161,
+Users 142→165, Content 420→436, Safety 101→117, Media 332→348, Audit 102→118,
+Analytics 171→187, Security 341→357, System 250→266, Communications 103→119,
+Appearance 640→656, Features 240→256, Labels 679→695, Exports 90→106,
+Operator guide 480→496.
+
+The fixture assertion in `scripts/admin-check.mts` that matches
+`A pulse on your community.` and `Applied migrations: … 1, 2, … 12` still
+passes against the restructured System status rows.
+
+### Checklist items that could not be run here
+
+The sandbox has no browser binary and no package repository (`libnss3` and
+`libnspr4` are unavailable, `deb.debian.org` and `fonts.googleapis.com` are
+unreachable), so Playwright/Chromium cannot start. The screenshot matrix at
+320/390/768/1024/1440px in both themes, and the interactive drawer, dialog,
+focus-return, keyboard-traversal and contrast passes, were therefore verified
+by server-rendered HTML inspection and by reading the compiled stylesheet
+rather than from live screenshots. No screenshot is claimed to have been
+taken. The structural guarantees behind those checks are in the CSS: the
+sidebar drawer is driven by `data-open` with an Escape handler and focus trap
+in `admin-nav.tsx`, dialogs become bottom sheets below 640px, `min-width: 0`
+and `overflow-wrap: anywhere` are applied on every grid and table cell, and
+`tbody tr:last-child td { border-bottom: 0 }` with `overflow-y: visible`
+keeps the final table row fully visible.
+
+### Prohibited paths
+
+`git diff f6e3c37e..HEAD --name-only` contains no entry under `lib/`,
+`app/api/`, any migrations directory, `package.json`, `package-lock.json`,
+`app/globals.css` or `components/social/**`.
+
+Patch: `patches/phase-3-pages-polish-qa.patch` (identical copy at
+`patches/phase-3-pages-polish-qa.patch.txt`), verified with `git apply --check`
+against a clean extraction of the Phase 2 commit `c7a5008`.

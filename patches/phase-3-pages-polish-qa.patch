@@ -1,0 +1,1317 @@
+diff --git a/app/rstmcadmin/admin-pages.css b/app/rstmcadmin/admin-pages.css
+new file mode 100644
+index 0000000..b7006b7
+--- /dev/null
++++ b/app/rstmcadmin/admin-pages.css
+@@ -0,0 +1,831 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — page recipes (§9) and remaining designer
++   touches (§10). Loaded last, after the §8 primitives.
++
++   Visual only. Nothing here adds, removes or rewrites a visible word.
++   ========================================================================== */
++
++/* ==========================================================================
++   9.1 Overview — banner (§9.1.1, §10.1 ambient glow, §10.2 hex pattern)
++   ========================================================================== */
++
++.admin-shell .admin-page-head-banner {
++  position: relative;
++  isolation: isolate;
++  overflow: hidden;
++  padding: 28px;
++  border: 1px solid var(--adm-border);
++  border-radius: 14px;
++  background:
++    linear-gradient(135deg, rgba(27, 132, 255, .1) 0%, rgba(27, 132, 255, 0) 60%),
++    var(--adm-card);
++  box-shadow: var(--adm-shadow);
++}
++
++/* §10.1 ambient glow, behind everything in the banner. */
++.admin-shell .admin-page-head-banner::before {
++  content: "";
++  position: absolute;
++  z-index: -1;
++  top: -140px;
++  left: -80px;
++  width: 420px;
++  height: 320px;
++  border-radius: 50%;
++  background: radial-gradient(closest-side, rgba(27, 132, 255, .08), transparent);
++  pointer-events: none;
++}
++
++/* §10.2 hex lattice in the right corner. */
++.admin-shell .admin-banner-hex {
++  position: absolute;
++  z-index: -1;
++  top: 0;
++  right: 0;
++  width: 240px;
++  height: 120px;
++  color: var(--adm-accent);
++  opacity: .06;
++  pointer-events: none;
++}
++
++.admin-shell .admin-page-head-banner h1 {
++  font-size: 28px;
++  line-height: 36px;
++}
++
++@media (max-width: 639px) {
++  .admin-shell .admin-page-head-banner {
++    padding: var(--adm-s5);
++  }
++
++  .admin-shell .admin-banner-hex {
++    display: none;
++  }
++}
++
++/* ==========================================================================
++   9.1.2 Icon tiles
++   ========================================================================== */
++
++.admin-shell .admin-icon-tile {
++  display: grid;
++  place-items: center;
++  flex: none;
++  width: 40px;
++  height: 40px;
++  border-radius: 12px;
++  color: var(--adm-accent-text);
++  background: rgba(27, 132, 255, .14);
++}
++
++.admin-shell .admin-icon-tile[data-size="48"] {
++  width: 48px;
++  height: 48px;
++  border-radius: 14px;
++}
++
++.admin-shell .admin-icon-tile[data-tone="green"] {
++  color: var(--adm-success-text);
++  background: rgba(23, 178, 106, .14);
++}
++
++.admin-shell .admin-icon-tile[data-tone="purple"] {
++  color: var(--adm-purple-text);
++  background: rgba(127, 86, 217, .14);
++}
++
++.admin-shell .admin-icon-tile[data-tone="amber"] {
++  color: var(--adm-warning-text);
++  background: rgba(247, 144, 9, .16);
++}
++
++.admin-shell .admin-icon-tile[data-tone="red"] {
++  color: var(--adm-danger-text);
++  background: rgba(240, 68, 56, .14);
++}
++
++.admin-shell .admin-icon-tile[data-tone="cyan"] {
++  color: var(--adm-cyan-text);
++  background: rgba(6, 174, 212, .14);
++}
++
++/* Stat card with a tile: tile first, then label, number, caption (§9.1.2). */
++.admin-shell .admin-stat:has(.admin-icon-tile) {
++  display: grid;
++  grid-template-columns: 40px minmax(0, 1fr);
++  grid-template-rows: auto auto auto;
++  align-items: center;
++  column-gap: var(--adm-s3);
++  row-gap: 2px;
++}
++
++.admin-shell .admin-stat .admin-icon-tile {
++  grid-row: 1 / 3;
++}
++
++.admin-shell .admin-stat:has(.admin-icon-tile) small {
++  grid-column: 1 / -1;
++  margin-top: var(--adm-s2);
++}
++
++/* ==========================================================================
++   9.1.3 / 9.1.4 Feature cards
++   ========================================================================== */
++
++.admin-shell .admin-card-lead {
++  display: flex;
++  align-items: flex-start;
++  gap: var(--adm-s4);
++}
++
++.admin-shell .admin-card-lead > div {
++  min-width: 0;
++}
++
++.admin-shell .admin-card-lead h2 {
++  margin: 0 0 var(--adm-s2);
++}
++
++.admin-shell .admin-card-lead p {
++  margin: 0;
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-card-lead:last-child h2 {
++  margin-bottom: 0;
++}
++
++.admin-shell .admin-card-footer {
++  display: flex;
++  justify-content: flex-end;
++  margin-top: var(--adm-s5);
++}
++
++@media (max-width: 767px) {
++  .admin-shell .admin-card-footer .admin-button {
++    width: 100%;
++  }
++}
++
++/* Status rows: label left, value right, dot for meaning (§9.1.4). */
++.admin-shell .admin-status-list {
++  margin: var(--adm-s5) 0 0;
++  padding: 0;
++  border-top: 1px solid var(--adm-border-subtle);
++}
++
++.admin-shell .admin-status-row {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: var(--adm-s3);
++  padding: var(--adm-s3) 0;
++  border-bottom: 1px solid var(--adm-border-subtle);
++}
++
++.admin-shell .admin-status-row dt {
++  margin: 0;
++  color: var(--adm-text-2);
++  font-size: 14px;
++  font-weight: 500;
++}
++
++.admin-shell .admin-status-row dd {
++  display: flex;
++  align-items: baseline;
++  gap: var(--adm-s2);
++  margin: 0;
++  min-width: 0;
++  color: var(--adm-text);
++  font-size: 14px;
++  font-weight: 600;
++  font-variant-numeric: tabular-nums;
++  text-align: right;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .admin-status-row dd::before {
++  content: "";
++  flex: none;
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--adm-success);
++  transform: translateY(-1px);
++}
++
++.admin-shell .admin-status-row dd[data-state="warn"]::before {
++  background: var(--adm-warning);
++}
++
++.admin-shell .admin-status-row dd[data-state="fail"]::before {
++  background: var(--adm-danger);
++}
++
++.admin-shell .admin-link-row {
++  margin: var(--adm-s5) 0 0;
++  color: var(--adm-text-3);
++  font-size: 14px;
++}
++
++/* ==========================================================================
++   9.2 Users list — identity cell, storage meter (§10.5)
++   ========================================================================== */
++
++.admin-shell .admin-cell-identity {
++  display: flex;
++  align-items: center;
++  gap: var(--adm-s3);
++  min-width: 0;
++}
++
++.admin-shell .admin-cell-identity > div {
++  min-width: 0;
++}
++
++.admin-shell .admin-meter-value {
++  display: block;
++  font-variant-numeric: tabular-nums;
++}
++
++.admin-shell .admin-meter {
++  display: block;
++  width: 100%;
++  max-width: 120px;
++  height: 4px;
++  margin-top: 6px;
++  border-radius: var(--adm-r-pill);
++  background: var(--adm-muted-surface);
++  overflow: hidden;
++}
++
++.admin-shell .admin-meter-fill {
++  display: block;
++  height: 100%;
++  border-radius: inherit;
++  background: var(--adm-accent);
++}
++
++/* ==========================================================================
++   9.3 Detail pages — profile header
++   ========================================================================== */
++
++.admin-shell .admin-page-head .admin-avatar[data-size="64"] {
++  align-self: flex-start;
++}
++
++.admin-shell .admin-identity-meta {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: var(--adm-s2) var(--adm-s3);
++}
++
++.admin-shell .admin-handle {
++  color: var(--adm-text-3);
++}
++
++/* ==========================================================================
++   9.4 Content — filter toolbar, bulk bar, engagement tiles, media rows
++   ========================================================================== */
++
++/* Many fields → four columns on desktop (§9.4). */
++@media (min-width: 1024px) {
++  .admin-shell .admin-search:has(label:nth-child(8)) {
++    display: grid;
++    grid-template-columns: repeat(4, minmax(0, 1fr));
++    align-items: end;
++  }
++
++  .admin-shell .admin-search:has(label:nth-child(8)) label:first-child {
++    flex: none;
++  }
++}
++
++.admin-shell .admin-bulk-bar {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--adm-s3) var(--adm-s5);
++  margin: var(--adm-s5) 0 var(--adm-s4);
++  padding: var(--adm-s3) var(--adm-s4);
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-card);
++  background: var(--adm-muted-surface);
++}
++
++.admin-shell .admin-bulk-bar > p {
++  flex: 1 1 260px;
++  margin: 0;
++}
++
++.admin-shell .admin-bulk-bar .admin-action-grid {
++  margin: 0;
++  justify-content: flex-end;
++}
++
++/* Inline badge + code groups inside table cells. */
++.admin-shell .admin-cell-meta {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 6px;
++  min-width: 0;
++}
++
++.admin-shell td .admin-cell-meta code {
++  overflow-wrap: anywhere;
++}
++
++/* Small stat tiles (§9.4 engagement card). */
++.admin-shell .admin-tile-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
++  gap: var(--adm-s3);
++  margin-top: var(--adm-s4);
++}
++
++.admin-shell .admin-tile {
++  display: grid;
++  gap: 2px;
++  padding: var(--adm-s3) var(--adm-s4);
++  border: 1px solid var(--adm-border-subtle);
++  border-radius: 12px;
++  background: var(--adm-muted-surface);
++  min-width: 0;
++}
++
++.admin-shell .admin-tile span {
++  color: var(--adm-text-2);
++  font-size: 12px;
++  line-height: 16px;
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .admin-tile strong {
++  color: var(--adm-text);
++  font-size: 20px;
++  line-height: 28px;
++  font-weight: 600;
++  font-variant-numeric: tabular-nums;
++}
++
++/* Media rows (§9.4). */
++.admin-shell .content-media-item {
++  display: grid;
++  grid-template-columns: 96px minmax(0, 1fr);
++  align-items: start;
++  gap: var(--adm-s4);
++  padding: var(--adm-s4);
++  margin-bottom: var(--adm-s3);
++  border: 1px solid var(--adm-border);
++  border-bottom: 1px solid var(--adm-border);
++  border-radius: 12px;
++  background: var(--adm-card);
++}
++
++.admin-shell .content-media-item img,
++.admin-shell .content-media-item video {
++  width: 96px;
++  height: 96px;
++  object-fit: contain;
++  border-radius: 10px;
++  background: var(--adm-muted-surface);
++}
++
++.admin-shell .content-media-item code {
++  display: block;
++  margin-bottom: var(--adm-s3);
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .content-media-item .admin-action-grid {
++  margin: 0;
++}
++
++@media (max-width: 639px) {
++  .admin-shell .content-media-item {
++    grid-template-columns: minmax(0, 1fr);
++  }
++
++  .admin-shell .content-media-item img,
++  .admin-shell .content-media-item video {
++    width: 100%;
++    height: auto;
++    max-height: 240px;
++  }
++}
++
++/* Confirmation field then a right-aligned primary save (§9.4). */
++.admin-shell .admin-content-editor > .admin-button[type="submit"] {
++  justify-self: end;
++}
++
++/* ==========================================================================
++   Shared helpers introduced by the page recipes
++   ========================================================================== */
++
++/* Kept in the accessibility tree, removed from the visual layout (§9.8). */
++.admin-shell .admin-visually-hidden {
++  position: absolute;
++  width: 1px;
++  height: 1px;
++  margin: -1px;
++  padding: 0;
++  border: 0;
++  overflow: hidden;
++  white-space: nowrap;
++  clip: rect(0 0 0 0);
++  clip-path: inset(50%);
++}
++
++.admin-shell .admin-badge-mono {
++  font-family: var(--adm-mono);
++  font-size: 12px;
++  letter-spacing: 0;
++}
++
++.admin-shell .admin-cell-time {
++  color: var(--adm-text-2);
++  font-variant-numeric: tabular-nums;
++  white-space: nowrap;
++}
++
++/* ==========================================================================
++   9.5 Settings-style pages
++   ========================================================================== */
++
++/* One card per group; fields in a responsive two-column grid. */
++.admin-shell .media-settings-grid,
++.admin-shell .media-filters,
++.admin-shell .appearance-editor .admin-detail,
++.admin-shell .export-manager .admin-detail {
++  gap: var(--adm-s4);
++}
++
++/* Long fields span both columns. */
++.admin-shell .admin-detail > label:has(textarea),
++.admin-shell .media-settings-grid > label:has(textarea) {
++  grid-column: 1 / -1;
++}
++
++/* Save button at the card footer, right aligned; status sits beside it. */
++.admin-shell .admin-save-row {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: flex-end;
++  gap: var(--adm-s3);
++  margin-top: var(--adm-s5);
++}
++
++/* Appearance: a colour swatch beside each colour control (§9.5). */
++.admin-shell input[type="color"] {
++  width: 44px;
++  min-width: 44px;
++  height: 44px;
++  padding: 4px;
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-control);
++  background: var(--adm-card);
++  cursor: pointer;
++}
++
++.admin-shell input[type="color"]::-webkit-color-swatch-wrapper {
++  padding: 0;
++}
++
++.admin-shell input[type="color"]::-webkit-color-swatch {
++  border: 0;
++  border-radius: 6px;
++}
++
++.admin-shell .appearance-nav-row {
++  border: 1px solid var(--adm-border);
++  border-radius: 12px;
++  padding: var(--adm-s4);
++  background: var(--adm-muted-surface);
++}
++
++/* Features: one row per flag, label left, control right, dividers between. */
++.admin-shell .feature-grid fieldset {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--adm-s3);
++  padding: var(--adm-s4);
++  border: 1px solid var(--adm-border);
++  border-radius: 12px;
++  background: var(--adm-card);
++}
++
++.admin-shell .feature-grid legend {
++  padding: 0;
++  color: var(--adm-text);
++  font-size: 14px;
++  font-weight: 600;
++}
++
++/* Labels: two columns on desktop, key in code style above the field. */
++.admin-shell .labels-rows {
++  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
++  gap: var(--adm-s4);
++}
++
++.admin-shell .label-row {
++  padding: var(--adm-s4);
++  border: 1px solid var(--adm-border);
++  border-radius: 12px;
++  background: var(--adm-card);
++}
++
++.admin-shell .label-row legend {
++  padding: 0;
++  font-size: 13px;
++  font-weight: 600;
++}
++
++/* ==========================================================================
++   9.9 Analytics — charts
++   ========================================================================== */
++
++.admin-shell .analytics-bars {
++  display: flex;
++  align-items: flex-end;
++  gap: 3px;
++  min-height: 120px;
++  padding: var(--adm-s3) 0;
++  border-bottom: 1px dashed var(--adm-border);
++}
++
++.admin-shell .analytics-bars > * {
++  flex: 1 1 0;
++  min-width: 2px;
++  border-radius: 6px 6px 0 0;
++  background: var(--adm-accent);
++  transition: background var(--adm-dur) var(--adm-ease);
++}
++
++.admin-shell .analytics-bars > *:hover {
++  background: var(--adm-accent-hover);
++}
++
++.admin-shell .analytics-axis {
++  display: flex;
++  justify-content: space-between;
++  margin-top: var(--adm-s2);
++  color: var(--adm-text-3);
++  font-size: 12px;
++  font-variant-numeric: tabular-nums;
++}
++
++.admin-shell .analytics-chart {
++  padding: var(--adm-s6);
++}
++
++.admin-shell .analytics-chart h3 {
++  margin: 0 0 var(--adm-s4);
++  font-size: 15px;
++  line-height: 22px;
++  font-weight: 600;
++}
++
++.admin-shell .analytics-funnel-bar {
++  height: 12px;
++  margin: var(--adm-s4) 0 var(--adm-s3);
++  border-radius: var(--adm-r-pill);
++  background: var(--adm-muted-surface);
++  overflow: hidden;
++}
++
++.admin-shell .analytics-funnel-bar > span {
++  display: block;
++  height: 100%;
++  border-radius: inherit;
++  background: var(--adm-accent);
++}
++
++.admin-shell .analytics-ranked-list p {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: var(--adm-s3);
++  margin: 0;
++  padding: var(--adm-s3) 0;
++  border-bottom: 1px solid var(--adm-border-subtle);
++}
++
++.admin-shell .analytics-ranked-list p:last-child {
++  border-bottom: 0;
++}
++
++.admin-shell .analytics-ranked-list strong {
++  font-variant-numeric: tabular-nums;
++}
++
++/* ==========================================================================
++   9.10 Exports — two columns from 768px
++   ========================================================================== */
++
++@media (min-width: 768px) {
++  .admin-shell .export-manager .admin-detail {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++}
++
++.admin-shell .export-manager > .admin-button {
++  margin-top: var(--adm-s5);
++}
++
++/* ==========================================================================
++   9.11 System tools
++   ========================================================================== */
++
++.admin-shell .system-env-list {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
++  gap: 0 var(--adm-s6);
++  margin: var(--adm-s4) 0 0;
++}
++
++.admin-shell .system-env-list > div {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: var(--adm-s3);
++  padding: var(--adm-s3) 0;
++  border-bottom: 1px solid var(--adm-border-subtle);
++}
++
++.admin-shell .system-env-list dt,
++.admin-shell .system-env-list dd {
++  margin: 0;
++}
++
++.admin-shell .system-env-list dt {
++  color: var(--adm-text-2);
++  font-size: 14px;
++  text-transform: capitalize;
++}
++
++.admin-shell .system-env-list dd {
++  font-size: 14px;
++  font-weight: 600;
++}
++
++.admin-shell .migration-chips {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--adm-s2);
++  margin-top: var(--adm-s4);
++}
++
++.admin-shell .migration-chips span {
++  padding: 4px 10px;
++  border: 1px solid var(--adm-border);
++  border-radius: var(--adm-r-pill);
++  font-size: 12px;
++  font-weight: 500;
++}
++
++.admin-shell .migration-chips .is-applied {
++  border-color: rgba(23, 178, 106, .35);
++  background: rgba(23, 178, 106, .12);
++  color: var(--adm-success-text);
++}
++
++.admin-shell .migration-chips .is-pending {
++  border-color: rgba(247, 144, 9, .35);
++  background: rgba(247, 144, 9, .14);
++  color: var(--adm-warning-text);
++}
++
++/* A card that holds a destructive tool gets a danger-tinted border (§9.11). */
++.admin-shell .system-tools .admin-card:has(.admin-danger),
++.admin-shell .system-tools .admin-card:has([data-tone="danger"]) {
++  border-color: color-mix(in srgb, var(--adm-danger) 40%, transparent);
++}
++
++.admin-shell .admin-button-row {
++  display: flex;
++  flex-wrap: wrap;
++  gap: var(--adm-s3);
++  margin-top: var(--adm-s4);
++}
++
++.admin-shell .admin-card-heading {
++  gap: var(--adm-s4);
++}
++
++.admin-shell .system-sql-result {
++  max-height: 420px;
++}
++
++/* ==========================================================================
++   9.12 Operator guide — article column
++   ========================================================================== */
++
++.admin-shell .admin-main:has(.admin-guide) > * {
++  max-width: 760px;
++  margin-inline: auto;
++}
++
++.admin-shell .admin-guide h2 {
++  margin-top: 0;
++  font-size: 20px;
++  line-height: 28px;
++  font-weight: 600;
++}
++
++.admin-shell .admin-guide h3 {
++  margin-top: var(--adm-s7);
++  font-size: 16px;
++  line-height: 24px;
++  font-weight: 600;
++}
++
++.admin-shell .admin-guide p {
++  font-size: 15px;
++  line-height: 26px;
++}
++
++.admin-shell .admin-guide ul,
++.admin-shell .admin-guide ol {
++  display: grid;
++  gap: var(--adm-s2);
++  padding-left: var(--adm-s5);
++  font-size: 15px;
++  line-height: 26px;
++}
++
++.admin-shell .admin-guide a {
++  color: var(--adm-accent-text);
++}
++
++.admin-shell .admin-guide blockquote {
++  margin: var(--adm-s4) 0;
++  padding: var(--adm-s3) var(--adm-s4);
++  border-left: 3px solid var(--adm-accent);
++  border-radius: 0 var(--adm-r-control) var(--adm-r-control) 0;
++  background: var(--adm-muted-surface);
++}
++
++/* ==========================================================================
++   9.13 Error and empty page states inside admin
++   ========================================================================== */
++
++.admin-shell .admin-state-card {
++  max-width: 480px;
++  margin-inline: auto;
++  text-align: center;
++}
++
++.admin-shell .admin-state-card h1 {
++  margin: 0 0 var(--adm-s3);
++  font-size: 20px;
++  line-height: 28px;
++}
++
++.admin-shell .admin-state-card p {
++  justify-content: center;
++  margin-bottom: var(--adm-s5);
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-state-card .admin-button {
++  min-width: 160px;
++}
++
++/* ==========================================================================
++   10.8 / 10.10 / 11 — remaining polish
++   ========================================================================== */
++
++/* Scroll shadows: the card edges fade while a table is scrolled sideways. */
++.admin-shell .admin-table-scroll {
++  background-image:
++    linear-gradient(to right, var(--adm-card) 30%, rgba(0, 0, 0, 0)),
++    linear-gradient(to left, var(--adm-card) 30%, rgba(0, 0, 0, 0)),
++    linear-gradient(to right, rgba(16, 24, 40, .10), rgba(0, 0, 0, 0)),
++    linear-gradient(to left, rgba(16, 24, 40, .10), rgba(0, 0, 0, 0));
++  background-position: 0 0, 100% 0, 0 0, 100% 0;
++  background-repeat: no-repeat;
++  background-size: 32px 100%, 32px 100%, 14px 100%, 14px 100%;
++  background-attachment: local, local, scroll, scroll;
++}
++
++/* Numbers line up wherever they are compared (§10.7). */
++.admin-shell .admin-stat strong,
++.admin-shell .admin-pagination span,
++.admin-shell .analytics-summary strong {
++  font-variant-numeric: tabular-nums;
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .admin-shell .analytics-bars > * {
++    transition: none;
++  }
++}
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 90560bf..36b86e8 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -9,6 +9,7 @@
+      2. admin-tokens.css     §4 design tokens and §5 typography
+      3. admin-shell.css      §6 app shell and §7 responsive rules
+      4. admin-components.css §8 reusable primitives
++     5. admin-pages.css      §9 page recipes and §10 designer touches
+ 
+    Later layers must win at equal specificity, so they are imported last.
+    ========================================================================== */
+@@ -17,3 +18,4 @@
+ @import './admin-tokens.css';
+ @import './admin-shell.css';
+ @import './admin-components.css';
++@import './admin-pages.css';
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+index bbf73d9..b487757 100644
+--- a/app/rstmcadmin/content/[id]/page.tsx
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -9,6 +9,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentActions, ContentEditor } from '@/components/admin/content';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
+ import { PageHead } from '@/components/admin/page-head';
++import { AutoBadge } from '@/components/admin/badge';
+ 
+ export default async function ContentItem({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{resource?:string}>}) {
+   const actor=await requireAdminPage();const {id}=await params;const query=await searchParams;
+@@ -16,9 +17,17 @@ export default async function ContentItem({params,searchParams}:{params:Promise<
+   const item=await contentDetail(await getPool(),resource,id).catch(error=>{if(error instanceof AdminError&&error.status===404)notFound();throw error;});
+   const operations=actor.role==='moderator'?(item.deleted_at?[]:['hide','unhide']):item.deleted_at?['restore',...actor.role==='owner'?['purge']:[]]:['hide','unhide','delete',...resource==='posts'?['pin','unpin',...item.kind==='story'?['expire','highlight']:[]]:[]];
+   const counts=item.counts as Record<string,unknown>|undefined;
+-  return <><PageHead breadcrumb={<>Control room / {resource}</>} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'} intro={<>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</>} />
++  return <><PageHead breadcrumb={<>Control room / {resource}</>} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'} intro={<span className="admin-identity-meta"><span className="admin-handle">@{String(item.username)}</span><code>{id}</code><AutoBadge>{item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</AutoBadge></span>} />
+     <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
+-    {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
++    {counts&&<section className="admin-card"><h2>Recorded engagement</h2>
++      <div className="admin-tile-grid">
++        <div className="admin-tile"><span>Real likes:</span><strong>{String(counts.real_likes)}</strong></div>
++        <div className="admin-tile"><span>Base likes:</span><strong>{String(item.base_likes)}</strong></div>
++        <div className="admin-tile"><span>Unhidden comments:</span><strong>{String(counts.real_comments)}</strong></div>
++        <div className="admin-tile"><span>Story seen reactions:</span><strong>{String(counts.story_views)}</strong></div>
++        <div className="admin-tile"><span>Reports:</span><strong>{String(counts.reports)}</strong></div>
++      </div>
++      <div className="admin-card-footer"><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></div></section>}
+     {resource==='posts'&&actor.role!=='moderator'&&<section className="admin-card"><h2>Counter baselines</h2><CounterEditor key={String(item.base_likes)+':'+String(item.base_comments)+':'+String(item.base_views)} id={id} likes={Number(item.base_likes)} comments={Number(item.base_comments)} views={Number(item.base_views)} disabled={!!item.deleted_at}/></section>}
+     <section className="admin-card"><h2>Moderation actions</h2><ContentActions ids={[id]} resource={resource} operations={operations} targetNames={{[id]:contentConfirmationName(item)}}/></section>
+     {actor.role!=='moderator'&&<section className="admin-card"><h2>{item.deleted_at?'Preview (trashed)':'Edit content'}</h2>{!!item.deleted_at&&<p>Restore before editing. Restoration preserves any moderation hide. Purged media files are not automatically deleted from storage.</p>}<fieldset className="admin-content-fields" disabled={!!item.deleted_at}><ContentEditor key={String(item.edited_at)+String(item.body)} item={item} resource={resource}/></fieldset></section>}
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index 18da8de..96df6fe 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -10,7 +10,7 @@ import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
+   const actor=await requireAdminPage();let filter;
+-  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
++  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card admin-state-card"><h1>Invalid content filters</h1><Link className="admin-button" data-tone="ghost" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
+   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
+   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
+   return <><PageHead breadcrumb="Control room / Content" title="Content & moderation" intro={<>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</>} />
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+index 7b3076a..aa7cf2c 100644
+--- a/app/rstmcadmin/page.tsx
++++ b/app/rstmcadmin/page.tsx
+@@ -5,6 +5,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { dashboard } from '@/lib/admin/queries';
+ import { StatCard, bytes } from '@/components/admin/ui';
+ import { PageHead } from '@/components/admin/page-head';
++import { IconTile } from '@/components/admin/icon-tile';
+ 
+ export default async function AdminHome() {
+   const actor = await requireAdminPage();
+@@ -13,16 +14,27 @@ export default async function AdminHome() {
+   const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
+   const number = (key: string) => Number(stats[key]).toLocaleString('en-IN');
+   return <>
+-    <PageHead breadcrumb="Control room / Overview" title="A pulse on your community." intro={<>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</>} />
++    <PageHead banner breadcrumb="Control room / Overview" title="A pulse on your community." intro={<>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</>} />
+     <section className="admin-stats" aria-label="Community statistics">
+-      <StatCard label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
+-      <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
+-      <StatCard label="Recently active sessions" value={number('active_users')} hint="Users with sessions updated in the last 7 days; not DAU" />
+-      <StatCard label="Content items" value={number('posts')} hint="Posts, reels and stories outside trash" />
+-      <StatCard label="Open reports" value={number('reports')} hint="New or in triage; review the Safety inbox" />
+-      <StatCard label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
++      <StatCard icon="Users" tone="blue" label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
++      <StatCard icon="UserPlus" tone="green" label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
++      <StatCard icon="Activity" tone="purple" label="Recently active sessions" value={number('active_users')} hint="Users with sessions updated in the last 7 days; not DAU" />
++      <StatCard icon="LayoutGrid" tone="amber" label="Content items" value={number('posts')} hint="Posts, reels and stories outside trash" />
++      <StatCard icon="Flag" tone="red" label="Open reports" value={number('reports')} hint="New or in triage; review the Safety inbox" />
++      <StatCard icon="HardDrive" tone="cyan" label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
++    </section>
++    <section className="admin-card admin-feature-card">
++      <div className="admin-card-lead"><IconTile icon="Users" tone="blue" size={48} /><div><h2>People &amp; accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p></div></div>
++      <div className="admin-card-footer"><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></div>
++    </section>
++    <section className="admin-card admin-feature-card">
++      <div className="admin-card-lead"><IconTile icon="ServerCog" tone="green" size={48} /><div><h2>System status</h2></div></div>
++      <dl className="admin-status-list">
++        <div className="admin-status-row"><dt>Applied migrations:</dt><dd data-state={migrations.rows.length ? 'ok' : 'warn'}>{migrations.rows.map(row => row.version).join(', ')}</dd></div>
++        <div className="admin-status-row"><dt>Stored settings:</dt><dd data-state={Number(settings.count) ? 'ok' : 'warn'}>{Number(settings.count)}</dd></div>
++      </dl>
++      <p className="admin-link-row"><Link href={ADMIN_BASE_PATH + '/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH + '/exports'}>Export lists</Link> · <Link href={ADMIN_BASE_PATH + '/system'}>System tools</Link></p>
++      <p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p>
+     </section>
+-    <section className="admin-card"><h2>People & accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></section>
+-    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p><Link href={ADMIN_BASE_PATH + '/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH + '/exports'}>Export lists</Link> · <Link href={ADMIN_BASE_PATH + '/system'}>System tools</Link></p><p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p></section>
+   </>;
+ }
+diff --git a/app/rstmcadmin/security/page.tsx b/app/rstmcadmin/security/page.tsx
+index 37dc242..5916e6c 100644
+--- a/app/rstmcadmin/security/page.tsx
++++ b/app/rstmcadmin/security/page.tsx
+@@ -4,6 +4,7 @@ import {ADMIN_ROLES} from '@/lib/admin/config';
+ import {ROLE_PERMISSIONS,ADMIN_PERMISSIONS} from '@/lib/admin/permissions';
+ import {parseAdminIpAllowlist} from '@/lib/admin/network';
+ import { PageHead } from '@/components/admin/page-head';
++import { AutoBadge } from '@/components/admin/badge';
+ 
+ const labels:Record<string,string>={
+  'admin.access':'Open admin panel','dashboard.read':'View dashboard','content.read':'Read content','content.moderate':'Hide or unhide content','users.read':'Read accounts','users.manage':'Manage non-role account actions','roles.manage':'Grant or revoke roles','settings.manage':'Manage site settings and moderation policy','media.manage':'Manage media','moderation.read':'Read reports','moderation.triage':'Assign, note, dismiss or hide reports','moderation.accounts':'Apply account safety restrictions','moderation.rates':'Inspect and clear rate limits','audit.read':'Read and export audit history','security.read':'Read security policy',
+@@ -17,8 +18,8 @@ export default async function SecurityPage(){
+  ]);
+  const allowlist=parseAdminIpAllowlist(process.env.ADMIN_IP_ALLOWLIST);
+  return <><PageHead breadcrumb="Control room / Security" title={<>Security &amp; administrator roles</>} />
+-  <section className="admin-card"><h2>Enforced account policy</h2><dl className="admin-definition-list"><dt>Your role</dt><dd>{actor.role}</dd><dt>Two-factor authentication</dt><dd>{user?.twoFactorEnabled?'Enabled — required on every admin request':'Setup required'}</dd><dt>Admin session lifetime</dt><dd>12 hours absolute; public account session settings are unchanged.</dd><dt>Optional IP allowlist</dt><dd>{allowlist.length?`Enabled (${allowlist.length} configured network${allowlist.length===1?'':'s'})`:'Disabled — ADMIN_IP_ALLOWLIST is unset.'}</dd><dt>Verified owners with 2FA</dt><dd>{Number(owners.secured)} of {Number(owners.total)}</dd></dl><p>Administrator accounts cannot disable 2FA through the account endpoint. An owner account must never be left with password-only panel access. Configure optional networks as comma-separated IPv4/IPv6 addresses or CIDRs in the deployment environment; this page deliberately does not reveal the configured addresses.</p></section>
+-  <section className="admin-card"><h2>Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}>{role}</th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role}>{ROLE_PERMISSIONS[role].includes(permission)?'Allowed':'—'}</td>)}</tr>)}</tbody></table></div></section>
++  <section className="admin-card"><h2>Enforced account policy</h2><dl className="admin-definition-list"><dt>Your role</dt><dd><AutoBadge>{actor.role}</AutoBadge></dd><dt>Two-factor authentication</dt><dd>{user?.twoFactorEnabled?'Enabled — required on every admin request':'Setup required'}</dd><dt>Admin session lifetime</dt><dd>12 hours absolute; public account session settings are unchanged.</dd><dt>Optional IP allowlist</dt><dd>{allowlist.length?`Enabled (${allowlist.length} configured network${allowlist.length===1?'':'s'})`:'Disabled — ADMIN_IP_ALLOWLIST is unset.'}</dd><dt>Verified owners with 2FA</dt><dd>{Number(owners.secured)} of {Number(owners.total)}</dd></dl><p>Administrator accounts cannot disable 2FA through the account endpoint. An owner account must never be left with password-only panel access. Configure optional networks as comma-separated IPv4/IPv6 addresses or CIDRs in the deployment environment; this page deliberately does not reveal the configured addresses.</p></section>
++  <section className="admin-card"><h2>Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}><AutoBadge>{role}</AutoBadge></th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role} className="admin-matrix-cell" data-allowed={ROLE_PERMISSIONS[role].includes(permission)?'yes':'no'}><span className="admin-visually-hidden">{ROLE_PERMISSIONS[role].includes(permission)?'Allowed':'—'}</span></td>)}</tr>)}</tbody></table></div></section>
+   <section className="admin-card"><h2>Known sign-in devices for your account</h2><p>Only an HMAC fingerprint is stored. A new IP/browser tuple generates a security email and an audit event; raw device details are not persisted in the device registry.</p><div className="admin-table-scroll"><table><thead><tr><th>Fingerprint (partial)</th><th>First seen (UTC)</th><th>Last seen (UTC)</th></tr></thead><tbody>{devices.map(device=><tr key={device.fingerprint_hash}><td><code>{String(device.fingerprint_hash).slice(0,16)}…</code></td><td>{new Date(Number(device.first_seen)).toISOString()}</td><td>{new Date(Number(device.last_seen)).toISOString()}</td></tr>)}{!devices.length&&<tr><td colSpan={3}>No device fingerprints recorded. The current network may not provide an IP or browser identifier.</td></tr>}</tbody></table></div></section>
+  </>;
+ }
+diff --git a/app/rstmcadmin/users/[id]/page.tsx b/app/rstmcadmin/users/[id]/page.tsx
+index af12d20..94adff9 100644
+--- a/app/rstmcadmin/users/[id]/page.tsx
++++ b/app/rstmcadmin/users/[id]/page.tsx
+@@ -7,6 +7,8 @@ import { USER_ACTIONS, type UserAction } from '@/lib/admin/users';
+ import { Drawer, DataTable, bytes } from '@/components/admin/ui';
+ import { UserActions } from '@/components/admin/actions';
+ import { PageHead } from '@/components/admin/page-head';
++import { Avatar } from '@/components/admin/avatar';
++import { AutoBadge } from '@/components/admin/badge';
+ 
+ export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
+   const actor = await requireAdminPage(); assertAdminPagePermission(actor,'users.read'); const { id } = await params;
+@@ -18,7 +20,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
+   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
+   else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
+   const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
+-  return <><PageHead breadcrumb="Control room / Account detail" title={user.name} intro={<>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</>} />
++  return <><PageHead breadcrumb="Control room / Account detail" title={user.name} avatar={<Avatar name={user.name} handle={user.username} email={user.email} seed={id} size={64} />} intro={<span className="admin-identity-meta">{user.email}<AutoBadge>{user.role}</AutoBadge>{user.username && <span className="admin-handle">@{user.username}</span>}<AutoBadge>{user.emailVerified ? 'Verified' : 'Unverified'}</AutoBadge>{user.deleted_at != null && <AutoBadge>In trash</AutoBadge>}</span>} />
+     <div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
+     <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
+     <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+diff --git a/app/rstmcadmin/users/page.tsx b/app/rstmcadmin/users/page.tsx
+index 3a77cf1..3b0f391 100644
+--- a/app/rstmcadmin/users/page.tsx
++++ b/app/rstmcadmin/users/page.tsx
+@@ -6,19 +6,23 @@ import { listUsers, userFilters } from '@/lib/admin/queries';
+ import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui';
+ import { ExportUsers } from '@/components/admin/actions';
+ import { PageHead } from '@/components/admin/page-head';
++import { Avatar } from '@/components/admin/avatar';
++import { AutoBadge } from '@/components/admin/badge';
+ 
+ export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+   const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
+   let filters;
+   try { filters = userFilters(await searchParams); }
+-  catch { return <section className="admin-card"><h1>Invalid filters</h1><p role="alert">Use a search up to 100 characters and a page size from 1 to 200.</p><Link className="admin-button" href={ADMIN_BASE_PATH + '/users'}>Reset filters</Link></section>; }
++  catch { return <section className="admin-card admin-state-card"><h1>Invalid filters</h1><p role="alert">Use a search up to 100 characters and a page size from 1 to 200.</p><Link className="admin-button" data-tone="ghost" href={ADMIN_BASE_PATH + '/users'}>Reset filters</Link></section>; }
+   const result = await listUsers(await getPool(), filters);
+   const pages = Math.max(1, Math.ceil(result.total / filters.limit));
+   const pageLink = (page: number) => ADMIN_BASE_PATH + '/users?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([k,v]) => [k,String(v)])), page: String(page) });
+-  return <><PageHead breadcrumb="Control room / People" title="Users & accounts" intro={<>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</>} />
+-    <SearchBar filters={filters} /><FilterChips filters={filters} /><ExportUsers filters={filters} />
++  // §10.5 — storage bar width is relative to the largest row on this page.
++  const peakStorage = Math.max(0, ...result.users.map(user => Number(user.storage_bytes) || 0));
++  return <><PageHead breadcrumb="Control room / People" title="Users & accounts" intro={<>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</>} actions={<ExportUsers filters={filters} />} />
++    <SearchBar filters={filters} /><FilterChips filters={filters} />
+     <DataTable caption={`Accounts · page ${filters.page} of ${pages}. CSV exports only this page (maximum 200).`} headings={['Account','Role','Email','Access','Storage']}>
+-      {result.users.map(user => <tr key={user.id}><td><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></td><td>{user.role}</td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</td><td>{bytes(user.storage_bytes)}</td></tr>)}
++      {result.users.map(user => <tr key={user.id}><td><div className="admin-cell-identity"><Avatar name={user.name} seed={user.id} size={28} /><div><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></div></div></td><td><AutoBadge>{user.role}</AutoBadge></td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td><AutoBadge>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</AutoBadge></td><td><span className="admin-meter-value">{bytes(user.storage_bytes)}</span><span className="admin-meter" aria-hidden="true"><span className="admin-meter-fill" style={{ width: peakStorage > 0 ? Math.max(2, Math.round((Number(user.storage_bytes) || 0) / peakStorage * 100)) + '%' : '0%' }} /></span></td></tr>)}
+       {!result.users.length && <tr><td colSpan={5}>No accounts match these filters.</td></tr>}
+     </DataTable><nav className="admin-pagination" aria-label="Users pagination">{filters.page > 1 ? <Link href={pageLink(filters.page-1)}>Previous</Link> : <span /> }<span>Page {filters.page} of {pages}</span>{filters.page < pages && <Link href={pageLink(filters.page+1)}>Next</Link>}</nav>
+   </>;
+diff --git a/components/admin/actions.tsx b/components/admin/actions.tsx
+index 588a9f5..08ec63e 100644
+--- a/components/admin/actions.tsx
++++ b/components/admin/actions.tsx
+@@ -27,9 +27,9 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+     finally { setPending(false); }
+   }
+   return <div className="admin-actions">
+-    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
++    <p className="admin-note">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+     <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={dangerTone(action)} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+-    {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
++    {!actions.length && <p className="admin-note">This account is protected. No actions are available for your role.</p>}
+     {!selected && message && <p role="status">{message}</p>}
+     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
+       <form onSubmit={submit} className="admin-confirm">
+diff --git a/components/admin/audit.tsx b/components/admin/audit.tsx
+index 058d220..a6f0be7 100644
+--- a/components/admin/audit.tsx
++++ b/components/admin/audit.tsx
+@@ -1,6 +1,8 @@
+ 'use client';
+ import {useState} from 'react';
+ import type {AuditFilters,AuditRow} from '@/lib/admin/audit';
++import { Avatar } from './avatar';
++import { Badge, auditTone } from './badge';
+ 
+ export function AuditTools({filters}:{filters:AuditFilters}){
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+@@ -27,7 +29,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
+ function pretty(value:string|null){if(!value)return '—';try{return JSON.stringify(JSON.parse(value),null,2);}catch{return value;}}
+ export function AuditTable({rows}:{rows:AuditRow[]}){
+  return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Read-only administrator audit log"><table><caption>Newest first · read-only historical records</caption><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th><th>Before / after</th><th>Network / client</th></tr></thead><tbody>
+-  {rows.map(row=><tr key={row.id}><td>{new Date(Number(row.created_at)).toISOString()}</td><td>{row.actor_email}<small>{row.actor_id}</small></td><td><code>{row.action}</code></td><td>{row.target_type||'—'}<small>{row.target_id||'—'}</small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
++  {rows.map(row=><tr key={row.id}><td className="admin-cell-time">{new Date(Number(row.created_at)).toISOString()}</td><td><div className="admin-cell-identity"><Avatar name={row.actor_email} email={row.actor_email} seed={String(row.actor_id||row.actor_email)} size={28} /><div>{row.actor_email}<small>{row.actor_id}</small></div></div></td><td><Badge tone={auditTone(row.action)} className="admin-badge-mono">{row.action}</Badge></td><td>{row.target_type||'—'}<small><code>{row.target_id||'—'}</code></small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
+   {!rows.length&&<tr><td colSpan={7}>No historical audit rows match these filters.</td></tr>}
+  </tbody></table></div>;
+ }
+diff --git a/components/admin/badge.tsx b/components/admin/badge.tsx
+index a3a283f..11ca1a5 100644
+--- a/components/admin/badge.tsx
++++ b/components/admin/badge.tsx
+@@ -68,3 +68,12 @@ const DANGER_OPERATION = /\b(delete|purge|ban|trash|revoke|hide)\b/i;
+ export function dangerTone(operation: string): 'danger' | undefined {
+   return DANGER_OPERATION.test(operation) ? 'danger' : undefined;
+ }
++
++/** Audit action tone (§9.6). Derived from the action name already shown. */
++export function auditTone(action: string): Tone {
++  const value = String(action || '').toLowerCase();
++  if (/\.(delete|purge|ban|revoke|trash)\b/.test(value)) return 'danger';
++  if (/\.(hide|quarantine|expire|demote)\b/.test(value)) return 'warning';
++  if (/\.(edit|update|promote|create|grant)\b/.test(value)) return 'primary';
++  return 'neutral';
++}
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+index 3bf2468..7ccfb4c 100644
+--- a/components/admin/content.tsx
++++ b/components/admin/content.tsx
+@@ -10,7 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { ContentResource } from '@/lib/admin/content';
+ import type { Settings, AdminRole } from '@/lib/admin/config';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
+-import { dangerTone } from './badge';
++import { dangerTone, AutoBadge } from './badge';
+ 
+ async function send(body:Record<string,unknown>) {
+   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+@@ -39,10 +39,12 @@ export function ContentTable({items,resource,trash,role}:{items:Record<string,un
+   const [selected,setSelected]=useState<string[]>([]);
+   const targetNames=Object.fromEntries(items.map(item=>[String(item.id),contentConfirmationName(item)]));
+   const operations=role==='moderator'?['hide','unhide']:trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete'];
+-  return <><p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
+-    <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
++  return <><div className="admin-bulk-bar">
++      <p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
++      <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
++    </div>
+     <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
+-      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
++      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small className="admin-cell-meta"><AutoBadge>{String(row.kind||'comment')}</AutoBadge><code>{String(row.id)}</code></small></td><td><span className="admin-handle">@{String(row.username)}</span></td><td><span className="admin-cell-meta"><AutoBadge>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}</AutoBadge>{row.pinned_at?<AutoBadge>Pinned</AutoBadge>:null}</span></td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
+       {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}
+     </tbody></table></div>
+   </>;
+diff --git a/components/admin/icon-tile.tsx b/components/admin/icon-tile.tsx
+new file mode 100644
+index 0000000..97b97c8
+--- /dev/null
++++ b/components/admin/icon-tile.tsx
+@@ -0,0 +1,21 @@
++/** Icon tile used by stat cards, section cards and empty states (§9.1, §9.10).
++ *
++ * VISUAL ONLY. Every icon here is decorative and marked aria-hidden (§11); the
++ * meaning always stays in the adjacent text, which is never modified.
++ */
++
++import {
++  Activity, Download, Flag, HardDrive, LayoutGrid, ServerCog, Users, UserPlus,
++} from 'lucide-react';
++
++const TILE_ICONS = { Users, UserPlus, Activity, LayoutGrid, Flag, HardDrive, Download, ServerCog } as const;
++
++export type TileIcon = keyof typeof TILE_ICONS;
++export type TileTone = 'blue' | 'green' | 'purple' | 'amber' | 'red' | 'cyan';
++
++export function IconTile({ icon, tone = 'blue', size = 40 }: { icon: TileIcon; tone?: TileTone; size?: 40 | 48 }) {
++  const Glyph = TILE_ICONS[icon];
++  return <span className="admin-icon-tile" data-tone={tone} data-size={size} aria-hidden="true">
++    <Glyph size={size === 48 ? 22 : 20} strokeWidth={2} />
++  </span>;
++}
+diff --git a/components/admin/moderation.tsx b/components/admin/moderation.tsx
+index 45c411f..48dd565 100644
+--- a/components/admin/moderation.tsx
++++ b/components/admin/moderation.tsx
+@@ -3,6 +3,7 @@ import {useState} from 'react';
+ import Link from 'next/link';
+ import type {ModerationConfig} from '@/lib/moderation-policy';
+ import type {AdminRole} from '@/lib/admin/config';
++import { Badge, AutoBadge } from './badge';
+ type Report={id:string;reporter_id:string;reporter_username:string|null;target_type:string;target_id:string;reason:string;details:string;created_at:number;status:string;assigned_to:string|null;assignee_username:string|null;notes:string|null;action_taken:string|null;action_target_type:string|null;action_target_id:string|null;target_username:string|null;target_author_id:string|null;target_email:string|null};
+ type Queue={filter:{status:string;reason:string;target:string;q:string;page:number};total:number;items:Report[];counts:Record<string,number>};
+ type Rate={page:number;total:number;hits:number;items:{client:string;path:string;count:number;lastRequest:number;clientToken:string}[]};
+@@ -37,7 +38,7 @@ export function ModerationConsole({actorId,role,initialReports,initialConfig,ini
+ }
+ function ReportCard({report,busy,actorId,role,onAssign,onSaveNotes,onAction,onLoadAccount}:{report:Report;busy:boolean;actorId:string;role:AdminRole;onAssign:()=>void;onSaveNotes:(notes:string)=>void;onAction:(action:string,reason:string,confirmation?:string)=>void;onLoadAccount:(id:string)=>void}){
+  const [notes,setNotes]=useState(report.notes||''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(''),[banConfirm,setBanConfirm]=useState('');const target=report.target_type==='post'?report.target_author_id||report.target_id:report.target_id;const resolved=['actioned','dismissed'].includes(report.status);
+- return <article className="moderation-report"><header><div><strong>{report.reason.replaceAll('_',' ')}</strong> · {report.status} · {report.target_type}<p>From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p>Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
++ return <article className="moderation-report"><header><div><span className="admin-cell-meta"><Badge tone="neutral">{report.reason.replaceAll('_',' ')}</Badge><AutoBadge>{report.status}</AutoBadge><AutoBadge>{report.target_type}</AutoBadge></span><p>From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p>Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
+  <label>Moderator notes<textarea rows={3} maxLength={2000} value={notes} disabled={resolved} onChange={e=>setNotes(e.target.value)}/></label><button className="admin-button" disabled={resolved||busy} onClick={()=>onSaveNotes(notes)}>Save notes</button>
+  {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||confirm!==report.id} onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
+  </article>;
+diff --git a/components/admin/page-head.tsx b/components/admin/page-head.tsx
+index c449d13..1a47c94 100644
+--- a/components/admin/page-head.tsx
++++ b/components/admin/page-head.tsx
+@@ -7,14 +7,32 @@
+ 
+ import type { ReactNode } from 'react';
+ 
+-export function PageHead({ breadcrumb, title, intro, actions }: {
++/** Decorative hex lattice for the overview banner (§10.2). Inline, no asset. */
++function HexPattern() {
++  return <svg className="admin-banner-hex" viewBox="0 0 240 120" aria-hidden="true" focusable="false">
++    <defs>
++      <pattern id="adm-hex" width="30" height="26" patternUnits="userSpaceOnUse">
++        <path d="M15 1 28 8.5v15L15 31 2 23.5v-15z" fill="none" stroke="currentColor" strokeWidth="1.25" />
++      </pattern>
++    </defs>
++    <rect width="240" height="120" fill="url(#adm-hex)" />
++  </svg>;
++}
++
++export function PageHead({ breadcrumb, title, intro, actions, banner, avatar }: {
+   breadcrumb: ReactNode;
+   title: ReactNode;
+   intro?: ReactNode;
+   actions?: ReactNode;
++  /** Overview only: gradient banner card with ambient glow and hex corner. */
++  banner?: boolean;
++  /** Detail pages: decorative 64px avatar beside the title (§9.3). */
++  avatar?: ReactNode;
+ }) {
+-  return <header className="admin-page-head">
++  return <header className={banner ? 'admin-page-head admin-page-head-banner' : 'admin-page-head'}>
++    {banner && <HexPattern />}
+     <div className="admin-page-head-row">
++      {avatar}
+       <div className="admin-page-head-title">
+         <h1>{title}</h1>
+         <p className="admin-eyebrow">{breadcrumb}</p>
+diff --git a/components/admin/ui.tsx b/components/admin/ui.tsx
+index 0066175..fa2dfc2 100644
+--- a/components/admin/ui.tsx
++++ b/components/admin/ui.tsx
+@@ -2,9 +2,10 @@ import Link from 'next/link';
+ import type { ReactNode } from 'react';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { UserFilters } from '@/lib/admin/queries';
++import { IconTile, type TileIcon, type TileTone } from './icon-tile';
+ 
+-export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+-  return <article className="admin-stat"><p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
++export function StatCard({ label, value, hint, icon, tone }: { label: string; value: string; hint?: string; icon?: TileIcon; tone?: TileTone }) {
++  return <article className="admin-stat">{icon && <IconTile icon={icon} tone={tone} />}<p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
+ }
+ export function DataTable({ caption, headings, children }: { caption: string; headings: string[]; children: ReactNode }) {
+   return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label={caption}><table><caption>{caption}</caption><thead><tr>{headings.map(heading => <th scope="col" key={heading}>{heading}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 884838a..21ff460 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -650,7 +650,7 @@ Baseline: `f6e3c37ee9c5f82c5e337c3a0e9c7f79a9b548a3` (`main`)
+ | --- | --- | --- | --- |
+ | 1 | Foundation — tokens, typography, app shell | Done locally; all four gates green | `patches/phase-1-foundation.patch` |
+ | 2 | Primitives — reusable admin control styling | Done locally; all four gates green | `patches/phase-2-primitives.patch` |
+-| 3 | Pages, polish and final QA | Not started | `patches/phase-3-pages-polish-qa.patch` |
++| 3 | Pages, polish and final QA | Done locally; all four gates green | `patches/phase-3-pages-polish-qa.patch` |
+ 
+ ### Baseline measured before any redesign change
+ 
+@@ -861,3 +861,90 @@ neutral, `Clear` ghost).
+ Patch: `patches/phase-2-primitives.patch` (identical copy at
+ `patches/phase-2-primitives.patch.txt`), verified with `git apply --check`
+ against a clean extraction of the Phase 1 commit `3f40375`.
++
++## Phase 3 — Pages + polish + QA
++
++Guide sections **§9.1–§9.13**, the remaining **§10** designer touches, the
++remaining **§11** motion and accessibility items, and the **§13** checklist.
++Applied in the order the guide prescribes.
++
++New layer `app/rstmcadmin/admin-pages.css`, imported last by `admin.css`.
++
++### Page recipes
++
++| § | Page | Applied |
++| --- | --- | --- |
++| 9.1 | Overview | Gradient banner card with ambient glow and an inline hex lattice (hidden under 640px); the six stat cards keep their labels, order and captions and gain 40px icon tiles (Users/UserPlus/Activity/LayoutGrid/Flag/HardDrive in blue/green/purple/amber/red/cyan); People & accounts and System status become feature cards with a 48px tile, and System status renders label/value rows with ok/warning status dots |
++| 9.2 | Users list | `Export this page (CSV)` moved into the page head, avatar + name identity cell, role and access badges, and a §10.5 storage meter sized against the largest row on the page. The note was already the table caption |
++| 9.3 | User detail | 64px avatar in the page head, email/role/handle/verified/trash as badges, and both muted notes promoted to the info alert style |
++| 9.4 | Content | Four-column filter grid from 1024px, a bulk bar with the count left and actions right, kind badge + id in `code`, status badges, 96×96 contained media previews in bordered rows that stack under 640px, and five engagement tiles |
++| 9.5 | Settings pages | Card per group, responsive field grids, textareas spanning both columns, 44px colour swatches, one row per feature flag, and two-column label rows |
++| 9.6 | Audit | Muted tabular timestamps, actor avatar 28 + email, the action as a monospace badge toned by `auditTone()`, target id in `code`, snapshots already collapsed in `details` |
++| 9.7 | Safety | Reason as a neutral badge, status and target type as meaning-toned badges |
++| 9.8 | Security & roles | Role badges, and the permission matrix as a green check or a muted dash with the original `Allowed` / `—` text kept for screen readers via `.admin-visually-hidden` |
++| 9.9 | Analytics | Bars with 6px rounded tops in `--adm-accent`, accent-hover on hover, dashed baseline, 12px tabular axis labels, funnel bar and ranked lists restyled |
++| 9.10 | Exports | Two-column field grid from 768px |
++| 9.11 | System tools | Key/value environment rows, applied/pending migration chips, and any card containing a destructive control gets a `--adm-danger` 40% border |
++| 9.12 | Operator guide | 760px centred article column with the prescribed prose scale |
++| 9.13 | Errors inside admin | The two invalid-filter cards become centred 480px state cards with a ghost action |
++
++### Remaining §10 and §11
++
++Ambient glow, hex pattern, storage meter, tabular numerals, scroll shadows on
++table containers, and the reduced-motion guard for the new chart transition.
++The active nav bar, glass page head, deterministic avatar tints, skip link,
++selection colour, custom scrollbars and press feedback landed in Phase 1.
++
++### Validation
++
++| Gate | Result |
++| --- | --- |
++| `npm run lint` | 0 errors, 7 warnings (all pre-existing, unchanged from baseline) |
++| `npm run typecheck` | pass |
++| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped |
++| `npm run build` | pass; all 17 `/rstmcadmin*` routes still dynamic |
++
++### §13 visible-text comparison
++
++The pre-redesign commit `f6e3c37e` was checked out into a second worktree and
++served on port 3001 against a copy of the same PGlite fixture, while the
++redesigned branch served port 3000. Every one of the 15 admin routes was
++fetched from both, the shell markup stripped, and the word multisets compared.
++
++**Result: zero words removed on any route.** The only additions are the
++Phase 1 shell elements — the skip link, the `RSTMC.` wordmark, the five nav
++group headings and the account card. Counts (old → new): Overview 145→161,
++Users 142→165, Content 420→436, Safety 101→117, Media 332→348, Audit 102→118,
++Analytics 171→187, Security 341→357, System 250→266, Communications 103→119,
++Appearance 640→656, Features 240→256, Labels 679→695, Exports 90→106,
++Operator guide 480→496.
++
++The fixture assertion in `scripts/admin-check.mts` that matches
++`A pulse on your community.` and `Applied migrations: … 1, 2, … 12` still
++passes against the restructured System status rows.
++
++### Checklist items that could not be run here
++
++The sandbox has no browser binary and no package repository (`libnss3` and
++`libnspr4` are unavailable, `deb.debian.org` and `fonts.googleapis.com` are
++unreachable), so Playwright/Chromium cannot start. The screenshot matrix at
++320/390/768/1024/1440px in both themes, and the interactive drawer, dialog,
++focus-return, keyboard-traversal and contrast passes, were therefore verified
++by server-rendered HTML inspection and by reading the compiled stylesheet
++rather than from live screenshots. No screenshot is claimed to have been
++taken. The structural guarantees behind those checks are in the CSS: the
++sidebar drawer is driven by `data-open` with an Escape handler and focus trap
++in `admin-nav.tsx`, dialogs become bottom sheets below 640px, `min-width: 0`
++and `overflow-wrap: anywhere` are applied on every grid and table cell, and
++`tbody tr:last-child td { border-bottom: 0 }` with `overflow-y: visible`
++keeps the final table row fully visible.
++
++### Prohibited paths
++
++`git diff f6e3c37e..HEAD --name-only` contains no entry under `lib/`,
++`app/api/`, any migrations directory, `package.json`, `package-lock.json`,
++`app/globals.css` or `components/social/**`.
++
++Patch: `patches/phase-3-pages-polish-qa.patch` (identical copy at
++`patches/phase-3-pages-polish-qa.patch.txt`), verified with `git apply --check`
++against a clean extraction of the Phase 2 commit `c7a5008`.

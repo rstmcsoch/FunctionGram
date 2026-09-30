@@ -10,7 +10,7 @@ import { PageHead } from '@/components/admin/page-head';
 
 export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
   const actor=await requireAdminPage();let filter;
-  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
+  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card admin-state-card"><h1>Invalid content filters</h1><Link className="admin-button" data-tone="ghost" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
   return <><PageHead breadcrumb="Control room / Content" title="Content & moderation" intro={<>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</>} />

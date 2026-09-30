@@ -7,6 +7,8 @@ import { USER_ACTIONS, type UserAction } from '@/lib/admin/users';
 import { Drawer, DataTable, bytes } from '@/components/admin/ui';
 import { UserActions } from '@/components/admin/actions';
 import { PageHead } from '@/components/admin/page-head';
+import { Avatar } from '@/components/admin/avatar';
+import { AutoBadge } from '@/components/admin/badge';
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireAdminPage(); assertAdminPagePermission(actor,'users.read'); const { id } = await params;
@@ -18,7 +20,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
   else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
   const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
-  return <><PageHead breadcrumb="Control room / Account detail" title={user.name} intro={<>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</>} />
+  return <><PageHead breadcrumb="Control room / Account detail" title={user.name} avatar={<Avatar name={user.name} handle={user.username} email={user.email} seed={id} size={64} />} intro={<span className="admin-identity-meta">{user.email}<AutoBadge>{user.role}</AutoBadge>{user.username && <span className="admin-handle">@{user.username}</span>}<AutoBadge>{user.emailVerified ? 'Verified' : 'Unverified'}</AutoBadge>{user.deleted_at != null && <AutoBadge>In trash</AutoBadge>}</span>} />
     <div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
     <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
     <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>

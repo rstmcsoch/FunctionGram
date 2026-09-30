@@ -10,7 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import type { ContentResource } from '@/lib/admin/content';
 import type { Settings, AdminRole } from '@/lib/admin/config';
 import { contentConfirmationName } from '@/lib/admin/content-label';
-import { dangerTone } from './badge';
+import { dangerTone, AutoBadge } from './badge';
 
 async function send(body:Record<string,unknown>) {
   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -39,10 +39,12 @@ export function ContentTable({items,resource,trash,role}:{items:Record<string,un
   const [selected,setSelected]=useState<string[]>([]);
   const targetNames=Object.fromEntries(items.map(item=>[String(item.id),contentConfirmationName(item)]));
   const operations=role==='moderator'?['hide','unhide']:trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete'];
-  return <><p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
-    <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
+  return <><div className="admin-bulk-bar">
+      <p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
+      <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
+    </div>
     <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
-      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
+      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small className="admin-cell-meta"><AutoBadge>{String(row.kind||'comment')}</AutoBadge><code>{String(row.id)}</code></small></td><td><span className="admin-handle">@{String(row.username)}</span></td><td><span className="admin-cell-meta"><AutoBadge>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}</AutoBadge>{row.pinned_at?<AutoBadge>Pinned</AutoBadge>:null}</span></td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
       {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}
     </tbody></table></div>
   </>;
