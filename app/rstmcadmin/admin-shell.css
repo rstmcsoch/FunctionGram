@@ -1,0 +1,546 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — application shell
+   Redesign guide §6 (shell), §7 (responsive), §10.3/10.4 (active bar, glass).
+
+   VISUAL ONLY. The grid layout is scoped to `.admin-shell.admin-layout` so the
+   standalone two-factor screens, which reuse `.admin-shell` for tokens only,
+   keep their centred single-column presentation.
+   ========================================================================== */
+
+.admin-shell.admin-layout {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  padding: 0;
+  background: var(--adm-bg);
+  color: var(--adm-text);
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   Sidebar (§6.2)
+   ========================================================================== */
+
+.admin-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s2);
+  height: 100dvh;
+  min-width: 0;
+  padding: var(--adm-s4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--adm-bg);
+}
+
+/* Brand row. */
+.admin-brand {
+  display: flex;
+  align-items: center;
+  height: 64px;
+  padding: var(--adm-s2) var(--adm-s3);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--adm-text);
+  white-space: nowrap;
+}
+
+.admin-brand span {
+  color: var(--adm-brand-dot);
+}
+
+/* Navigation. */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s3);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.admin-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-nav-group-label {
+  padding: var(--adm-s4) var(--adm-s3) 6px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--adm-text-3);
+}
+
+.admin-nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--adm-s3);
+  min-height: 44px;
+  padding: 0 var(--adm-s3);
+  border-radius: var(--adm-r-control);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--adm-text-2);
+  text-decoration: none;
+  transition: background-color var(--adm-dur) ease-out, color var(--adm-dur) ease-out;
+}
+
+.admin-nav-link svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--adm-text-3);
+  transition: color var(--adm-dur) ease-out;
+}
+
+.admin-nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-nav-link:hover {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+  text-decoration: none;
+}
+
+.admin-nav-link:hover svg {
+  color: var(--adm-text-2);
+}
+
+.admin-nav-link[aria-current="page"] {
+  background: var(--adm-active-bg);
+  color: var(--adm-accent-text);
+  font-weight: 600;
+}
+
+.admin-nav-link[aria-current="page"] svg {
+  color: var(--adm-accent-text);
+}
+
+/* §10.3 — 3x18 accent bar on the active item. */
+.admin-nav-link[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: 2px;
+  background: var(--adm-accent);
+}
+
+.admin-nav-external {
+  flex: none;
+  margin-left: auto;
+}
+
+/* Account card (§6.2) — display only, never interactive. */
+.admin-account {
+  display: flex;
+  align-items: center;
+  gap: var(--adm-s3);
+  margin-top: auto;
+  padding: var(--adm-s3);
+  border: 1px solid var(--adm-border-subtle);
+  border-radius: 12px;
+  background: var(--adm-muted-surface);
+}
+
+.admin-account-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-account-email {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--adm-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Panel (§6.1)
+   ========================================================================== */
+
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: var(--adm-s4) var(--adm-s4) var(--adm-s4) 0;
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-panel);
+  background: var(--adm-panel);
+  min-height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Main area (§6.4). */
+.admin-shell .admin-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s5);
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: var(--adm-s6) var(--adm-s7) var(--adm-s8);
+  min-width: 0;
+}
+
+/* Page head (§6.3). Bleeds out of the main padding so the sticky glass bar
+   spans the panel, while the content below stays centred. */
+.admin-page-head {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s2);
+  margin: calc(var(--adm-s6) * -1) calc(var(--adm-s7) * -1) 0;
+  padding: var(--adm-s6) var(--adm-s7) var(--adm-s4);
+  border-bottom: 1px solid var(--adm-border-subtle);
+  background: color-mix(in srgb, var(--adm-panel) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Browsers without color-mix keep a solid, readable bar. */
+@supports not (background: color-mix(in srgb, red 85%, transparent)) {
+  .admin-page-head {
+    background: var(--adm-panel);
+  }
+}
+
+.admin-page-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--adm-s3) var(--adm-s4);
+}
+
+.admin-page-head-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-page-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--adm-s2);
+}
+
+.admin-page-intro {
+  max-width: 68ch;
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--adm-text-2);
+}
+
+/* Title and breadcrumb share one baseline row on desktop. */
+@media (min-width: 1024px) {
+  .admin-page-head-title {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--adm-s4);
+  }
+}
+
+/* Footer (§6.5). */
+.admin-footer {
+  padding: var(--adm-s5) var(--adm-s7);
+  border-top: 1px solid var(--adm-border-subtle);
+}
+
+.admin-footer p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--adm-text-3);
+}
+
+/* ==========================================================================
+   Mobile top bar and drawer (§7) — hidden at >= 768px
+   ========================================================================== */
+
+.admin-topbar,
+.admin-backdrop {
+  display: none;
+}
+
+/* ==========================================================================
+   Responsive (§7)
+   ========================================================================== */
+
+/* 1024–1279 — narrower labelled sidebar. */
+@media (max-width: 1279px) {
+  .admin-shell.admin-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+
+/* 768–1023 — 76px icon rail; labels stay in the DOM but are hidden. */
+@media (max-width: 1023px) {
+  .admin-shell.admin-layout {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  .admin-sidebar {
+    padding: var(--adm-s3) var(--adm-s2);
+    align-items: stretch;
+  }
+
+  .admin-brand {
+    justify-content: center;
+    padding: var(--adm-s2) 0;
+    font-size: 18px;
+  }
+
+  .admin-nav-link {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .admin-nav-label,
+  .admin-nav-external {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Group labels become thin dividers. */
+  .admin-nav-group-label {
+    height: 1px;
+    padding: 0;
+    margin: var(--adm-s3) var(--adm-s2) var(--adm-s2);
+    overflow: hidden;
+    text-indent: -999em;
+    background: var(--adm-border-subtle);
+  }
+
+  .admin-account {
+    justify-content: center;
+    padding: var(--adm-s2);
+  }
+
+  .admin-account-body {
+    display: none;
+  }
+
+  /* Panel is full-bleed below 1024 (§6.1). */
+  .admin-panel {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    min-height: 100dvh;
+    max-height: 100dvh;
+  }
+}
+
+/* < 768 — sticky top bar plus slide-in drawer. */
+@media (max-width: 767px) {
+  .admin-shell.admin-layout {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .admin-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: var(--adm-s2);
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) var(--adm-s2) 0;
+    border-bottom: 1px solid var(--adm-border);
+    background: var(--adm-bg);
+  }
+
+  .admin-topbar-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: var(--adm-r-control);
+    background: transparent;
+    color: var(--adm-text);
+    cursor: pointer;
+  }
+
+  .admin-topbar-button:hover {
+    background: var(--adm-hover);
+  }
+
+  .admin-topbar .admin-brand {
+    height: auto;
+    padding: 0 var(--adm-s1);
+    font-size: 20px;
+  }
+
+  /* The sidebar becomes the drawer. Same nav, never duplicated in the DOM. */
+  .admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(296px, 86vw);
+    height: 100dvh;
+    padding: var(--adm-s4);
+    border-right: 1px solid var(--adm-border);
+    background: var(--adm-bg);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform var(--adm-dur-lg) var(--adm-ease), visibility 0s linear var(--adm-dur-lg);
+  }
+
+  .admin-sidebar[data-open="true"] {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--adm-dur-lg) var(--adm-ease), visibility 0s;
+  }
+
+  .admin-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: block;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, .55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--adm-dur-lg) var(--adm-ease), visibility 0s linear var(--adm-dur-lg);
+  }
+
+  .admin-backdrop[data-open="true"] {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity var(--adm-dur-lg) var(--adm-ease), visibility 0s;
+  }
+
+  /* Rail overrides from the 1023 breakpoint are reverted inside the drawer. */
+  .admin-sidebar .admin-brand {
+    justify-content: flex-start;
+    height: 56px;
+    padding: var(--adm-s2) var(--adm-s3);
+    font-size: 22px;
+  }
+
+  .admin-nav-link {
+    justify-content: flex-start;
+    padding: 0 var(--adm-s3);
+  }
+
+  .admin-nav-label,
+  .admin-nav-external {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+  }
+
+  .admin-nav-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .admin-nav-external {
+    margin-left: auto;
+  }
+
+  .admin-nav-group-label {
+    height: auto;
+    padding: var(--adm-s4) var(--adm-s3) 6px;
+    margin: 0;
+    overflow: visible;
+    text-indent: 0;
+    background: none;
+  }
+
+  .admin-account {
+    justify-content: flex-start;
+    padding: var(--adm-s3);
+  }
+
+  .admin-account-body {
+    display: flex;
+  }
+
+  .admin-panel {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .admin-shell .admin-main {
+    padding: var(--adm-s4) var(--adm-s4) var(--adm-s6);
+    gap: var(--adm-s4);
+  }
+
+  /* Not sticky on mobile — it would eat the screen (§6.3). */
+  .admin-page-head {
+    position: static;
+    margin: calc(var(--adm-s4) * -1) calc(var(--adm-s4) * -1) 0;
+    padding: var(--adm-s4) var(--adm-s4) var(--adm-s3);
+    background: var(--adm-panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .admin-footer {
+    padding: var(--adm-s5) var(--adm-s4);
+  }
+}
+
+/* Page-level sideways scroll is never acceptable (§1.4, §7). */
+.admin-shell.admin-layout,
+.admin-panel,
+.admin-shell .admin-main {
+  max-width: 100%;
+}
+
+.admin-shell .admin-main > * {
+  min-width: 0;
+}

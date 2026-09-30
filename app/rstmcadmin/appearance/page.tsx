@@ -3,7 +3,8 @@ import {readSettings} from '@/lib/admin/settings';
 import {appearanceFromSettings} from '@/lib/appearance';
 import {localDevDatabase} from '@/lib/postgres';
 import {AppearanceEditor} from '@/components/admin/appearance';
+import { PageHead } from '@/components/admin/page-head';
 export default async function AppearancePage(){
  const actor=await requireAdminPage();assertAdminPagePermission(actor,'settings.manage');const value=appearanceFromSettings(await readSettings());
- return <><p className="admin-eyebrow">Control room / Appearance</p><h1>Make this space yours</h1><p>Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default.</p><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
+ return <><PageHead breadcrumb="Control room / Appearance" title="Make this space yours" intro="Branding, theme, banners, footer and navigation. Save publishes the complete configuration in one audited transaction. Changes apply on the next page load; your personal theme choice takes precedence over the site default." /><AppearanceEditor initial={value} localUploads={localDevDatabase()}/></>;
 }

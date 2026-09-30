@@ -1,0 +1,133 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — reusable primitives
+   Phase 1 seeds the two primitives the shell account card needs (§8.5 badges,
+   §8.10 avatars). Later phases extend this file with the remaining controls.
+
+   VISUAL ONLY, scoped to `.admin-shell` (and the dialog portal, which renders
+   outside the shell subtree).
+   ========================================================================== */
+
+/* ==========================================================================
+   Avatars (§8.10)
+   ========================================================================== */
+
+.admin-shell .admin-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--adm-r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: .01em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.admin-shell .admin-avatar[data-size="28"] {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.admin-shell .admin-avatar[data-size="40"] {
+  width: 40px;
+  height: 40px;
+}
+
+.admin-shell .admin-avatar[data-size="64"] {
+  width: 64px;
+  height: 64px;
+  font-size: 20px;
+}
+
+/* Six deterministic tints: background at 16%, text at the readable variant. */
+.admin-shell .admin-avatar[data-tint="blue"] {
+  background: rgba(27, 132, 255, .16);
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-avatar[data-tint="green"] {
+  background: rgba(23, 198, 83, .16);
+  color: var(--adm-success-text);
+}
+
+.admin-shell .admin-avatar[data-tint="purple"] {
+  background: rgba(114, 57, 234, .16);
+  color: var(--adm-purple-text);
+}
+
+.admin-shell .admin-avatar[data-tint="amber"] {
+  background: rgba(246, 177, 0, .16);
+  color: var(--adm-warning-text);
+}
+
+.admin-shell .admin-avatar[data-tint="red"] {
+  background: rgba(248, 40, 90, .16);
+  color: var(--adm-danger-text);
+}
+
+.admin-shell .admin-avatar[data-tint="cyan"] {
+  background: rgba(6, 182, 212, .16);
+  color: var(--adm-cyan-text);
+}
+
+/* ==========================================================================
+   Badges (§8.5)
+   ========================================================================== */
+
+.admin-shell .admin-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--adm-r-pill);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.admin-shell .admin-badge-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--adm-r-pill);
+  background: currentColor;
+}
+
+.admin-shell .admin-badge[data-tone="neutral"] {
+  background: var(--adm-muted-surface);
+  color: var(--adm-text-2);
+  box-shadow: inset 0 0 0 1px var(--adm-border-subtle);
+}
+
+.admin-shell .admin-badge[data-tone="primary"] {
+  background: var(--adm-accent-soft);
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-badge[data-tone="purple"] {
+  background: rgba(114, 57, 234, .14);
+  color: var(--adm-purple-text);
+}
+
+.admin-shell .admin-badge[data-tone="warning"] {
+  background: rgba(246, 177, 0, .14);
+  color: var(--adm-warning-text);
+}
+
+.admin-shell .admin-badge[data-tone="success"] {
+  background: rgba(23, 198, 83, .14);
+  color: var(--adm-success-text);
+}
+
+.admin-shell .admin-badge[data-tone="danger"] {
+  background: rgba(248, 40, 90, .14);
+  color: var(--adm-danger-text);
+}

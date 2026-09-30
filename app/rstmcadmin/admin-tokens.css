@@ -1,0 +1,343 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — design tokens and typography
+   Redesign guide §4 (tokens), §5 (typography), §10 (touches), §11 (motion/a11y).
+
+   VISUAL ONLY. Everything is scoped to `.admin-shell`; no public-site token,
+   `app/globals.css` value or component behaviour is touched.
+
+   Theme switching mirrors the selectors the app already emits from
+   `appearanceCss()` in `lib/appearance.ts`:
+     html:root{...}                       -> light
+     html:root[data-theme="dark"]{...}    -> explicit dark
+     @media(prefers-color-scheme:dark){html:root:not([data-theme]){...}}
+   A `.dark` class is honoured too, in case a later theme provider sets one.
+   ========================================================================== */
+
+.admin-shell {
+  /* ---- Accent. Change ONLY this block to re-brand (brand pink = #eb456e) -- */
+  --adm-accent: #1b84ff;
+  --adm-accent-hover: #0f6fe0;
+  --adm-accent-soft: rgba(27, 132, 255, .14);
+  --adm-on-accent: #fff;
+
+  /* ---- Status tones ---------------------------------------------------- */
+  --adm-success: #17c653;
+  --adm-warning: #f6b100;
+  --adm-danger: #f8285a;
+  --adm-purple: #7239ea;
+  --adm-cyan: #06b6d4;
+
+  /* ---- Shape ----------------------------------------------------------- */
+  --adm-r-panel: 20px;
+  --adm-r-card: 14px;
+  --adm-r-control: 10px;
+  --adm-r-pill: 999px;
+
+  /* ---- Type -----------------------------------------------------------
+     Inter first, then a full system stack. The guide asks for `next/font`,
+     but the panel must stay readable and correctly proportioned when Inter
+     is unavailable, so every size below is tuned against this stack.       */
+  --adm-font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --adm-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --adm-ease: cubic-bezier(.2, .8, .2, 1);
+  --adm-dur: 150ms;
+  --adm-dur-lg: 240ms;
+
+  /* ---- Spacing scale (4px base) ---------------------------------------- */
+  --adm-s1: 4px;
+  --adm-s2: 8px;
+  --adm-s3: 12px;
+  --adm-s4: 16px;
+  --adm-s5: 20px;
+  --adm-s6: 24px;
+  --adm-s7: 28px;
+  --adm-s8: 32px;
+  --adm-s9: 48px;
+
+  /* The single remaining piece of brand pink: the wordmark dot (§6.2). */
+  --adm-brand-dot: #eb456e;
+}
+
+/* ---- LIGHT (base) -------------------------------------------------------- */
+.admin-shell {
+  color-scheme: light;
+  --adm-bg: #f3f4f6;
+  --adm-panel: #fff;
+  --adm-card: #fff;
+  --adm-muted-surface: #f7f8fa;
+  --adm-hover: #f1f3f6;
+  --adm-border: #e4e6eb;
+  --adm-border-subtle: #eceef2;
+  --adm-text: #15161a;
+  --adm-text-2: #5b606c;
+  --adm-text-3: #8a8f9b;
+  --adm-accent-text: #0f63d6;           /* passes AA on white */
+  --adm-active-bg: var(--adm-accent-soft);
+  --adm-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+  --adm-success-text: #0d8a3c;
+  --adm-warning-text: #a15c07;
+  --adm-danger-text: #d61f4c;
+  --adm-purple-text: #6234c7;
+  --adm-cyan-text: #0e7490;             /* companion to --adm-cyan (§9.1) */
+  --adm-dialog-shadow: 0 24px 64px rgba(16, 24, 40, .24);
+}
+
+/* ---- DARK (default look, matches the reference) -------------------------- */
+html[data-theme="dark"] .admin-shell,
+.dark .admin-shell {
+  color-scheme: dark;
+  --adm-bg: #0f0f12;                    /* page + sidebar */
+  --adm-panel: #08080a;                 /* main panel */
+  --adm-card: #0c0c0f;
+  --adm-muted-surface: #131317;         /* table header, chips, code */
+  --adm-hover: #17171c;
+  --adm-border: #222228;
+  --adm-border-subtle: #1a1a1f;
+  --adm-text: #f5f5f7;
+  --adm-text-2: #a1a1aa;                /* secondary */
+  --adm-text-3: #71717a;                /* hints */
+  --adm-accent-text: #4da3ff;           /* links + active nav text */
+  --adm-active-bg: #000;
+  --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  --adm-success-text: #3ddc84;
+  --adm-warning-text: #ffc933;
+  --adm-danger-text: #ff5c85;
+  --adm-purple-text: #a78bfa;
+  --adm-cyan-text: #45d0e8;
+  --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .admin-shell {
+    color-scheme: dark;
+    --adm-bg: #0f0f12;
+    --adm-panel: #08080a;
+    --adm-card: #0c0c0f;
+    --adm-muted-surface: #131317;
+    --adm-hover: #17171c;
+    --adm-border: #222228;
+    --adm-border-subtle: #1a1a1f;
+    --adm-text: #f5f5f7;
+    --adm-text-2: #a1a1aa;
+    --adm-text-3: #71717a;
+    --adm-accent-text: #4da3ff;
+    --adm-active-bg: #000;
+    --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    --adm-success-text: #3ddc84;
+    --adm-warning-text: #ffc933;
+    --adm-danger-text: #ff5c85;
+    --adm-purple-text: #a78bfa;
+    --adm-cyan-text: #45d0e8;
+    --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+  }
+}
+
+/* ==========================================================================
+   Typography (§5)
+   ========================================================================== */
+
+.admin-shell {
+  font-family: var(--adm-font);
+  color: var(--adm-text);
+  font-size: 14px;
+  line-height: 22px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.admin-shell h1 {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0;
+}
+
+.admin-shell h2 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.admin-shell h3 {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.admin-shell p {
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell small,
+.admin-shell .admin-caption {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--adm-text-3);
+}
+
+.admin-shell code,
+.admin-shell pre,
+.admin-shell kbd,
+.admin-shell samp {
+  font-family: var(--adm-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.admin-shell a {
+  color: var(--adm-accent-text);
+  text-decoration: none;
+}
+
+.admin-shell a:hover,
+.admin-shell a:focus-visible {
+  text-decoration: underline;
+}
+
+/* The old eyebrow becomes the breadcrumb: normal case, no tracking, not pink. */
+.admin-shell .admin-eyebrow {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--adm-text-2);
+  margin: 0;
+}
+
+.admin-shell .admin-muted {
+  color: var(--adm-text-2);
+}
+
+/* Numbers line up wherever they are compared (§10.7). */
+.admin-shell .admin-stat strong,
+.admin-shell .admin-num {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767px) {
+  .admin-shell h1 {
+    font-size: 22px;
+    line-height: 28px;
+  }
+}
+
+/* ==========================================================================
+   Shared shell affordances (§10, §11)
+   ========================================================================== */
+
+/* §10.9 — selection colour. */
+.admin-shell ::selection {
+  background: rgba(27, 132, 255, .3);
+}
+
+/* §10.11 — custom scrollbars, admin only. */
+.admin-shell *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.admin-shell *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-shell *::-webkit-scrollbar-thumb {
+  background: var(--adm-border);
+  border-radius: 4px;
+}
+
+.admin-shell *::-webkit-scrollbar-thumb:hover {
+  background: var(--adm-text-3);
+}
+
+.admin-shell * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--adm-border) transparent;
+}
+
+/* §11 — focus is never removed; :focus-visible only. */
+.admin-shell :focus-visible,
+.admin-confirm-dialog :focus-visible {
+  outline: 2px solid var(--adm-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* §11 — the sticky page head must not hide in-page anchor targets. */
+html:has(.admin-shell) {
+  scroll-padding-top: 96px;
+}
+
+/* §10.8 — skip link, hidden until focused, first in the DOM. */
+.admin-skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--adm-r-control);
+  background: var(--adm-accent);
+  color: var(--adm-on-accent);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform var(--adm-dur) ease-out;
+}
+
+.admin-skip-link:focus-visible {
+  transform: translateY(0);
+  text-decoration: none;
+}
+
+/* §10.12 — press feedback. */
+.admin-shell button:not(:disabled):active,
+.admin-shell .admin-button:not(:disabled):active {
+  transform: scale(.98);
+}
+
+/* §11 — content fade-in. */
+.admin-shell .admin-main {
+  animation: adm-rise 200ms ease-out both;
+}
+
+@keyframes adm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* §11 — reduced motion turns everything off. */
+@media (prefers-reduced-motion: reduce) {
+
+  .admin-shell,
+  .admin-shell *,
+  .admin-shell *::before,
+  .admin-shell *::after,
+  .admin-confirm-dialog,
+  .admin-confirm-dialog * {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .admin-shell button:not(:disabled):active,
+  .admin-shell .admin-button:not(:disabled):active {
+    transform: none;
+  }
+}

@@ -5,6 +5,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { listUsers, userFilters } from '@/lib/admin/queries';
 import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui';
 import { ExportUsers } from '@/components/admin/actions';
+import { PageHead } from '@/components/admin/page-head';
 
 export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
@@ -14,7 +15,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<Re
   const result = await listUsers(await getPool(), filters);
   const pages = Math.max(1, Math.ceil(result.total / filters.limit));
   const pageLink = (page: number) => ADMIN_BASE_PATH + '/users?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([k,v]) => [k,String(v)])), page: String(page) });
-  return <><p className="admin-eyebrow">Control room / People</p><h1>Users & accounts</h1><p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
+  return <><PageHead breadcrumb="Control room / People" title="Users & accounts" intro={<>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</>} />
     <SearchBar filters={filters} /><FilterChips filters={filters} /><ExportUsers filters={filters} />
     <DataTable caption={`Accounts · page ${filters.page} of ${pages}. CSV exports only this page (maximum 200).`} headings={['Account','Role','Email','Access','Storage']}>
       {result.users.map(user => <tr key={user.id}><td><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></td><td>{user.role}</td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</td><td>{bytes(user.storage_bytes)}</td></tr>)}
