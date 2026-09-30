@@ -107,7 +107,7 @@
   border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
   background: var(--adm-card); box-shadow: var(--adm-shadow);
 }
-.admin-stat p { color: var(--adm-text-2); font-size: 13px; line-height: 20px; font-weight: 500; }
+.admin-stat p, .admin-stat > span { color: var(--adm-text-2); font-size: 13px; line-height: 20px; font-weight: 500; }
 .admin-stat strong { display: block; font-size: 30px; line-height: 36px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .admin-stat small { color: var(--adm-text-3); font-size: 12px; line-height: 16px; }
 .admin-icon-tile {

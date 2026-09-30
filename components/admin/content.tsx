@@ -10,6 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import type { ContentResource } from '@/lib/admin/content';
 import type { Settings, AdminRole } from '@/lib/admin/config';
 import { contentConfirmationName } from '@/lib/admin/content-label';
+import { Badge } from './badge';
 
 async function send(body:Record<string,unknown>) {
   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -38,11 +39,13 @@ export function ContentTable({items,resource,trash,role}:{items:Record<string,un
   const [selected,setSelected]=useState<string[]>([]);
   const targetNames=Object.fromEntries(items.map(item=>[String(item.id),contentConfirmationName(item)]));
   const operations=role==='moderator'?['hide','unhide']:trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete'];
-  return <><p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
+  return <><div className="admin-bulk-toolbar">
+    <p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
     <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
+  </div>
     <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
-      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
-      {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}
+      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><span className="admin-table-name"><span className="admin-table-name-text"><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small><Badge>{String(row.kind||'comment')}</Badge> · {String(row.id)}</small></span></span></td><td>@{String(row.username)}</td><td><span className="admin-badges"><Badge>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}</Badge>{Boolean(row.pinned_at)&&<Badge tone="primary">Pinned</Badge>}</span></td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
+      {!items.length&&<tr><td colSpan={5} className="is-empty">No content matches these filters.</td></tr>}
     </tbody></table></div>
   </>;
 }
@@ -74,7 +77,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
   }}>
     <label>{post?'Caption':'Comment text'}<textarea maxLength={post?2200:1000} value={caption} onChange={event=>setCaption(event.target.value)} required={!post} /></label>
     {post&&<>
-      <div className="admin-detail"><label>Location<input value={location} maxLength={100} onChange={event=>setLocation(event.target.value)} /></label><label>Category<select value={category} onChange={event=>setCategory(event.target.value)}>{['For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(value=><option key={value}>{value}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}>{['post','reel','story'].map(value=><option key={value}>{value}</option>)}</select></label><label>Expiry (UTC; blank means no expiry)<input type="datetime-local" value={expires} onChange={event=>{setExpires(event.target.value);setExpiryChanged(true);}} /><button type="button" className="admin-button" onClick={()=>{setExpires('');setExpiryChanged(true);}}>Clear expiry</button></label></div>
+      <div className="admin-field-grid"><label>Location<input value={location} maxLength={100} onChange={event=>setLocation(event.target.value)} /></label><label>Category<select value={category} onChange={event=>setCategory(event.target.value)}>{['For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(value=><option key={value}>{value}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}>{['post','reel','story'].map(value=><option key={value}>{value}</option>)}</select></label><label>Expiry (UTC; blank means no expiry)<input type="datetime-local" value={expires} onChange={event=>{setExpires(event.target.value);setExpiryChanged(true);}} /><button type="button" className="admin-button" onClick={()=>{setExpires('');setExpiryChanged(true);}}>Clear expiry</button></label></div>
       <label>Tagged account IDs (comma-separated, maximum 10)<input value={tags} onChange={event=>setTags(event.target.value)} maxLength={1100} /></label>
       <fieldset className="content-media"><legend>Media preview & order</legend><p>New items must be verified uploads owned by you or the author. Reordering preserves each item’s layout and alt text.</p>{media.map((url,index)=><div className="content-media-item" key={url+index}>
         {safeMedia(url)&&(item.media_type==='video'||kind==='reel'?<video src={url} controls preload="metadata" aria-label={'Preview media '+(index+1)} />:<Image unoptimized width={800} height={800} src={url} alt={'Content preview '+(index+1)} />)}
@@ -84,7 +87,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
       <label>Aspect ratios (JSON array, or null to clear)<input value={aspects} onChange={event=>setAspects(event.target.value)} /></label><button type="button" className="admin-button" disabled={pending||!media.length} onClick={regenerate}>Regenerate aspects from media</button>
     </>}
     <label>Type content ID to confirm: <code>{String(item.id)}</code><input aria-label="Edit confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
-    {message&&<p role="status">{message}</p>}<button className="admin-button admin-primary" disabled={pending||confirmation!==item.id} type="submit">{pending?'Working…':'Save content'}</button>
+    {message&&<p role="status">{message}</p>}<div className="admin-card-footer"><button className="admin-button admin-primary" disabled={pending||confirmation!==item.id} type="submit">{pending?'Working…':'Save content'}</button></div>
   </form>;
 }
 export function ContentSettings({settings}:{settings:Settings}) {

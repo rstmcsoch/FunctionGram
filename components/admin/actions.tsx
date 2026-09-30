@@ -26,9 +26,9 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
     finally { setPending(false); }
   }
   return <div className="admin-actions">
-    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+    <p className="admin-muted admin-alert">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
     <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={['ban', 'delete'].includes(action) ? 'danger' : undefined} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
-    {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
+    {!actions.length && <p className="admin-alert">This account is protected. No actions are available for your role.</p>}
     {!selected && message && <p role="status">{message}</p>}
     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
       <form onSubmit={submit} className="admin-confirm">

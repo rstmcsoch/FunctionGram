@@ -3,8 +3,9 @@ import {useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {DEFAULT_APPEARANCE,NAV_ICONS,NAV_TARGETS,validateAppearance,type Appearance,type NavItem,type Palette} from '@/lib/appearance';
 import {upload,request} from '@/components/social/common';
-function Text({label,value,onChange,max=500,type='text'}:{label:string;value:string|number;onChange:(value:string)=>void;max?:number;type?:string}){return <label>{label}<input type={type} value={value} maxLength={max} onChange={e=>onChange(e.target.value)}/></label>;}
-function Toggle({label,value,onChange}:{label:string;value:boolean;onChange:(value:boolean)=>void}){return <label className="appearance-toggle"><input type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/>{label}</label>;}
+// max=7 marks the palette fields, which are the only six-digit hex colour inputs.
+function Text({label,value,onChange,max=500,type='text'}:{label:string;value:string|number;onChange:(value:string)=>void;max?:number;type?:string}){return <label>{label}<span className="admin-input-suffix">{max===7?<span className="admin-color-swatch" style={{background:String(value)}} aria-hidden="true"/>:null}<input type={type} value={value} maxLength={max} onChange={e=>onChange(e.target.value)}/></span></label>;}
+function Toggle({label,value,onChange}:{label:string;value:boolean;onChange:(value:boolean)=>void}){return <label className="appearance-toggle admin-switch"><input type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/>{label}</label>;}
 export function AppearanceEditor({initial,localUploads}:{initial:Appearance;localUploads:boolean}){
  const router=useRouter();const [a,setA]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState('');
  const set=(patch:Partial<Appearance>)=>setA(current=>({...current,...patch}));

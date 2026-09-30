@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { Download } from 'lucide-react';
 
 type Resource = 'users'|'posts'|'reports'|'audit';
 export function ExportManager(){
@@ -20,7 +21,7 @@ export function ExportManager(){
   }catch(error){setMessage(error instanceof Error?error.message:'Export failed.');}
   finally{setBusy(false);}
  };
- return <section className="admin-card export-manager"><h2>List export</h2><p>Exports are streamed from the server, capped at 1,000 rows, formula-neutralized for CSV, and audited. Choose only the data you need; user exports include email addresses and audit exports include client metadata.</p>
+ return <section className="admin-card export-manager"><span className="admin-icon-tile" aria-hidden="true"><Download /></span><h2>List export</h2><p>Exports are streamed from the server, capped at 1,000 rows, formula-neutralized for CSV, and audited. Choose only the data you need; user exports include email addresses and audit exports include client metadata.</p>
   <div className="admin-detail"><label>List<select value={resource} onChange={event=>{setResource(event.target.value as Resource);setStatus('all');}}><option value="users">Users</option><option value="posts">Posts</option><option value="reports">Reports</option><option value="audit">Audit</option></select></label><label>Format<select value={format} onChange={event=>setFormat(event.target.value as 'csv'|'json')}><option value="csv">CSV</option><option value="json">JSON</option></select></label>
   <label>Search{resource==='audit'?' (action, actor, target, reason)':' text'}<input maxLength={160} value={q} onChange={event=>setQ(event.target.value)}/></label>
   {resource==='users'&&<><label>User status<select value={status} onChange={event=>setStatus(event.target.value)}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(item=><option key={item}>{item}</option>)}</select></label><label>Role<select value={role} onChange={event=>setRole(event.target.value)}>{['all','user','moderator','admin','owner'].map(item=><option key={item}>{item}</option>)}</select></label></>}

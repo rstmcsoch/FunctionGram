@@ -46,7 +46,11 @@
 
   display: grid;
   grid-template-columns: var(--adm-sidebar-w) minmax(0, 1fr);
+  /* Desktop: the shell owns the viewport so the sidebar stays still and the
+     panel scrolls inside itself. Mobile reverts to normal page scrolling. */
+  height: 100dvh;
   min-height: 100dvh;
+  overflow: hidden;
   background: var(--adm-bg);
   color: var(--adm-text);
   font-family: var(--adm-font);
@@ -277,7 +281,7 @@ html[data-theme="light"] body .admin-shell {
 }
 
 @media (max-width: 767px) {
-  .admin-shell { display: block; min-height: 100dvh; overflow: visible; }
+  .admin-shell { display: block; height: auto; min-height: 100dvh; overflow: visible; }
   .admin-topbar {
     display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 60;
     height: 56px; padding: env(safe-area-inset-top) 12px 0; box-sizing: content-box;
