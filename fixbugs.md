@@ -1,154 +1,60 @@
-Here is the exact `.md` file you need to feed back to your AI builder. It diagnoses the root cause of the shattered table layout in your screenshots and provides strict CSS rules to fix it without breaking your original 3-phase guide.
+FIX PASS 1 (visual only). Do NOT change any text, feature, route, API, database, settings or logic. Keep all existing tests passing.
 
-***
+1. SIDEBAR OVERLAP (most important)
+- Sidebar container: display:flex; flex-direction:column; height:100dvh; overflow-y:auto; overscroll-behavior:contain.
+- Brand row: flex:none; position:sticky; top:0; z-index:2; solid background var(--adm-bg) (no transparency).
+- Nav: flex:none, normal flow. Never position:absolute or fixed.
+- Account card: flex:none; margin-top:auto; position:static (NOT sticky, absolute or fixed); solid background; at least 12px space above it.
+- Result: nothing overlaps at any screen height. On tall screens the card sits at the bottom. On short screens it comes after the last link and is reached by scrolling.
+- On page load, scroll the active link into view inside the sidebar (scrollIntoView with block:'nearest').
+- Use the same structure inside the mobile drawer, plus padding-bottom: env(safe-area-inset-bottom).
 
-# FunctionGram Admin Panel: Bug Fixes & Responsive Alignment Guide
+2. NAV LINK COLORS
+- Default link: color var(--adm-text-2), icon var(--adm-text-3).
+- Hover: color var(--adm-text) and bg var(--adm-hover).
+- Only [aria-current="page"] uses var(--adm-accent-text) and font-weight 600.
+- Make the selector strong enough that the global accent link rule cannot win, for example: .admin-shell .admin-nav a { ... }
 
-**Context:** The AI builder's implementation of the Audit page (and likely other tables) has severe layout collapse and text-wrapping bugs. Long strings (emails, IDs) are breaking mid-word or stacking vertically letter-by-letter. The table is failing to scroll horizontally on smaller screens.
+3. ACCOUNT CARD
+- Role badge: display:inline-flex; width:fit-content; align-self:flex-start; max-width:100%.
+- Email: min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap. Put the full email in a title attribute.
 
-**Goal:** Fix table layout collapse, enforce proper text wrapping, and guarantee horizontal scrolling on narrow viewports. **Visual-only fixes. No logic, data, or feature changes.**
+4. PAGE HEAD
+- Remove sticky. .admin-page-head { position:static; background:transparent; }
+- Remove backdrop-filter. Nothing may show through the header.
 
-## 1. Root Cause Analysis
-The "shattered" layout in Screenshot 2 (text wrapping vertically like `r s t m c...`) is caused by one of two CSS mistakes:
-1. Using `word-break: break-all` instead of `overflow-wrap: anywhere`.
-2. Applying `table-layout: fixed` to the table without defining explicit column widths, causing the browser to guess and collapse columns.
+5. TABLES (audit first, then apply to all tables)
+- Add a class .admin-table--wide { min-width:1180px } to tables with 6 or more columns (audit). Other tables keep min-width 720px.
+- Time cell: white-space:nowrap.
+- Action cell: min-width 220px; white-space:nowrap. The pill inside: display:inline-flex; white-space:nowrap; padding 2px 10px; overflow:visible. The text must sit fully inside the pill.
+- Target cell: min-width 260px; max-width 360px. IDs and code: overflow-wrap:anywhere; word-break:normal (not break-all).
+- Actor cell: min-width 240px. Reason: min-width 140px. Before / after: min-width 150px; nowrap. Network / client: min-width 160px.
+- table-layout:auto. Wrapper stays overflow-x:auto and overflow-y:visible.
+- Add a scroll hint: a soft fade on the right edge of the wrapper while more content exists, and a visible 8px horizontal scrollbar.
+- Apply the same min-width rules to the Users, Content and Safety tables, so IDs never break into 1 to 6 characters per line.
 
-## 2. Critical CSS Fixes (`app/rstmcadmin/admin.css`)
+6. BUTTONS
+- Buttons and button-links never stretch: width:auto; flex:none; align-self:flex-start.
+- "Export matching audit rows (CSV, max 5,000)": normal secondary button with a Download icon, left aligned. Full width only under 480px.
 
-Update or add the following CSS rules under the `.admin-shell` scope. **Do not use `word-break: break-all` anywhere in the admin panel.**
+7. FILTER FORMS
+- Put Apply and Clear in one actions cell: grid-column:1 / -1; display:flex; gap:12px; flex-wrap:wrap. Clear sits right next to Apply. Under 480px both are full width and stacked.
+- Input, select and textarea border. Dark: #3f3f49 (hover #52525e). Light: #cfd3db. Keep 44px height and the focus ring.
 
-### 2.1 Table Container & Scroll
-```css
-.admin-table-scroll {
-  /* Must allow horizontal scroll, never vertical scroll inside the card */
-  overflow-x: auto;
-  overflow-y: visible; 
-  -webkit-overflow-scrolling: touch;
-  
-  /* Custom thin scrollbar */
-  scrollbar-width: thin;
-  scrollbar-color: var(--adm-border) transparent;
-}
+8. RESPONSIVE SELF-CHECK
+Test every admin page at widths 320, 360, 390, 430, 768, 1024, 1280, 1440, 1920 and at heights 480, 700, 900, in dark and light. Fix anything that fails:
+- No element overlaps another. No text is hidden behind another element.
+- No page-level sideways scroll. Only tables scroll, inside their own card.
+- No text is cut off without wrapping or an ellipsis. Long emails and IDs wrap or truncate inside their box.
+- Sidebar and drawer: all 16 links reachable at height 480 by scrolling. Brand stays visible. Focus ring visible.
+- Every control is at least 44px high. Buttons never overflow their container.
+- Grids go 4 columns to 2 to 1 as the width shrinks. Forms never overflow.
+- Dialogs fit the screen at height 480, scroll inside, and their buttons are reachable with safe-area padding at the bottom.
+- Drawer still closes with Esc and the backdrop, and focus returns to the menu button.
 
-.admin-table-scroll::-webkit-scrollbar {
-  height: 8px;
-}
-.admin-table-scroll::-webkit-scrollbar-thumb {
-  background: var(--adm-border);
-  border-radius: 4px;
-}
-```
-
-### 2.2 Table Element (Prevent Collapse)
-```css
-.admin-table-scroll table {
-  width: 100%;
-  /* CRITICAL FIX: Prevents the table from shrinking below this width */
-  min-width: 720px; 
-  border-collapse: collapse;
-  /* Do NOT use table-layout: fixed unless you define explicit <colgroup> widths */
-}
-```
-
-### 2.3 Cell Text Wrapping Rules
-```css
-/* Default cell behavior */
-.admin-table-scroll td, 
-.admin-table-scroll th {
-  padding: 14px 20px;
-  vertical-align: middle;
-  text-align: left;
-  /* CRITICAL FIX: Allows breaking at any character if needed, but respects word boundaries first */
-  overflow-wrap: anywhere; 
-  /* NEVER use word-break: break-all; */
-}
-
-/* Specific column overrides to prevent ugly wrapping */
-.admin-table-scroll td.time-cell,
-.admin-table-scroll td.action-cell,
-.admin-table-scroll td.status-cell {
-  white-space: nowrap; /* Keeps timestamps, buttons, and badges on one line */
-}
-
-/* For emails and long IDs */
-.admin-table-scroll td.email-cell,
-.admin-table-scroll td.id-cell {
-  overflow-wrap: anywhere;
-  word-break: break-word; /* Fallback for older browsers, safer than break-all */
-}
-```
-
-## 3. Component & Layout Alignment Fixes
-
-### 3.1 Actor/Email Cell Structure
-In the Audit and Users tables, the actor cell contains an avatar, name, and email/ID. Ensure the HTML structure uses flexbox so the avatar doesn't shrink.
-
-```css
-.admin-actor-cell {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.admin-actor-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0; /* CRITICAL: Allows flex child to shrink and trigger overflow-wrap */
-}
-
-.admin-actor-name {
-  font-weight: 600;
-  color: var(--adm-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.admin-actor-email {
-  font-size: 12px;
-  color: var(--adm-text-2);
-  overflow-wrap: anywhere;
-  line-height: 1.4;
-}
-```
-
-### 3.2 Action Buttons ("View snapshot")
-Ensure action buttons do not wrap.
-```css
-.admin-table-scroll .admin-action-btn {
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-```
-
-## 4. Responsive Validation Checklist for AI Builder
-
-After applying these CSS fixes, the AI builder **must** verify the following before proceeding:
-
-1. **Desktop (1440px):** Table fills width. No text wraps unnecessarily. Timestamps and actions are single-line.
-2. **Tablet (768px):** Table triggers horizontal scroll. The container shows a thin scrollbar. No page-level horizontal scroll.
-3. **Mobile (320px):** Table scrolls horizontally. Email addresses wrap cleanly at the `@` symbol or dots, never letter-by-letter.
-4. **Last Row:** The last row of the table is fully visible (no clipping at the bottom).
-
-## 5. Execution Rules
-- **Do not** change the React/TSX logic for data fetching or rendering.
-- **Do not** add new columns or remove existing columns.
-- **Only** modify `app/rstmcadmin/admin.css` and add inline `className` adjustments to table cells if strictly necessary to target the CSS above.
-- Run `npm run build` and `npm run typecheck` after applying.
-
-***
-
-### 💡 Quick Tips & Concepts for You (RSTMC)
-
-**Concept: `overflow-wrap` vs `word-break`**
-*   `word-break: break-all`: The brute-force approach. It will break a word like "functiongram" into "fun-ctio-ngr-am" even if there's space. This causes the "letter-by-letter" stacking bug in your screenshot.
-*   `overflow-wrap: anywhere`: The smart approach. It only breaks the word if it *has* to, and it allows breaking at any character (like inside a long URL or email) without breaking normal words. **Always prefer this for data tables.**
-
-**Concept: Flexbox Shrinking (`min-width: 0`)**
-*   When you put a long text inside a flex container (like your table cell with an avatar), the text refuses to shrink below its natural width, pushing the layout apart. Adding `min-width: 0` to the text container tells the browser: *"It's okay to shrink this text and force it to wrap."*
-
-**Trick for Table Responsiveness:**
-Never try to make a complex data table "stack" vertically on mobile (like turning rows into cards) unless you have a lot of time. The industry standard (and your guide's rule) is: **Keep the table layout, force a `min-width`, and let the container scroll horizontally (`overflow-x: auto`)**. It preserves data hierarchy and is much easier to code.
+9. GUARD RAILS AND DELIVERY
+- CSS and markup only. Do not touch lib/**, app/api/**, migrations, package files, or any text.
+- Run lint, typecheck, tests and build once at the end.
+- Make patches/phase-13-fix1.patch with git diff. Check it with git apply --check on the current baseline.
+- Save .patch and .patch.txt in the sandbox downloads as real downloadable files, not chat text.
+- Update patches/ADMIN_PROGRESS.md, then stop.
