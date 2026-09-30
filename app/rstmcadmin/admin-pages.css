@@ -162,11 +162,9 @@
   margin-top: var(--adm-s5);
 }
 
-@media (max-width: 767px) {
-  .admin-shell .admin-card-footer .admin-button {
-    width: 100%;
-  }
-}
+/* Card footer buttons keep their natural width at every size (§6: buttons
+   never stretch). The old <768px full-width rule made a 700px-wide button
+   out of "Manage users" on tablets. */
 
 /* Status rows: label left, value right, dot for meaning (§9.1.4). */
 .admin-shell .admin-status-list {
@@ -442,6 +440,14 @@
   clip-path: inset(50%);
 }
 
+/* The visually-hidden pattern is absolutely positioned, so an unpositioned
+   cell lets its containing block escape the table's scroll wrapper and widen
+   the page. Making the cell the containing block keeps the span inside the
+   wrapper's clipped scroll area (markup and semantics unchanged). */
+.admin-shell .admin-matrix-cell {
+  position: relative;
+}
+
 .admin-shell .admin-badge-mono {
   font-family: var(--adm-mono);
   font-size: 12px;
@@ -585,6 +591,14 @@
 
 .admin-shell .analytics-chart {
   padding: var(--adm-s6);
+}
+
+/* Charts go two-up on tablets and single-column on phones; the legacy
+   two-column rule alone squeezed bars to ~130px at 320px. */
+@media (max-width: 767px) {
+  .admin-shell .analytics-chart-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .admin-shell .analytics-chart h3 {

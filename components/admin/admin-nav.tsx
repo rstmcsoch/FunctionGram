@@ -57,6 +57,12 @@ export function AdminNav({ groups, wordmark, account }: {
     return () => query.removeEventListener('change', sync);
   }, []);
 
+  // On load (and route change) bring the active link into view inside the
+  // sidebar's own scroll container; `nearest` never scrolls the page itself.
+  useEffect(() => {
+    sidebar.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [pathname]);
+
   useEffect(() => {
     if (!open) return;
     const node = sidebar.current;
