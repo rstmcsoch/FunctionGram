@@ -1,0 +1,643 @@
+diff --git a/app/rstmcadmin/admin-fixes.css b/app/rstmcadmin/admin-fixes.css
+new file mode 100644
+index 0000000..60900f1
+--- /dev/null
++++ b/app/rstmcadmin/admin-fixes.css
+@@ -0,0 +1,489 @@
++/* ==========================================================================
++   FunctionGram / RSTMC admin — FIX PASS 1 (visual only)
++
++   Loaded last by admin.css so these corrections always win the cascade.
++   No text, route, API, data or behaviour is touched by this layer: it only
++   repairs layout, colour and responsive defects reported against Phase 12.
++
++     1. Sidebar overlap        5. Tables
++     2. Nav link colours       6. Buttons
++     3. Account card           7. Filter forms
++     4. Page head              8. Responsive self-check hardening
++   ========================================================================== */
++
++/* ==========================================================================
++   0. Field border tokens (§7 of the fix list)
++   ========================================================================== */
++
++.admin-shell,
++.admin-confirm-dialog {
++  --adm-field-border: #cfd3db;
++  --adm-field-border-hover: #b6bcc7;
++}
++
++html[data-theme="dark"] .admin-shell,
++html[data-theme="dark"] .admin-confirm-dialog,
++.dark .admin-shell,
++.dark .admin-confirm-dialog {
++  --adm-field-border: #3f3f49;
++  --adm-field-border-hover: #52525e;
++}
++
++@media (prefers-color-scheme: dark) {
++
++  html:not([data-theme]) .admin-shell,
++  html:not([data-theme]) .admin-confirm-dialog {
++    --adm-field-border: #3f3f49;
++    --adm-field-border-hover: #52525e;
++  }
++}
++
++/* ==========================================================================
++   1. Sidebar — nothing overlaps at any screen height
++   ========================================================================== */
++
++.admin-shell .admin-sidebar {
++  display: flex;
++  flex-direction: column;
++  gap: var(--adm-s2);
++  height: 100dvh;
++  max-height: 100dvh;
++  overflow-y: auto;
++  overflow-x: hidden;
++  overscroll-behavior: contain;
++  background: var(--adm-bg);
++}
++
++/* Brand row: pinned to the top of the scroller, fully opaque. */
++.admin-shell .admin-sidebar > .admin-brand {
++  position: sticky;
++  top: 0;
++  z-index: 2;
++  flex: none;
++  background: var(--adm-bg);
++}
++
++/* Nav: normal flow, never absolute, never a scroll container of its own. */
++.admin-shell .admin-nav {
++  position: static;
++  flex: none;
++  min-height: 0;
++  /* 8px shell gap + 4px = the 12px of clear space above the account card. */
++  padding-bottom: var(--adm-s1);
++}
++
++/* Account card: static, solid, pushed to the bottom only when there is room. */
++.admin-shell .admin-account {
++  position: static;
++  flex: none;
++  margin-top: auto;
++  background: var(--adm-muted-surface);
++}
++
++/* ==========================================================================
++   2. Nav link colours — must beat the global `.admin-shell a` accent rule
++   ========================================================================== */
++
++.admin-shell .admin-nav a.admin-nav-link {
++  color: var(--adm-text-2);
++  font-weight: 500;
++  text-decoration: none;
++}
++
++.admin-shell .admin-nav a.admin-nav-link svg {
++  color: var(--adm-text-3);
++}
++
++.admin-shell .admin-nav a.admin-nav-link:hover,
++.admin-shell .admin-nav a.admin-nav-link:focus-visible {
++  background: var(--adm-hover);
++  color: var(--adm-text);
++  text-decoration: none;
++}
++
++.admin-shell .admin-nav a.admin-nav-link:hover svg,
++.admin-shell .admin-nav a.admin-nav-link:focus-visible svg {
++  color: var(--adm-text-2);
++}
++
++.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] {
++  background: var(--adm-active-bg);
++  color: var(--adm-accent-text);
++  font-weight: 600;
++}
++
++.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] svg {
++  color: var(--adm-accent-text);
++}
++
++/* ==========================================================================
++   3. Account card
++   ========================================================================== */
++
++.admin-shell .admin-account .admin-badge {
++  display: inline-flex;
++  width: fit-content;
++  max-width: 100%;
++  align-self: flex-start;
++}
++
++.admin-shell .admin-account-email {
++  min-width: 0;
++  max-width: 100%;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++/* ==========================================================================
++   4. Page head — not sticky, nothing shows through it
++   ========================================================================== */
++
++.admin-shell .admin-page-head {
++  position: static;
++  top: auto;
++  z-index: auto;
++  backdrop-filter: none;
++  -webkit-backdrop-filter: none;
++}
++
++.admin-shell .admin-page-head:not(.admin-page-head-banner) {
++  background: transparent;
++}
++
++/* ==========================================================================
++   5. Tables
++   ========================================================================== */
++
++.admin-shell .admin-table-scroll {
++  overflow-x: auto;
++  overflow-y: visible;
++  scrollbar-width: auto;
++  scrollbar-color: var(--adm-text-3) transparent;
++}
++
++.admin-shell .admin-table-scroll::-webkit-scrollbar {
++  height: 8px;
++}
++
++.admin-shell .admin-table-scroll::-webkit-scrollbar-track {
++  background: var(--adm-muted-surface);
++  border-radius: 4px;
++}
++
++.admin-shell .admin-table-scroll::-webkit-scrollbar-thumb {
++  background: var(--adm-text-3);
++  border-radius: 4px;
++}
++
++.admin-shell .admin-table-scroll table {
++  table-layout: auto;
++  min-width: 720px;
++}
++
++/* Six columns or more need real breathing room. */
++.admin-shell .admin-table-scroll table.admin-table--wide {
++  min-width: 1180px;
++}
++
++/* Long identifiers wrap on word boundaries, never 1–6 characters per line. */
++.admin-shell .admin-table-scroll td,
++.admin-shell .admin-table-scroll td code,
++.admin-shell .admin-table-scroll td small {
++  overflow-wrap: anywhere;
++  word-break: normal;
++}
++
++.admin-shell .admin-table-scroll td.email-cell,
++.admin-shell .admin-table-scroll td.id-cell {
++  min-width: 220px;
++  word-break: normal;
++}
++
++/* Time. */
++.admin-shell .admin-table-scroll td.admin-cell-time,
++.admin-shell .admin-table-scroll th.admin-cell-time,
++.admin-shell .admin-table-scroll td.time-cell {
++  min-width: 190px;
++  white-space: nowrap;
++  overflow-wrap: normal;
++}
++
++/* Actor / identity. */
++.admin-shell .admin-table-scroll td.admin-cell-actor,
++.admin-shell .admin-table-scroll td.admin-cell-account {
++  min-width: 240px;
++  max-width: 360px;
++}
++
++.admin-shell .admin-cell-identity,
++.admin-shell .admin-actor-cell {
++  min-width: 0;
++}
++
++/* Action pill — the label always sits fully inside the pill. */
++.admin-shell .admin-table-scroll td.action-cell,
++.admin-shell .admin-table-scroll td.admin-cell-action {
++  min-width: 220px;
++  white-space: nowrap;
++  overflow-wrap: normal;
++}
++
++.admin-shell .admin-table-scroll td.action-cell .admin-badge,
++.admin-shell .admin-table-scroll td.admin-cell-action .admin-badge {
++  display: inline-flex;
++  align-items: center;
++  max-width: none;
++  padding: 2px 10px;
++  white-space: nowrap;
++  overflow: visible;
++  text-overflow: clip;
++}
++
++/* Target. */
++.admin-shell .admin-table-scroll td.admin-cell-target {
++  min-width: 260px;
++  max-width: 360px;
++}
++
++.admin-shell .admin-table-scroll td.admin-cell-target code {
++  overflow-wrap: anywhere;
++  word-break: normal;
++}
++
++/* Reason, snapshot, network. */
++.admin-shell .admin-table-scroll td.admin-cell-reason {
++  min-width: 140px;
++}
++
++.admin-shell .admin-table-scroll td.admin-cell-diff {
++  min-width: 150px;
++  white-space: nowrap;
++}
++
++.admin-shell .admin-table-scroll td.admin-cell-diff pre {
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++  max-width: 420px;
++}
++
++.admin-shell .admin-table-scroll td.admin-cell-network {
++  min-width: 160px;
++}
++
++/* Users, Content and Safety tables: identifiers keep a usable column. */
++.admin-shell .admin-table-scroll td .admin-cell-identity {
++  min-width: 200px;
++}
++
++.admin-shell .moderation-console .admin-table {
++  min-width: 720px;
++}
++
++/* ==========================================================================
++   6. Buttons — never stretch
++   ========================================================================== */
++
++.admin-shell .admin-button,
++.admin-confirm-dialog .admin-button {
++  width: auto;
++  max-width: 100%;
++  flex: none;
++}
++
++.admin-shell .admin-card > .admin-button,
++.admin-shell form > .admin-button,
++.admin-shell .admin-form-actions .admin-button,
++.admin-shell .admin-export-button {
++  align-self: flex-start;
++}
++
++/* Export row (Audit): a normal secondary button, left aligned. */
++.admin-shell .admin-export-button {
++  display: inline-flex;
++  align-items: center;
++  gap: var(--adm-s2);
++  width: auto;
++  margin-top: var(--adm-s4);
++}
++
++@media (max-width: 479px) {
++
++  .admin-shell .admin-export-button {
++    width: 100%;
++    justify-content: center;
++  }
++}
++
++/* ==========================================================================
++   7. Filter forms
++   ========================================================================== */
++
++.admin-shell .admin-form-actions {
++  grid-column: 1 / -1;
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  align-self: end;
++  gap: var(--adm-s3);
++  min-width: 0;
++}
++
++.admin-shell .admin-form-actions .admin-button,
++.admin-shell .admin-form-actions button {
++  align-self: center;
++  margin: 0;
++}
++
++@media (max-width: 479px) {
++
++  .admin-shell .admin-form-actions {
++    flex-direction: column;
++    align-items: stretch;
++  }
++
++  .admin-shell .admin-form-actions .admin-button,
++  .admin-shell .admin-form-actions button {
++    width: 100%;
++    justify-content: center;
++  }
++}
++
++/* Field borders. */
++.admin-shell input,
++.admin-shell select,
++.admin-shell textarea,
++.admin-confirm input,
++.admin-confirm select,
++.admin-confirm textarea,
++.admin-confirm-dialog input,
++.admin-confirm-dialog select,
++.admin-confirm-dialog textarea {
++  border-color: var(--adm-field-border);
++}
++
++.admin-shell input:hover:not(:disabled),
++.admin-shell select:hover:not(:disabled),
++.admin-shell textarea:hover:not(:disabled),
++.admin-confirm-dialog input:hover:not(:disabled),
++.admin-confirm-dialog select:hover:not(:disabled),
++.admin-confirm-dialog textarea:hover:not(:disabled) {
++  border-color: var(--adm-field-border-hover);
++}
++
++.admin-shell input:focus,
++.admin-shell select:focus,
++.admin-shell textarea:focus,
++.admin-confirm-dialog input:focus,
++.admin-confirm-dialog select:focus,
++.admin-confirm-dialog textarea:focus {
++  border-color: var(--adm-accent);
++  box-shadow: 0 0 0 3px var(--adm-accent-soft);
++}
++
++.admin-shell input[type="checkbox"],
++.admin-shell input[type="radio"],
++.admin-shell input[type="file"] {
++  width: auto;
++}
++
++/* ==========================================================================
++   8. Responsive hardening
++   ========================================================================== */
++
++/* No page-level sideways scroll; only the table cards scroll. */
++.admin-shell.admin-layout,
++.admin-shell .admin-panel,
++.admin-shell .admin-main,
++.admin-shell .admin-card,
++.admin-shell .admin-main > * {
++  min-width: 0;
++  max-width: 100%;
++}
++
++.admin-shell .admin-card,
++.admin-shell .admin-main section,
++.admin-shell .admin-main form,
++.admin-shell .admin-main fieldset {
++  overflow-wrap: anywhere;
++}
++
++.admin-shell .admin-main pre {
++  max-width: 100%;
++  overflow-x: auto;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++
++/* Grids collapse 4 → 2 → 1 instead of overflowing. */
++@media (max-width: 1023px) {
++
++  .admin-shell .analytics-chart-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++}
++
++@media (max-width: 639px) {
++
++  .admin-shell .admin-stats,
++  .admin-shell .analytics-chart-grid,
++  .admin-shell .feature-grid,
++  .admin-shell .comms-grid,
++  .admin-shell .media-settings-grid,
++  .admin-shell .media-filters,
++  .admin-shell .system-env-list {
++    grid-template-columns: minmax(0, 1fr);
++  }
++
++  .admin-shell .admin-page-head-actions,
++  .admin-shell .admin-button-row,
++  .admin-shell .admin-action-grid {
++    width: 100%;
++  }
++}
++
++/* Mobile drawer: same structure, plus safe-area padding. */
++@media (max-width: 767px) {
++
++  .admin-shell .admin-sidebar {
++    height: 100dvh;
++    max-height: 100dvh;
++    padding-bottom: calc(var(--adm-s4) + env(safe-area-inset-bottom, 0px));
++    overflow-y: auto;
++    overscroll-behavior: contain;
++  }
++
++  .admin-shell .admin-sidebar > .admin-brand {
++    position: sticky;
++    top: 0;
++    background: var(--adm-bg);
++  }
++
++  .admin-shell .admin-account {
++    margin-top: auto;
++  }
++}
++
++/* Short viewports: the account card simply follows the last link. */
++@media (max-height: 560px) {
++
++  .admin-shell .admin-account {
++    margin-top: var(--adm-s3);
++  }
++}
++
++/* Dialogs stay reachable on short screens. */
++.admin-confirm-dialog[data-slot="dialog-content"] {
++  max-height: min(90dvh, calc(100dvh - 32px));
++  overflow-y: auto;
++  overscroll-behavior: contain;
++  padding-bottom: max(var(--adm-s6), env(safe-area-inset-bottom, 0px));
++}
++
++/* Focus ring is always visible, including inside the scrolling sidebar. */
++.admin-shell .admin-nav a.admin-nav-link:focus-visible,
++.admin-shell .admin-button:focus-visible,
++.admin-shell .admin-topbar-button:focus-visible {
++  outline: 2px solid var(--adm-accent);
++  outline-offset: 2px;
++}
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 36b86e8..7ddb172 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -10,6 +10,7 @@
+      3. admin-shell.css      §6 app shell and §7 responsive rules
+      4. admin-components.css §8 reusable primitives
+      5. admin-pages.css      §9 page recipes and §10 designer touches
++     6. admin-fixes.css      fix pass 1 — layout, colour and responsive repairs
+ 
+    Later layers must win at equal specificity, so they are imported last.
+    ========================================================================== */
+@@ -19,3 +20,4 @@
+ @import './admin-shell.css';
+ @import './admin-components.css';
+ @import './admin-pages.css';
++@import './admin-fixes.css';
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index 96df6fe..3b595eb 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -19,7 +19,7 @@ export default async function Content({searchParams}:{searchParams:Promise<Recor
+       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
+       <label>Status<select name="status" defaultValue={filter.status}>{['all','visible','hidden','trash','pinned'].map(v=><option key={v}>{v}</option>)}</select></label>
+       <label>Author ID<input name="author" maxLength={100} defaultValue={filter.author}/></label><label>Post ID (comments)<input name="post" maxLength={100} defaultValue={filter.post}/></label><label>Category (posts)<select name="category" defaultValue={filter.category}>{['','For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(v=><option key={v} value={v}>{v||'All categories'}</option>)}</select></label>
+-      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button admin-primary">Filter content</button><Link className="admin-button" data-tone="ghost" href={base}>Clear</Link>
++      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><div className="admin-form-actions"><button className="admin-button admin-primary">Filter content</button><Link className="admin-button" data-tone="ghost" href={base}>Clear</Link></div>
+     </form><ContentTable key={JSON.stringify(filter)} items={data.items} resource={filter.resource} trash={filter.status==='trash'} role={actor.role}/>
+     <nav className="admin-pagination" aria-label="Content pagination">{filter.page>1?<Link href={pageLink(filter.page-1)}>Previous</Link>:<span/>}<span>Page {filter.page} of {Math.max(1,Math.ceil(data.total/50))}</span>{filter.page*50<data.total&&<Link href={pageLink(filter.page+1)}>Next</Link>}</nav>
+     <p className="admin-muted">Trash can be restored for 30 days. No automatic purge runs; only owners can permanently purge one confirmed item at a time. Unhidden is not necessarily public: expiry, private profiles and account trash also apply.</p>
+diff --git a/components/admin/admin-nav.tsx b/components/admin/admin-nav.tsx
+index 25d9a3c..9daa4c4 100644
+--- a/components/admin/admin-nav.tsx
++++ b/components/admin/admin-nav.tsx
+@@ -81,6 +81,12 @@ export function AdminNav({ groups, wordmark, account }: {
+     };
+   }, [open, close]);
+ 
++  // Keep the current page visible inside the scrolling sidebar on load.
++  useEffect(() => {
++    const active = sidebar.current?.querySelector<HTMLElement>('a[aria-current="page"]');
++    active?.scrollIntoView({ block: 'nearest' });
++  }, [pathname]);
++
+   // Exact for Overview, prefix for every other panel route (§6.2).
+   const isActive = (item: AdminNavItem) => item.match === 'exact'
+     ? pathname === item.href
+diff --git a/components/admin/audit.tsx b/components/admin/audit.tsx
+index 1be1539..c66d693 100644
+--- a/components/admin/audit.tsx
++++ b/components/admin/audit.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ import {useState} from 'react';
+ import type {AuditFilters,AuditRow} from '@/lib/admin/audit';
++import { Download } from 'lucide-react';
+ import { Avatar } from './avatar';
+ import { Badge, auditTone } from './badge';
+ 
+@@ -14,8 +15,8 @@ export function AuditTools({filters}:{filters:AuditFilters}){
+   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
+   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
+   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
+-  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a>
+- </form><button className="admin-button" disabled={busy} onClick={async()=>{
++  <div className="admin-form-actions"><button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a></div>
++ </form><button className="admin-button admin-export-button" disabled={busy} onClick={async()=>{
+   setBusy(true);setError('');
+   try{
+    const response=await fetch('/api/admin/audit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'export',filters})});
+@@ -23,13 +24,13 @@ export function AuditTools({filters}:{filters:AuditFilters}){
+    const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='admin-audit.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+   }catch(cause){setError(cause instanceof Error?cause.message:'Audit export failed.');}
+   finally{setBusy(false);}
+- }}>{busy?'Exporting…':'Export matching audit rows (CSV, max 5,000)'}</button>{error&&<p role="alert">{error}</p>}</>;
++ }}><Download aria-hidden="true" size={16} strokeWidth={1.75} />{busy?'Exporting…':'Export matching audit rows (CSV, max 5,000)'}</button>{error&&<p role="alert">{error}</p>}</>;
+ }
+ 
+ function pretty(value:string|null){if(!value)return '—';try{return JSON.stringify(JSON.parse(value),null,2);}catch{return value;}}
+ export function AuditTable({rows}:{rows:AuditRow[]}){
+- return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Read-only administrator audit log"><table><caption>Newest first · read-only historical records</caption><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th><th>Before / after</th><th>Network / client</th></tr></thead><tbody>
+-  {rows.map(row=><tr key={row.id}><td className="admin-cell-time">{new Date(Number(row.created_at)).toISOString()}</td><td className="email-cell"><div className="admin-actor-cell"><Avatar name={row.actor_email} email={row.actor_email} seed={String(row.actor_id||row.actor_email)} size={28} /><div className="admin-actor-info"><span className="admin-actor-name">{row.actor_email}</span><small className="admin-actor-email">{row.actor_id}</small></div></div></td><td className="action-cell"><Badge tone={auditTone(row.action)} className="admin-badge-mono">{row.action}</Badge></td><td>{row.target_type||'—'}<small><code>{row.target_id||'—'}</code></small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
++ return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Read-only administrator audit log"><table className="admin-table admin-table--wide"><caption>Newest first · read-only historical records</caption><thead><tr><th className="admin-cell-time">Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th><th>Before / after</th><th>Network / client</th></tr></thead><tbody>
++  {rows.map(row=><tr key={row.id}><td className="admin-cell-time">{new Date(Number(row.created_at)).toISOString()}</td><td className="email-cell admin-cell-actor"><div className="admin-actor-cell"><Avatar name={row.actor_email} email={row.actor_email} seed={String(row.actor_id||row.actor_email)} size={28} /><div className="admin-actor-info"><span className="admin-actor-name">{row.actor_email}</span><small className="admin-actor-email">{row.actor_id}</small></div></div></td><td className="action-cell"><Badge tone={auditTone(row.action)} className="admin-badge-mono">{row.action}</Badge></td><td className="admin-cell-target">{row.target_type||'—'}<small><code>{row.target_id||'—'}</code></small></td><td className="admin-cell-reason">{row.reason||'—'}</td><td className="admin-cell-diff"><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td className="admin-cell-network">{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
+   {!rows.length&&<tr><td colSpan={7}>No historical audit rows match these filters.</td></tr>}
+  </tbody></table></div>;
+ }
+diff --git a/components/admin/communications.tsx b/components/admin/communications.tsx
+index c8c6973..ab133d4 100644
+--- a/components/admin/communications.tsx
++++ b/components/admin/communications.tsx
+@@ -22,7 +22,7 @@ function MessageInspector(){
+  useEffect(()=>{let active=true;request<{conversations:Conversation[];total:number}>('/api/admin/comms?view=conversations&q=').then(result=>{if(active){setItems(result.conversations);setTotal(result.total);}}).catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load conversations.');});return()=>{active=false;};},[]);
+  const inspect=async(event:React.FormEvent)=>{event.preventDefault();if(!selected)return;setBusy(true);setError('');try{const result=await request<{messages:Message[];total:number;truncated:boolean}>('/api/admin/comms',{action:'inspectConversation',firstId:selected.first_id,secondId:selected.second_id,reason,confirmation});setMessages(result.messages);setConfirmation('');setError(`Audited break-glass access: ${result.total} messages${result.truncated?' (showing newest 100)':''}.`);}catch(e){setError(e instanceof Error?e.message:'Could not inspect conversation.');}finally{setBusy(false);}};
+  const moderate=async(message:Message,action:'redact'|'delete',reasonText:string,confirmText:string)=>{setBusy(true);setError('');try{await request('/api/admin/comms',{action:'moderateMessage',operation:action,id:message.id,confirmation:confirmText,reason:reasonText});setMessages(items=>action==='delete'?items.filter(item=>item.id!==message.id):items.map(item=>item.id===message.id?{...item,body:'[Message removed by moderation]',redacted_at:Date.now(),redaction_reason:reasonText}:item));setError(action==='redact'?'Message redacted and audited.':'Message removed and audited.');}catch(e){setError(e instanceof Error?e.message:'Could not change message.');}finally{setBusy(false);}};
+- return <div className="comms-grid"><section className="admin-card"><h2>Private message inventory</h2><p>Conversation listings show participant metadata only. Message text is revealed only after entering a reason and the exact break-glass phrase. Each access is audited before the text is returned.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setError(e.message));}}><label>Search participants<input maxLength={100} value={q} onChange={event=>setQ(event.target.value)} placeholder="Username, name, email, or ID"/></label><button className="admin-button">Search</button><button type="button" className="admin-button" onClick={()=>void load().catch(e=>setError(e.message))}>Refresh</button></form><p>{total.toLocaleString()} conversations</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Message conversations"><table><thead><tr><th>Participants</th><th>Messages</th><th>Last activity</th><th>Action</th></tr></thead><tbody>{items.map(item=><tr key={item.first_id+':'+item.second_id}><td>{item.first_name} <small>{item.first_email||item.first_id}</small><br/>{item.second_name} <small>{item.second_email||item.second_id}</small></td><td>{Number(item.message_count)}</td><td>{new Date(Number(item.last_at)).toLocaleString()}</td><td><button className="admin-button" type="button" onClick={()=>{setSelected(item);setMessages([]);setReason('');setConfirmation('');setError('');}}>Break glass</button></td></tr>)}{!items.length&&<tr><td colSpan={4}>No conversations match.</td></tr>}</tbody></table></div></section>
++ return <div className="comms-grid"><section className="admin-card"><h2>Private message inventory</h2><p>Conversation listings show participant metadata only. Message text is revealed only after entering a reason and the exact break-glass phrase. Each access is audited before the text is returned.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setError(e.message));}}><label>Search participants<input maxLength={100} value={q} onChange={event=>setQ(event.target.value)} placeholder="Username, name, email, or ID"/></label><div className="admin-form-actions"><button className="admin-button">Search</button><button type="button" className="admin-button" onClick={()=>void load().catch(e=>setError(e.message))}>Refresh</button></div></form><p>{total.toLocaleString()} conversations</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Message conversations"><table><thead><tr><th>Participants</th><th>Messages</th><th>Last activity</th><th>Action</th></tr></thead><tbody>{items.map(item=><tr key={item.first_id+':'+item.second_id}><td>{item.first_name} <small>{item.first_email||item.first_id}</small><br/>{item.second_name} <small>{item.second_email||item.second_id}</small></td><td>{Number(item.message_count)}</td><td>{new Date(Number(item.last_at)).toLocaleString()}</td><td><button className="admin-button" type="button" onClick={()=>{setSelected(item);setMessages([]);setReason('');setConfirmation('');setError('');}}>Break glass</button></td></tr>)}{!items.length&&<tr><td colSpan={4}>No conversations match.</td></tr>}</tbody></table></div></section>
+   {selected&&<section className="admin-card admin-confirm"><h2>Audited conversation inspection</h2><p>{selected.first_name} ↔ {selected.second_name} · {selected.first_id} / {selected.second_id}</p><form onSubmit={inspect}><label>Reason for access<input required minLength={8} maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Type BREAK GLASS<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} required/></label><button className="admin-button admin-primary" disabled={busy||confirmation!=='BREAK GLASS'}>Reveal and audit</button></form>{error&&<p role="status">{error}</p>}
+    {messages.map(message=><MessageRow key={message.id} message={message} busy={busy} onModerate={moderate}/>)}
+   </section>}
+@@ -37,7 +37,7 @@ function DirectMessageControls(){
+  const load=async()=>setItems(await request<Account[]>('/api/admin/comms?view=accounts&q='+encodeURIComponent(q)));
+  useEffect(()=>{let active=true;request<Account[]>('/api/admin/comms?view=accounts&q=').then(rows=>{if(active)setItems(rows);}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load accounts.');});return()=>{active=false;};},[]);
+  const save=async(account:Account,disabled:boolean)=>{setBusy(true);setMessage('');try{await request('/api/admin/comms',{action:'setDirectMessageControl',profileId:account.id,disabled,reason:reasons[account.id]||'',confirmation:confirms[account.id]||''});await load();setConfirms({...confirms,[account.id]:''});setMessage('Direct-message restriction saved and audited.');}catch(e){setMessage(e instanceof Error?e.message:'Could not update direct-message access.');}finally{setBusy(false);}};
+- return <section className="admin-card"><h2>Per-account direct-message controls</h2><p>The existing global Messages feature switch remains under Features. These per-account controls deny new sends when either participant is restricted; historical conversations are not hidden or deleted.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><button className="admin-button">Search</button></form><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Direct-message account controls"><table><thead><tr><th>Account</th><th>Current state</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(account=><tr key={account.id}><td>{account.username||account.name}<small>{account.email}<br/>{account.id}</small></td><td>{account.dm_disabled?'Restricted':'Allowed'}</td><td><input aria-label={'Reason for '+account.email} value={reasons[account.id]??account.dm_reason} maxLength={500} onChange={event=>setReasons({...reasons,[account.id]:event.target.value})}/></td><td><input aria-label={'Confirmation for '+account.email} value={confirms[account.id]||''} onChange={event=>setConfirms({...confirms,[account.id]:event.target.value})}/></td><td><button className="admin-button" disabled={busy||confirms[account.id]!==account.id||(!account.dm_disabled&&!(reasons[account.id]||'').trim())} onClick={()=>void save(account,!account.dm_disabled)}>{account.dm_disabled?'Allow DMs':'Restrict DMs'}</button></td></tr>)}{!items.length&&<tr><td colSpan={5}>Search for a member to manage DM access.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
++ return <section className="admin-card"><h2>Per-account direct-message controls</h2><p>The existing global Messages feature switch remains under Features. These per-account controls deny new sends when either participant is restricted; historical conversations are not hidden or deleted.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><div className="admin-form-actions"><button className="admin-button">Search</button></div></form><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Direct-message account controls"><table><thead><tr><th>Account</th><th>Current state</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(account=><tr key={account.id}><td>{account.username||account.name}<small>{account.email}<br/>{account.id}</small></td><td>{account.dm_disabled?'Restricted':'Allowed'}</td><td><input aria-label={'Reason for '+account.email} value={reasons[account.id]??account.dm_reason} maxLength={500} onChange={event=>setReasons({...reasons,[account.id]:event.target.value})}/></td><td><input aria-label={'Confirmation for '+account.email} value={confirms[account.id]||''} onChange={event=>setConfirms({...confirms,[account.id]:event.target.value})}/></td><td><button className="admin-button" disabled={busy||confirms[account.id]!==account.id||(!account.dm_disabled&&!(reasons[account.id]||'').trim())} onClick={()=>void save(account,!account.dm_disabled)}>{account.dm_disabled?'Allow DMs':'Restrict DMs'}</button></td></tr>)}{!items.length&&<tr><td colSpan={5}>Search for a member to manage DM access.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
+ }
+ function NotificationTemplateEditor(){
+  const [templates,setTemplates]=useState<Template[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+diff --git a/components/admin/media.tsx b/components/admin/media.tsx
+index aead1af..d3cecd9 100644
+--- a/components/admin/media.tsx
++++ b/components/admin/media.tsx
+@@ -22,7 +22,7 @@ export function StorageInventory({report,owner}:{report:Awaited<ReturnType<typeo
+  const url=(page:number)=>'/rstmcadmin/media?'+new URLSearchParams({...report.filter,page:String(page)}).toString();
+  const manage=(key:string,next:string)=>{setSelected(key);setAction(next);setConfirmation('');setReason('');setMessage('');};
+  return <section className="admin-card admin-confirm"><h2>Storage inventory</h2><p>Registered objects: {String(report.summary.assets)} · {formatBytes(Number(report.summary.bytes))} · retained originals: {formatBytes(Number(report.summary.retained_source_bytes))}. Quarantined: {String(report.summary.quarantined)} · Trash: {String(report.summary.trashed)}.</p><p>Active reservations: {String(report.pending.reservations)} · {formatBytes(Number(report.pending.reserved_bytes))} reserved, not confirmed storage. Totals include quarantine and trash. Bundled demo media and unrelated objects in a shared Blob store are excluded.</p>
+- <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button admin-primary">Filter assets</button></form>
++ <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><div className="admin-form-actions"><button className="admin-button admin-primary">Filter assets</button></div></form>
+  <p>Orphans have no references from any posts (including hidden, expired and trashed posts), avatars, account images or branding settings. Trash is restorable for 30 days. Permanent deletion requires an owner and a typed asset key. Quarantine blocks the application media URL immediately; already-known public Blob URLs and downloaded bytes cannot be recalled.</p>
+  <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
+  {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}>Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next</Link>}</nav>
+diff --git a/components/admin/moderation.tsx b/components/admin/moderation.tsx
+index 48dd565..88f1729 100644
+--- a/components/admin/moderation.tsx
++++ b/components/admin/moderation.tsx
+@@ -24,7 +24,7 @@ export function ModerationConsole({actorId,role,initialReports,initialConfig,ini
+   <nav className="moderation-tabs" aria-label="Moderation tools">{[['all','Reports'],...(canManageSettings?[['filters','Word & domain filters']]:[]),...(canManageAccounts?[['accounts','Account safety'],['rates','Rate limits']]:[])].map(([key,label])=><button key={key} className="admin-button" aria-pressed={view===key} onClick={()=>setView(key)}>{label}</button>)}</nav>
+   {message&&<p role="status">{message}</p>}
+   {view==='all'&&<section className="admin-card admin-confirm"><h2>Reports inbox</h2><p>New {reports.counts.new||0} · Triage {reports.counts.triage||0} · Actioned {reports.counts.actioned||0} · Dismissed {reports.counts.dismissed||0} · {reports.total} matching this page&apos;s filters.</p>
+-   <form className="moderation-filters" onSubmit={event=>{event.preventDefault();void reloadReports({...reports.filter,page:1});}}><label>Status<select value={reports.filter.status} onChange={e=>setReports({...reports,filter:{...reports.filter,status:e.target.value}})}>{['new','triage','actioned','dismissed','all'].map(x=><option key={x}>{x}</option>)}</select></label><label>Reason<select value={reports.filter.reason} onChange={e=>setReports({...reports,filter:{...reports.filter,reason:e.target.value}})}><option value="">All reasons</option>{reasons.map(x=><option key={x}>{x}</option>)}</select></label><label>Target<select value={reports.filter.target} onChange={e=>setReports({...reports,filter:{...reports.filter,target:e.target.value}})}><option value="all">All targets</option><option value="post">Posts</option><option value="profile">Profiles</option></select></label><label>Search ID or username<input value={reports.filter.q} maxLength={100} onChange={e=>setReports({...reports,filter:{...reports.filter,q:e.target.value}})}/></label><button className="admin-button admin-primary">Apply filters</button></form>
++   <form className="moderation-filters" onSubmit={event=>{event.preventDefault();void reloadReports({...reports.filter,page:1});}}><label>Status<select value={reports.filter.status} onChange={e=>setReports({...reports,filter:{...reports.filter,status:e.target.value}})}>{['new','triage','actioned','dismissed','all'].map(x=><option key={x}>{x}</option>)}</select></label><label>Reason<select value={reports.filter.reason} onChange={e=>setReports({...reports,filter:{...reports.filter,reason:e.target.value}})}><option value="">All reasons</option>{reasons.map(x=><option key={x}>{x}</option>)}</select></label><label>Target<select value={reports.filter.target} onChange={e=>setReports({...reports,filter:{...reports.filter,target:e.target.value}})}><option value="all">All targets</option><option value="post">Posts</option><option value="profile">Profiles</option></select></label><label>Search ID or username<input value={reports.filter.q} maxLength={100} onChange={e=>setReports({...reports,filter:{...reports.filter,q:e.target.value}})}/></label><div className="admin-form-actions"><button className="admin-button admin-primary">Apply filters</button></div></form>
+    {!reports.items.length&&<p>No reports match the current filters.</p>}
+    <div className="moderation-report-list">{reports.items.map(report=><ReportCard key={report.id} report={report} busy={busy} actorId={actorId} role={role} onAssign={()=>void mutate(async()=>{await api('/api/admin/moderation',{action:'updateReport',operation:'assign',id:report.id});await reloadReports();})} onSaveNotes={notes=>saveNotes(report,notes)} onAction={(action,reason,confirmation)=>act(report,action,reason,confirmation||report.id)} onLoadAccount={id=>{setAccountId(id);setView('accounts');}}/>)}</div>
+    <div className="admin-pagination"><button className="admin-button" disabled={reports.filter.page<=1} onClick={()=>void reloadReports({...reports.filter,page:reports.filter.page-1})}>Previous</button><span>Page {reports.filter.page} · up to 50 reports</span><button className="admin-button" disabled={reports.items.length<50} onClick={()=>void reloadReports({...reports.filter,page:reports.filter.page+1})}>Next</button></div>
+diff --git a/components/admin/ui.tsx b/components/admin/ui.tsx
+index fa2dfc2..f4eb28e 100644
+--- a/components/admin/ui.tsx
++++ b/components/admin/ui.tsx
+@@ -19,7 +19,7 @@ export function SearchBar({ filters }: { filters: UserFilters }) {
+     <label>Status<select name="status" defaultValue={filters.status}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
+     <label>Role<select name="role" defaultValue={filters.role}>{['all','user','moderator','admin','owner'].map(role => <option key={role}>{role}</option>)}</select></label>
+     <label>Per page<select name="limit" defaultValue={filters.limit}>{[25,50,100,200].map(limit => <option key={limit}>{limit}</option>)}</select></label>
+-    <button className="admin-button admin-primary" type="submit">Apply filters</button>
++    <div className="admin-form-actions"><button className="admin-button admin-primary" type="submit">Apply filters</button></div>
+   </form>;
+ }
+ export function FilterChips({ filters }: { filters: UserFilters }) {

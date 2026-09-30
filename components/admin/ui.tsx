@@ -19,7 +19,7 @@ export function SearchBar({ filters }: { filters: UserFilters }) {
     <label>Status<select name="status" defaultValue={filters.status}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
     <label>Role<select name="role" defaultValue={filters.role}>{['all','user','moderator','admin','owner'].map(role => <option key={role}>{role}</option>)}</select></label>
     <label>Per page<select name="limit" defaultValue={filters.limit}>{[25,50,100,200].map(limit => <option key={limit}>{limit}</option>)}</select></label>
-    <button className="admin-button admin-primary" type="submit">Apply filters</button>
+    <div className="admin-form-actions"><button className="admin-button admin-primary" type="submit">Apply filters</button></div>
   </form>;
 }
 export function FilterChips({ filters }: { filters: UserFilters }) {

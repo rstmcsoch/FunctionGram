@@ -81,6 +81,12 @@ export function AdminNav({ groups, wordmark, account }: {
     };
   }, [open, close]);
 
+  // Keep the current page visible inside the scrolling sidebar on load.
+  useEffect(() => {
+    const active = sidebar.current?.querySelector<HTMLElement>('a[aria-current="page"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [pathname]);
+
   // Exact for Overview, prefix for every other panel route (§6.2).
   const isActive = (item: AdminNavItem) => item.match === 'exact'
     ? pathname === item.href

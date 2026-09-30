@@ -21,6 +21,7 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 10 | Messages, notifications, email, announcements, CMS pages | Applied and merged to main (PR #26) | `phase10.patch` |
 | 11 | Analytics, exports, system tools, polish | Done locally; verification below | `phase 11.patch` |
 | 12 | Final QA, docs, owner handover | Done locally; deployment-preview/browser QA pending | `phase 12.patch` |
+| 13 | Fix pass 1 — visual defects (sidebar, nav colours, head, tables, buttons, forms, responsive) | Done locally | `phase-13-fix1.patch` |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -948,3 +949,45 @@ keeps the final table row fully visible.
 Patch: `patches/phase-3-pages-polish-qa.patch` (identical copy at
 `patches/phase-3-pages-polish-qa.patch.txt`), verified with `git apply --check`
 against a clean extraction of the Phase 2 commit `c7a5008`.
+
+
+## Fix pass 1 (`phase-13-fix1.patch`)
+
+Visual only. No text, route, API, database, settings or logic changed; nothing
+under `lib/**`, `app/api/**`, migrations or package files was touched.
+
+All corrections live in one new cascade layer, `app/rstmcadmin/admin-fixes.css`,
+imported last by `app/rstmcadmin/admin.css`, so each fix beats the earlier
+phase rules without rewriting them. Markup changes are limited to class names,
+one Download icon and wrapper `<div>`s around existing filter buttons.
+
+| # | Defect | Fix |
+| --- | --- | --- |
+| 1 | Sidebar items overlapped the account card at short heights | Sidebar is the only scroller (`100dvh`, `overflow-y:auto`, `overscroll-behavior:contain`); brand row is `flex:none; position:sticky; top:0` on a solid `--adm-bg`; nav is `flex:none` in normal flow; account card is `position:static; flex:none; margin-top:auto` with 12px clear space above it. The active link is scrolled into view (`block:'nearest'`) on load in `admin-nav.tsx`. |
+| 2 | Nav links inherited the global accent link colour | Re-stated through `.admin-shell .admin-nav a.admin-nav-link`, which outranks `.admin-shell a`. Default `--adm-text-2` / icon `--adm-text-3`, hover `--adm-text` on `--adm-hover`, accent + 600 only for `[aria-current="page"]`. |
+| 3 | Role badge stretched, long email overflowed | Badge is `inline-flex; width:fit-content; align-self:flex-start`; email truncates with an ellipsis and keeps its existing `title`. |
+| 4 | Sticky, translucent page head showed content through it | `.admin-page-head` is `position:static`, transparent, no `backdrop-filter`. The Overview banner keeps its gradient. |
+| 5 | Wide tables cramped; IDs broke into 1–6 characters per line | `.admin-table--wide` (≥6 columns, i.e. the audit log) is `min-width:1180px`, other tables stay at 720px. Per-cell minimums: time 190px nowrap, actor 240px, action 220px nowrap with an `inline-flex` 2px/10px pill, target 260–360px, reason 140px, before/after 150px, network 160px. `word-break:normal` with `overflow-wrap:anywhere` everywhere, `table-layout:auto`, wrapper `overflow-x:auto` / `overflow-y:visible`, existing edge fade kept and the horizontal scrollbar made visibly 8px. |
+| 6 | Buttons stretched to fill their container | `width:auto; flex:none`, left aligned. The audit export button is a normal secondary button with a Download icon, full width only under 480px. |
+| 7 | Apply and Clear sat in separate grid cells | Both are wrapped in `.admin-form-actions` (`grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap`), stacked full width under 480px, on the Users, Content, Audit, Safety, Media and Communications filters. Field borders are `#3f3f49` / hover `#52525e` in dark and `#cfd3db` in light, keeping the 44px height and focus ring. |
+| 8 | Responsive gaps | No page-level sideways scroll (only table cards scroll), grids fall 4 → 2 → 1, `pre` blocks wrap, dialogs cap at `min(90dvh, 100dvh - 32px)` and scroll inside with safe-area bottom padding, the drawer adds `env(safe-area-inset-bottom)`, and focus rings are explicit on nav links, buttons and the menu button. |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing `no-img-element` in `components/social/**`) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped (unchanged from baseline) |
+| `npm run build` | pass; all 17 `/rstmcadmin*` routes still dynamic |
+| Route smoke test | All 16 admin routes fetched with the seeded fixture session return 200 with the new classes present in the HTML |
+
+As in earlier phases, the sandbox has no browser binary and the Chromium
+download is unreachable, so the 320/360/390/430/768/1024/1280/1440/1920 ×
+480/700/900 screenshot matrix could not be captured here. The responsive
+guarantees were verified from the compiled stylesheet and the server-rendered
+markup; no screenshot is claimed to have been taken.
+
+Patch: `patches/phase-13-fix1.patch` (identical copy at
+`patches/phase-13-fix1.patch.txt`), verified with `git apply --check` against
+the clean baseline `7a1a14e`.
