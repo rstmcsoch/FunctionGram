@@ -23,6 +23,6 @@ export default async function AdminHome() {
       <StatCard label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
     </section>
     <section className="admin-card"><h2>People & accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></section>
-    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p className="admin-muted">Two-factor enforcement and shorter administrator sessions arrive in Phase 9. Only owners can grant or revoke admin roles.</p></section>
+    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p></section>
   </>;
 }

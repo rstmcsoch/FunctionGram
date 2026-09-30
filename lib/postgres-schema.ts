@@ -161,3 +161,14 @@ export const moderationUpgradeStatements=[
  `CREATE TABLE IF NOT EXISTS profile_moderation(profile_id text PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,shadow_banned boolean NOT NULL DEFAULT false,comment_banned boolean NOT NULL DEFAULT false,shadow_reason text NOT NULL DEFAULT '',comment_reason text NOT NULL DEFAULT '',updated_at bigint NOT NULL,updated_by text NOT NULL)`,
  `CREATE INDEX IF NOT EXISTS profile_moderation_shadow_idx ON profile_moderation(profile_id) WHERE shadow_banned=true`,
 ];
+
+// Version 10: append-only audit history and privacy-preserving admin device registry.
+export const adminHardeningUpgradeStatements=[
+ `CREATE TABLE IF NOT EXISTS admin_login_devices(user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,fingerprint_hash text NOT NULL,first_seen bigint NOT NULL,last_seen bigint NOT NULL,PRIMARY KEY(user_id,fingerprint_hash))`,
+ 'CREATE INDEX IF NOT EXISTS admin_login_devices_last_seen_idx ON admin_login_devices(user_id,last_seen DESC)',
+ 'CREATE INDEX IF NOT EXISTS audit_action_created_idx ON admin_audit_log(action,created_at DESC)',
+ 'CREATE INDEX IF NOT EXISTS audit_email_created_idx ON admin_audit_log(actor_email,created_at DESC)',
+ `CREATE OR REPLACE FUNCTION reject_admin_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Administrator audit records are append-only'; END $$`,
+ 'DROP TRIGGER IF EXISTS admin_audit_immutable ON admin_audit_log',
+ 'CREATE TRIGGER admin_audit_immutable BEFORE UPDATE OR DELETE ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_admin_audit_mutation()',
+];

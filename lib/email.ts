@@ -154,6 +154,34 @@ export function createDeleteAccountEmailSender(env: Environment = process.env, f
   });
 }
 
+export function createAdminNewDeviceEmailSender(env: Environment = process.env, fetcher: typeof fetch = fetch) {
+  const { apiKey, senderEmail, senderName } = brevoConfiguration(env);
+  return async (details: { user: { email: string }; ipAddress: string; userAgent: string; at: string }) => {
+    const ipAddress = details.ipAddress.slice(0, 64);
+    const userAgent = details.userAgent.replace(/[\r\n\0]/g, ' ').slice(0, 512);
+    const text = `A new sign-in to your RSTMC administrator account was detected.\n\nTime: ${details.at}\nIP address: ${ipAddress}\nBrowser/device: ${userAgent}\n\nIf this was not you, change your password and contact another owner. Administrator access always requires two-factor authentication.`;
+    let response: Response;
+    try {
+      response = await fetcher('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': apiKey, 'content-type': 'application/json', accept: 'application/json' },
+        signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({
+          sender: { name: senderName, email: senderEmail },
+          to: [{ email: details.user.email }],
+          subject: 'New sign-in to your RSTMC administrator account',
+          textContent: text,
+          htmlContent: `<html><body style="font-family:Arial,sans-serif;color:#171717"><h1>New administrator sign-in</h1><p>A new sign-in to your RSTMC administrator account was detected.</p><p><strong>Time:</strong> ${escapeHtml(details.at)}<br><strong>IP address:</strong> ${escapeHtml(ipAddress)}<br><strong>Browser/device:</strong> ${escapeHtml(userAgent)}</p><p>If this was not you, change your password and contact another owner. Administrator access always requires two-factor authentication.</p></body></html>`,
+          tags: ['admin-new-device'],
+        }),
+      });
+    } catch { throw new Error('Brevo administrator security email request failed.'); }
+    if (!response.ok) throw new Error(`Brevo administrator security email rejected (HTTP ${response.status}).`);
+    const result = await response.json().catch(() => null) as { messageId?: unknown } | null;
+    if (typeof result?.messageId !== 'string') throw new Error('Brevo did not acknowledge the administrator security email.');
+  };
+}
+
 export function createVerificationEmailSender(env: Environment = process.env, fetcher: typeof fetch = fetch) {
   const { apiKey, senderEmail, senderName } = brevoConfiguration(env);
   return async ({ user, url }: VerificationEmail) => {

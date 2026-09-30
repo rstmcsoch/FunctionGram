@@ -7,6 +7,9 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     files: ["app/api/admin/**/route.ts"],
+    // This self-only preflight exists so a newly signed-in admin can learn
+    // whether to open enrollment before the 2FA gate; it is not an admin API.
+    ignores: ["app/api/admin/security-status/route.ts"],
     rules: {
       "no-restricted-syntax": ["error",
         { selector: "ExportNamedDeclaration > FunctionDeclaration", message: "Admin handlers must be exported through adminRoute()." },

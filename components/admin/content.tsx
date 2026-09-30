@@ -8,7 +8,8 @@ import { DialogDescription } from '@/components/ui/dialog';
 import { ConfirmDialog } from './actions';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import type { ContentResource } from '@/lib/admin/content';
-import type { Settings } from '@/lib/admin/config';
+import type { Settings, AdminRole } from '@/lib/admin/config';
+import { contentConfirmationName } from '@/lib/admin/content-label';
 
 async function send(body:Record<string,unknown>) {
   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -16,16 +17,16 @@ async function send(body:Record<string,unknown>) {
   if(!response.ok)throw new Error(result.error||'The operation failed.');
 }
 const labels:Record<string,string>={hide:'Hide',unhide:'Unhide',delete:'Move to trash',restore:'Restore',purge:'Permanently purge',pin:'Pin / feature',unpin:'Unpin',expire:'Expire now',highlight:'Promote to highlight'};
-export function ContentActions({ids,resource,operations,onDone}:{ids:string[];resource:ContentResource;operations:string[];onDone?:()=>void}) {
+export function ContentActions({ids,resource,operations,targetNames={},onDone}:{ids:string[];resource:ContentResource;operations:string[];targetNames?:Record<string,string>;onDone?:()=>void}) {
   const router=useRouter();const trigger=useRef<HTMLButtonElement|null>(null);
   const [operation,setOperation]=useState(''),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[pending,setPending]=useState(false),[message,setMessage]=useState('');
-  const expected=ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
-  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
+  const expected=['delete','purge'].includes(operation)&&ids.length===1?(targetNames[ids[0]]||ids[0]):ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
+  return <><div className="admin-action-grid">{operations.map(op=><button type="button" className="admin-button" disabled={!ids.length||(['delete','purge'].includes(op)&&ids.length!==1)} key={op} onClick={event=>{trigger.current=event.currentTarget;setOperation(op);setConfirmation('');setReason('');setMessage('');}}>{labels[op]}</button>)}</div>
     {!operation&&message&&<p role="status">{message}</p>}
     <ConfirmDialog open={!!operation} title={labels[operation]||'Content action'} onClose={()=>{if(!pending)setOperation('');}} onRestoreFocus={()=>trigger.current?.focus()}>
       <form className="admin-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await send({action:'moderateContent',resource,operation,ids,confirmation,reason});setOperation('');setMessage('Saved and recorded in the audit log.');onDone?.();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Request failed.');}finally{setPending(false);}}}>
         <DialogDescription>{operation==='purge'?'Permanent deletion cannot be undone. Associated comments, reactions and saved references will also be removed. Media files are retained for the later storage cleanup tools.':operation==='highlight'?'This clears story expiry and adds the story to its author’s highlights. Hidden stories remain hidden.':operation==='restore'?'Restore is allowed within 30 days of deletion. Any separate hidden state is preserved.':'This affects the selected content on all public surfaces. All items succeed together or no changes are saved.'}</DialogDescription>
-        <label>Type <code>{expected}</code> to confirm<input aria-label="Content confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
+        <label>Type {['delete','purge'].includes(operation)?'the exact content name':'the selection confirmation'} <code>{expected}</code> to confirm<input aria-label="Content confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
         <label>Moderation reason {operation==='hide'?'(required)':'(optional)'}<textarea maxLength={500} required={operation==='hide'} value={reason} onChange={event=>setReason(event.target.value)} /></label>
         {message&&<p role="alert">{message}</p>}
         <button className="admin-button admin-primary" disabled={pending||confirmation!==expected} type="submit">{pending?'Saving…':'Confirm content action'}</button>
@@ -33,10 +34,12 @@ export function ContentActions({ids,resource,operations,onDone}:{ids:string[];re
     </ConfirmDialog>
   </>;
 }
-export function ContentTable({items,resource,trash}:{items:Record<string,unknown>[];resource:ContentResource;trash:boolean}) {
+export function ContentTable({items,resource,trash,role}:{items:Record<string,unknown>[];resource:ContentResource;trash:boolean;role:AdminRole}) {
   const [selected,setSelected]=useState<string[]>([]);
-  return <><p className="admin-muted">{selected.length} selected · Bulk actions affect at most 50 items. Open an item for editing, media and permanent purge.</p>
-    <ContentActions resource={resource} ids={selected} operations={trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete']} onDone={()=>setSelected([])} />
+  const targetNames=Object.fromEntries(items.map(item=>[String(item.id),contentConfirmationName(item)]));
+  const operations=role==='moderator'?['hide','unhide']:trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete'];
+  return <><p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
+    <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
     <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
       {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
       {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}

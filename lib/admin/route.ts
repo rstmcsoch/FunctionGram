@@ -3,12 +3,14 @@ import { AppError, sameOrigin } from '../server';
 import { requireAdmin } from './guard';
 import { AdminError } from './validation';
 import type { AdminActor } from './config';
+import { requirePermission, type AdminPermission } from './permissions';
 
-export function adminRoute(handler: (request: Request, actor: AdminActor) => Promise<Response>) {
+export function adminRoute(handler: (request: Request, actor: AdminActor) => Promise<Response>, permission: AdminPermission = 'admin.access') {
   return async (request: Request) => {
     let response: Response;
     try {
       const actor = await requireAdmin(request);
+      requirePermission(actor, permission);
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) sameOrigin(request);
       response = await handler(request, actor);
     } catch (error) {

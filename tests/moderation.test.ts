@@ -15,7 +15,7 @@ async function addUser(id:string,role='user'){
  await pool.query('INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,\'\',\'\',0,1)',[id]);
 }
 async function seed(){
- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements])await db.exec(sql);
+ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements])await db.exec(sql);
  await addUser('owner','owner');await addUser('admin','admin');await addUser('guarded-admin','admin');await addUser('reporter');await addUser('target');await addUser('viewer');
  await pool.query("INSERT INTO posts(id,author_id,media,created_at,caption) VALUES('target-post','target','[]',1,'a safe caption'),('shadow-post','target','[]',2,'another safe caption')");
 }
@@ -23,7 +23,7 @@ const report=async(id:string,targetType:string,targetId:string,reason='spam')=>p
 
  test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
   await seed();
-  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9]);
+  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10]);
   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
   // Repeat only the additive version statements as the migration runner does.
@@ -46,21 +46,21 @@ test('normal reports appear in filtered queue, can be assigned, noted, hidden or
  let queue=await reportQueue(pool,{status:'new',reason:'misleading',target:'post'});assert.equal(queue.total,1);assert.equal(queue.items[0].id,'post-report');
  await updateReport(pool,'admin',{id:'post-report',operation:'assign'});await updateReport(pool,'admin',{id:'post-report',operation:'notes',notes:'Reviewed source and context.'});
  queue=await reportQueue(pool,{status:'triage'});assert.equal(queue.items[0].assigned_to,'admin');assert.equal(queue.items[0].notes,'Reviewed source and context.');
- await closeReport(pool,'admin',{id:'post-report',action:'hide',reason:'Confirmed harmful content',notes:'Resolution note'});
+ await closeReport(pool,'admin',{id:'post-report',action:'hide',confirmation:'post-report',reason:'Confirmed harmful content',notes:'Resolution note'});
  const hidden=(await pool.query('SELECT hidden_at,hidden_by,hidden_reason FROM posts WHERE id=\'target-post\'')).rows[0];assert.equal(hidden.hidden_by,'admin');assert.equal(hidden.hidden_reason,'Confirmed harmful content');
  const resolved=await reportQueue(pool,{status:'actioned'});assert.equal(resolved.items[0].handled_by,'admin');assert.equal(resolved.items[0].action_taken,'hide');assert.equal(resolved.items[0].notes,'Resolution note');
  await assert.rejects(closeReport(pool,'admin',{id:'post-report',action:'dismiss'}),{status:409});
- await closeReport(pool,'admin',{id:'profile-report',action:'dismiss',reason:'Not actionable'});const dismissed=await reportQueue(pool,{status:'dismissed'});assert.equal(dismissed.items[0].handled_by,'admin');assert.equal(dismissed.items[0].status,'dismissed');
+ await closeReport(pool,'admin',{id:'profile-report',action:'dismiss',confirmation:'profile-report',reason:'Not actionable'});const dismissed=await reportQueue(pool,{status:'dismissed'});assert.equal(dismissed.items[0].handled_by,'admin');assert.equal(dismissed.items[0].status,'dismissed');
  const audit=(await pool.query("SELECT action,target_id FROM admin_audit_log WHERE action LIKE 'reports.%' ORDER BY created_at")).rows;assert.ok(audit.some(row=>row.action==='reports.hide'));assert.ok(audit.some(row=>row.action==='reports.dismiss'));
 });
 
 test('report ban respects roles, revokes sessions and records the actor',async()=>{
  await report('ban-admin','profile','guarded-admin','spam');await pool.query('INSERT INTO session(id,token,"userId","expiresAt") VALUES(\'admin-session\',\'secret-admin\',\'guarded-admin\',now()+interval \'1 day\')');
- await assert.rejects(closeReport(pool,'admin',{id:'ban-admin',action:'ban',reason:'Repeated abuse'}),{status:403},'only owner can ban privileged users');
- await closeReport(pool,'owner',{id:'ban-admin',action:'ban',reason:'Repeated abuse'});
+ await assert.rejects(closeReport(pool,'admin',{id:'ban-admin',action:'ban',confirmation:'guarded-admin@moderation.test',reason:'Repeated abuse'}),{status:403},'only owner can ban privileged users');
+ await closeReport(pool,'owner',{id:'ban-admin',action:'ban',confirmation:'guarded-admin@moderation.test',reason:'Repeated abuse'});
  const banned=(await pool.query('SELECT banned,"banReason" FROM "user" WHERE id=\'guarded-admin\'')).rows[0];assert.equal(banned.banned,true);assert.equal(banned.banReason,'Repeated abuse');assert.equal((await pool.query('SELECT id FROM session WHERE "userId"=\'guarded-admin\'')).rows.length,0);
  const event=(await pool.query("SELECT actor_id,action FROM admin_audit_log WHERE action='users.ban'")).rows[0];assert.equal(event.actor_id,'owner');
- await report('protect-owner','profile','owner','spam');await assert.rejects(closeReport(pool,'admin',{id:'protect-owner',action:'ban',reason:'No'}),{status:403});
+ await report('protect-owner','profile','owner','spam');await assert.rejects(closeReport(pool,'admin',{id:'protect-owner',action:'ban',confirmation:'owner@moderation.test',reason:'No'}),{status:403});
 });
 
 test('shadow bans remain private and self-visible; comment bans are enforced',async()=>{

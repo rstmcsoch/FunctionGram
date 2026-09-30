@@ -88,7 +88,10 @@ export function AuthForm({initialMode='signin',initialNotice=''}:{initialMode?:'
     throw new Error(result.error.status===429?t("auth_form.too_many_attempts_please_wait_a_minute_and_try_again"):result.error.message||t("auth_form.unable_to_sign_in"));
    }
    if(register){setPendingEmail(email);return;}
-   window.location.assign('/');
+   if((result.data as {twoFactorRedirect?:boolean}|undefined)?.twoFactorRedirect)return;
+   let setupRequired=false;
+   try{const status=await fetch('/api/admin/security-status',{cache:'no-store'});if(status.ok)setupRequired=(await status.json() as {twoFactorSetupRequired?:boolean}).twoFactorSetupRequired===true;}catch{}
+   window.location.assign(setupRequired?'/admin-two-factor/setup':'/');
   }catch(err){setError(err instanceof Error?err.message:t("auth_form.unable_to_connect_please_try_again"));}
   finally{setBusy(false);}
  }

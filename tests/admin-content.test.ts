@@ -22,7 +22,11 @@ async function fixture() {
  for(const id of ['p1','p2','story'])await pool.query(`INSERT INTO posts(id,author_id,media,caption,kind,created_at,media_options,aspects) VALUES($1,'author',$2,'Test caption',$3,1,$4,'[1,2]')`,[id,JSON.stringify(['/media/coast.jpg','/media/japan.jpg']),id==='story'?'story':'post',JSON.stringify([{ratio:'original',fit:'contain',alt:'coast'},{ratio:'original',fit:'contain',alt:'japan'}])]);
  await pool.query(`UPDATE posts SET media='["/media/coast.jpg"]',aspects='[1]' WHERE id='story'`);
  await pool.query(`INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','author','Original comment',1)`);
- const act=(operation:string,ids=['p1'],extra:Record<string,unknown>={},actor='admin')=>moderateContent(pool,actor,{resource:'posts',operation,ids,reason:'test reason',confirmation:ids.length===1?ids[0]:`CONFIRM ${ids.length}`,...extra});
+ const act=async(operation:string,ids=['p1'],extra:Record<string,unknown>={},actor='admin')=>{
+  let confirmation=ids.length===1?ids[0]:`CONFIRM ${ids.length}`;
+  if(['delete','purge'].includes(operation)&&ids.length===1){const {rows:[item]}=await pool.query('SELECT id,caption FROM posts WHERE id=$1',[ids[0]]);if(item)confirmation=String(item.caption||'Untitled').trim().slice(0,80)||String(item.id);}
+  return moderateContent(pool,actor,{resource:'posts',operation,ids,reason:'test reason',confirmation,...extra});
+ };
  return {db,pool,act};
 }
 test('content guard, bulk bounds, confirmation and SQL-bound filters fail closed',async()=>{

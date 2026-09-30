@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogFooter } f
 import type { UserAction } from '@/lib/admin/users';
 import type { UserFilters } from '@/lib/admin/queries';
 
-const labels: Record<UserAction, string> = { ban: 'Ban account', unban: 'Unban account', promote: 'Promote to admin', demote: 'Demote to user', signout: 'Force sign-out', verify: 'Mark email verified', delete: 'Move account to trash', restore: 'Restore account', resetPassword: 'Send password reset' };
+const labels: Record<UserAction, string> = { ban: 'Ban account', unban: 'Unban account', promote: 'Promote to admin', promoteModerator: 'Promote to moderator', demote: 'Demote to user', signout: 'Force sign-out', verify: 'Mark email verified', delete: 'Move account to trash', restore: 'Restore account', resetPassword: 'Send password reset' };
 export function UserActions({ id, email, actions }: { id: string; email: string; actions: UserAction[] }) {
   const router = useRouter();
   const trigger = useRef<HTMLButtonElement | null>(null);
@@ -34,8 +34,9 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
       <form onSubmit={submit} className="admin-confirm">
         <DialogDescription>This action affects {email}. Type the exact email to confirm.</DialogDescription>
         {selected === 'verify' && <p>Only verify after independently confirming ownership of this email.</p>}
+        {['promote','promoteModerator','demote'].includes(String(selected))&&<p>Only an owner may grant or revoke roles. A role change requires an audit reason, exact account email, email verification and enabled two-factor authentication before admin access becomes available.</p>}
         <label>Confirmation email<input autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} maxLength={320} required /></label>
-        <label>Reason {selected === 'ban' ? '(required)' : '(optional)'}<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500} required={selected === 'ban'} /></label>
+        <label>Reason {selected === 'ban' ? '(required)' : '(optional)'}<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500} required={['ban','promote','promoteModerator','demote'].includes(String(selected))} /></label>
         {selected === 'ban' && <label>Ban until (your local time; blank means indefinite)<input type="datetime-local" value={expires} onChange={e => setExpires(e.target.value)} /></label>}
         {message && <p role="alert">{message}</p>}
         <DialogFooter><button className="admin-button" type="button" disabled={pending} onClick={() => setSelected(null)}>Cancel</button><button className="admin-button admin-primary" type="submit" disabled={pending || confirmation !== email}>{pending ? 'Saving…' : 'Confirm action'}</button></DialogFooter>

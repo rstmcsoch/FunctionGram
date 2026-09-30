@@ -17,7 +17,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 | 6 | Editable labels & copy | Applied and merged to main (PR #22) | `phase06.patch` |
 | 7 | Media & upload pipeline | Applied and merged to main (PR #23) | `patch07.patch` |
 | 8 | Moderation: reports, filters, safety | Applied on `arena/01a0ec62-functiongram`; deployment pending | `patch 08.patch` |
-| 9–12 | IP allowlisting through handover | Not started | — |
+| 9 | Hardening: 2FA, roles, session policy, audit viewer | Done locally; verification below | `patches/phase-09-hardening.patch` |
+| 10–12 | Analytics through handover | Not started | — |
 
 No application code, environment files, secrets, or production data changed in discovery.
 
@@ -464,3 +465,44 @@ Implemented locally on the complete Phase 1–7 baseline (`67c0f89`) as a focuse
 - The progress-document hunk was merged manually because it was authored against a tail without the retained Phase 6/7 integration notes. Its Phase 8 section is preserved verbatim above this note; nothing from the upload was cut.
 - Verified in this checkout: `npm run typecheck`, `npm run lint` (0 errors, 7 existing image warnings), `npm run build` (now lists `/rstmcadmin/moderation` and `/api/admin/moderation`) and `npm run test:vercel` (**93 tests, 90 passed, 0 failed, 3 optional managed-PostgreSQL skips**).
 - A live dev-server smoke test against isolated PGlite passed: guest/user/admin guards on the page and API, admin page render of all four surfaces, filtered report queue, assign/notes/dismiss with audit rows, account-safety round trip, draft preview, published filters rejecting a real social write with 422, and an audited rate-limit clear built from real Better Auth sign-in buckets with the client address never disclosed.
+
+## Phase 9 — Hardening: 2FA, admin roles, session policy, audit viewer
+
+Implemented locally on the complete Phase 1–8 checkout. This increment preserves the existing email/password sign-in and `/rstmcadmin`, keeps the configured bootstrap account's role exactly `admin`, and makes `owner`-only operations explicit. No push, PR, production access, or IP address configuration was performed.
+
+### Delivered
+
+- Better Auth TOTP/recovery-code two-factor authentication, with an isolated first-enrollment route and a five-minute sign-in challenge. An admin who has not completed enrollment may reach only that setup flow; the ordinary admin page/API guard requires an active, verified database role, completed 2FA, permitted IP (when configured), and a fresh session. The TOTP plugin has failed-attempt lockout and does not trust devices.
+- Static, server-enforced `owner`, `admin`, and `moderator` permission matrix. Owners retain all permissions and alone grant/revoke roles, ban privileged accounts, and permanently purge media. Admins keep ordinary user/content/settings operations but cannot grant roles. Moderators can read/triage reports and hide content, but cannot access account promotion, settings, media, security, or audit administration.
+- Absolute 12-hour administrator-session policy without shortening ordinary user sessions. Expired admin sessions are denied and removed.
+- Searchable/filterable, bounded audit viewer and CSV export. Historical rows remain visible. Migration 10 installs an append-only database trigger that rejects updates/deletes; CSV export neutralizes spreadsheet formulas. Reads/exports require `audit.read` and use the standard authorization, CSRF, and no-store controls.
+- Exact-target typed confirmations remain enforced for destructive actions. Report ban confirmation is the target account's exact email; hide/dismiss confirmation is the report ID. Existing user/content/media destructive safeguards and owner-only protections remain intact.
+- Optional server-side `ADMIN_IP_ALLOWLIST` supports exact IPv4/IPv6 addresses and CIDRs. An unset/empty value disables the restriction; malformed nonempty policy fails closed. No owner IP is guessed or added to deployment configuration.
+- New administrator device detection stores an HMAC fingerprint (not the tuple) in `admin_login_devices`, appends an audit event, and sends a rate-limited security email. The email includes the observed IP/browser details, with bounded/escaped text; actual provider delivery was not attempted.
+- Additive, repeatable migration 10 adds the device registry and audit indexes/immutability trigger. The Better Auth `twoFactor` schema remains registered from the existing migration. No destructive migration or new runtime dependency was introduced.
+
+### Verification
+
+- `npm run typecheck -- --pretty false`, `npm run lint`, `npm run build`, and `git diff --check` pass. Lint has **0 errors** and 7 existing public `<img>` warnings.
+- Full `npm run test:vercel`: **97 tests, 94 passed, 0 failed, 3 optional managed-PostgreSQL tests skipped** because no isolated managed database URL was supplied. The additional post-change focused user/moderation run passed **11/11**.
+- `tests/admin-hardening.test.ts` covers the static role matrix, owner-only role grants, mandatory 2FA disable policy, 12-hour session policy, exact-IP/CIDR allowlist parsing and fail-closed errors, HMAC device notice/audit behavior, CSV formula neutralization and audit immutability.
+- `tests/two-factor.test.ts` exercises real Better Auth TOTP enrollment, password-only login with no usable admin session, TOTP challenge completion, and rejection of administrator 2FA disable. `tests/admin-users.test.ts` and `tests/moderation.test.ts` cover exact typed confirmations and owner/admin/moderator protections.
+- No production database, admin account, deployment setting, owner IP, real email provider, secret, or object storage was changed. Optional managed-PostgreSQL checks remain unverified in this environment.
+
+### Apply and operate
+
+1. Apply `patches/phase-09-hardening.patch` only after the complete Phase 1–8 implementation; `FunctionGram-Phase-9-Hardening.patch` is an identical copy, so apply only one. Preserve migrations 1–9 and append migration 10. Run typecheck, lint, the full test suite and production build before deployment.
+2. Keep `ADMIN_IP_ALLOWLIST` empty unless the owner/operator has confirmed the actual stable network address and a recovery path. When enabled, include all intentionally supported operator addresses/CIDRs; a wrong value can lock out all admin page/API access.
+3. Sign in through the existing email/password flow. The admin account is redirected to `/admin-two-factor/setup`; enroll an authenticator and securely retain the generated recovery codes before continuing to `/rstmcadmin`.
+4. Use `/rstmcadmin/security` to review the matrix/session policy and `/rstmcadmin/audit` for read-only history and CSV export. Keep a verified owner recovery path available; do not disable an owner's factor through the application.
+5. Real Brevo delivery, target Vercel/Neon behavior, and optional allowlist routing still require preview-environment verification. No remote operation was attempted in this session.
+
+**Next:** Phases 10–12 are not started or authorized by this Phase 9 task.
+
+### Integration verification — 2026-09-30 (Phase 9)
+
+- Applied on the complete Phase 1–8 checkout (`57144fb`) as branch `arena/01a0f016-functiongram` for review. All 66 file diffs are present, and no earlier feature, migration, test or setting was removed.
+- The upload was transport-damaged in exactly one byte: the final hunk of `tests/vercel.test.ts` had no trailing newline, so `git apply` aborted with `corrupt patch at line 2217`. Unlike `patch07.patch` and `patch 08.patch` there were no HTML-mangled `--- /dev/null` markers and no stripped context indentation. Appending the missing newline restored the artifact; the repaired `phase09.patch` is retained in the repository and now passes `git apply --check` against the Phase 1–8 tree apart from this progress document, which is the only file merged by hand.
+- 63 of the 66 sections landed byte-identical to the upload's declared output hashes (`git hash-object`). `README.md` and `lib/admin/core.ts` carry pre-existing base-revision drift outside the patched regions (their hunks still land exactly as authored), and `patches/ADMIN_PROGRESS.md` was merged manually because its table and tail context predate the retained Phase 6–8 notes; the Phase 9 section above is preserved verbatim.
+- Verified in this checkout: `npm run typecheck`; `npm run lint` (0 errors, the 7 existing public image warnings); `npm run build`, which now lists `/admin-two-factor/setup`, `/two-factor`, `/rstmcadmin/audit`, `/rstmcadmin/security`, `/api/admin/audit` and `/api/admin/security-status`; `git diff --check` clean; and `npm run test:vercel` at **101 tests, 98 passed, 0 failed, 3 optional managed-PostgreSQL skips**.
+- The six pre-existing `tests/social.test.ts` failures inherited from the demo-data removal commits (`49db422`, `c60c773`) are fixed at the test layer only. That suite now creates its own `sample_author`/`sample_post` fixture — explicitly `is_demo=0`, because `bootstrap()` deletes demo rows — instead of expecting the removed autogenerated dataset. Application seeding was not restored.
