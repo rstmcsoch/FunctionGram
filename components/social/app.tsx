@@ -5,7 +5,7 @@ import {useLabels} from "./labels";
 import {Feature,FeatureContext} from "./features";
 import {navigationLabel} from "@/lib/admin/labels";
 import {ALL_FEATURES,VIEW_FEATURES} from "@/lib/features";
-import { Brand, Banners, PublicFooter, navIcons } from './appearance';
+import { Brand, Banners, LiveAnnouncements, PublicFooter, navIcons, type CmsFooterPage, type LiveAnnouncement } from './appearance';
 import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import {
@@ -32,7 +32,7 @@ import type { SocialData, Post, Person, Comment } from "@/lib/types";
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
 type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
-export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE }: { initial: SocialData | null; appearance?: Appearance }) {
+export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE, cmsPages = [], announcements = [] }: { initial: SocialData | null; appearance?: Appearance; cmsPages?: CmsFooterPage[]; announcements?: LiveAnnouncement[] }) {
   const t=useLabels();
   const [data, setData] = useState<SocialData>(initial || emptyData);
   const mediaPolicy=useMediaPolicy();const resolvedFlags=data.features||ALL_FEATURES;const flags={...resolvedFlags,uploads:resolvedFlags.uploads&&mediaPolicy.enabled};
@@ -448,6 +448,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
       <main id="main-content" className={"main-surface view-" + view}>
         <Banners appearance={appearance}/>
+        <LiveAnnouncements items={announcements}/>
         {!data.me && (
           <div className="guest-auth-bar glass-card">
             <p>{t("app.share_your_moments_on")}{appearance.name}</p>
@@ -499,7 +500,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
             )}
           </div>
         )}
-        <PublicFooter appearance={appearance}/>
+        <PublicFooter appearance={appearance} cmsPages={cmsPages}/>
       </main>
       <FloatingDock items={appearance.nav.filter(item=>item.enabled&&item.dock)} active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 

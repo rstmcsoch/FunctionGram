@@ -442,6 +442,7 @@ const notificationFilters = [
   ["comment", "Comments"],
   ["follow", "Follows"],
   ["tag", "Tags"],
+  ["broadcast", "Announcements"],
 ] as const;
 
 export function NotificationsView({ notifications, posts, openPost, onProfile }: {
@@ -453,7 +454,7 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
   const groups = useMemo(() => {
     const result: NotificationGroup[] = [];
     for (const notification of notifications) {
-      const key = notification.kind + ":" + (notification.post_id || "none");
+      const key = notification.kind === 'broadcast' ? `broadcast:${notification.broadcast_id || notification.id}` : notification.kind + ":" + (notification.post_id || "none");
       const last = result[result.length - 1];
       if (last && last.key === key && last.actors.length < 3) {
         last.actors.push(notification);
@@ -471,6 +472,7 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
   // post is missing, fetch it straight from the API before opening it.
   const activate = async (group: NotificationGroup) => {
     const first = group.actors[0];
+    if (group.kind === 'broadcast') return;
     if (!group.postId) { onProfile(first.actor_id); return; }
     const local = posts.find(p => p.id === group.postId);
     if (local) { openPost(local); return; }
@@ -501,11 +503,12 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
       {!notifications.length ? (
         <Empty icon={<Heart />} heading={t("views.you_re_all_caught_up")} body={t("views.when_someone_likes_comments_or_follows_you_you_ll_see_it_here")} />
       ) : !visibleGroups.length ? (
-        <Empty icon={<Heart />} heading={t("views.nothing_here_yet")} body={t("views.no") + (filter === "all" ? "" : t(filter==="like"?"notification.like":filter==="comment"?"notification.comment":filter==="follow"?"notification.follow":"notification.tag") + " ") + t("views.notifications_yet")} />
+        <Empty icon={<Heart />} heading={t("views.nothing_here_yet")} body={t("views.no") + (filter === "all" ? "" : t(filter==="like"?"notification.like":filter==="comment"?"notification.comment":filter==="follow"?"notification.follow":filter==="broadcast"?"notification.announcement":"notification.tag") + " ") + t("views.notifications_yet")} />
       ) : visibleGroups.map(group => {
         const first = group.actors[0];
         const others = group.actors.length - 1;
-        const label = group.kind === "like" ? t("views.liked_your_post") : group.kind === "follow" ? t("views.started_following_you") : group.kind === "comment" ? t("views.commented_on_your_post") : group.kind === "tag" ? t("views.tagged_you_in_a_post") : t("views.interacted_with_you");
+        const fallbackLabel = group.kind === "like" ? t("views.liked_your_post") : group.kind === "follow" ? t("views.started_following_you") : group.kind === "comment" ? t("views.commented_on_your_post") : group.kind === "tag" ? t("views.tagged_you_in_a_post") : group.kind === "broadcast" ? t("views.sent_you_an_announcement") : t("views.interacted_with_you");
+        const label = first.message_text || first.template_text || fallbackLabel;
         const post = group.postId ? posts.find(p => p.id === group.postId) : null;
         return (
           <button className={"notification-row " + (group.unread ? "unread" : "")} key={group.key + ":" + first.id}

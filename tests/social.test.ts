@@ -292,6 +292,19 @@ test('blocking hides content, removes follows, and blocks messaging one way', as
   assert.equal(restored.status, 200);
 });
 
+test('Phase 10 per-account DM controls deny new sends by either participant without exposing the restriction', async () => {
+  const pool = await getPool();
+  await pool.query('INSERT INTO admin_message_controls(profile_id,dm_disabled,reason,updated_at,updated_by) VALUES($1,true,$2,$3,$4)', [bob.id,'policy test',Date.now(),'admin']);
+  const recipientRestricted = await api(alice,{action:'message',id:bob.id,body:'should not arrive'});
+  assert.equal(recipientRestricted.status,403);
+  await pool.query('DELETE FROM admin_message_controls WHERE profile_id=$1',[bob.id]);
+  await pool.query('INSERT INTO admin_message_controls(profile_id,dm_disabled,reason,updated_at,updated_by) VALUES($1,true,$2,$3,$4)', [alice.id,'policy test',Date.now(),'admin']);
+  const senderRestricted = await api(alice,{action:'message',id:carol.id,body:'should not leave'});
+  assert.equal(senderRestricted.status,403);
+  await pool.query('DELETE FROM admin_message_controls WHERE profile_id=$1',[alice.id]);
+  assert.equal((await api(alice,{action:'message',id:carol.id,body:'restriction is removed'})).status,200);
+});
+
 test('reports are recorded once per reason and validated', async () => {
   const first = await api(alice, { action: 'report', id: bob.id, target_type: 'profile', reason: 'spam' });
   assert.equal(first.status, 200);

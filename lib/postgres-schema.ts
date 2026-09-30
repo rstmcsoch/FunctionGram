@@ -172,3 +172,24 @@ export const adminHardeningUpgradeStatements=[
  'DROP TRIGGER IF EXISTS admin_audit_immutable ON admin_audit_log',
  'CREATE TRIGGER admin_audit_immutable BEFORE UPDATE OR DELETE ON admin_audit_log FOR EACH ROW EXECUTE FUNCTION reject_admin_audit_mutation()',
 ];
+
+// Version 11: privacy-safe communication tools, delivery controls, and CMS support.
+export const adminCommsUpgradeStatements=[
+ 'ALTER TABLE messages ADD COLUMN IF NOT EXISTS redacted_at bigint',
+ 'ALTER TABLE messages ADD COLUMN IF NOT EXISTS redacted_by text',
+ 'ALTER TABLE messages ADD COLUMN IF NOT EXISTS redaction_reason text',
+ 'ALTER TABLE notifications ADD COLUMN IF NOT EXISTS message_text text',
+ 'ALTER TABLE notifications ADD COLUMN IF NOT EXISTS broadcast_id text',
+ 'CREATE INDEX IF NOT EXISTS notifications_broadcast_idx ON notifications(broadcast_id) WHERE broadcast_id IS NOT NULL',
+ `CREATE TABLE IF NOT EXISTS admin_message_controls(profile_id text PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,dm_disabled boolean NOT NULL DEFAULT false,reason text NOT NULL DEFAULT '',updated_at bigint NOT NULL,updated_by text NOT NULL)`,
+ 'CREATE INDEX IF NOT EXISTS admin_message_controls_disabled_idx ON admin_message_controls(profile_id) WHERE dm_disabled=true',
+ `CREATE TABLE IF NOT EXISTS admin_notification_templates(kind text PRIMARY KEY,enabled boolean NOT NULL DEFAULT true,template_text text NOT NULL,updated_at bigint NOT NULL DEFAULT 0,updated_by text NOT NULL DEFAULT '')`,
+ `INSERT INTO admin_notification_templates(kind,enabled,template_text) VALUES ('like',true,'liked your post'),('comment',true,'commented on your post'),('follow',true,'started following you'),('tag',true,'tagged you in a post'),('broadcast',true,'sent you an announcement') ON CONFLICT(kind) DO NOTHING`,
+ `CREATE OR REPLACE FUNCTION suppress_disabled_admin_notification() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM admin_notification_templates WHERE kind=NEW.kind AND enabled=true) THEN RETURN NULL; END IF; RETURN NEW; END $$`,
+ 'DROP TRIGGER IF EXISTS admin_notification_kind_gate ON notifications',
+ 'CREATE TRIGGER admin_notification_kind_gate BEFORE INSERT ON notifications FOR EACH ROW EXECUTE FUNCTION suppress_disabled_admin_notification()',
+ `CREATE TABLE IF NOT EXISTS admin_email_controls(id integer PRIMARY KEY CHECK(id=1),paused boolean NOT NULL DEFAULT true,daily_cap integer NOT NULL DEFAULT 25,sent_today integer NOT NULL DEFAULT 0,day_start bigint NOT NULL DEFAULT 0,updated_at bigint NOT NULL DEFAULT 0,updated_by text NOT NULL DEFAULT '')`,
+ 'INSERT INTO admin_email_controls(id) VALUES(1) ON CONFLICT(id) DO NOTHING',
+ 'CREATE INDEX IF NOT EXISTS site_pages_published_footer_idx ON site_pages(published,show_in_footer,footer_order)',
+ 'CREATE INDEX IF NOT EXISTS announcements_live_idx ON announcements(published,starts_at,ends_at)',
+];

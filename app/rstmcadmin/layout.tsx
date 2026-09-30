@@ -19,6 +19,7 @@ const navigation: {label:string;path:string;permission:AdminPermission}[] = [
   {label:'Safety',path:'/moderation',permission:'moderation.read'},
   {label:'Audit',path:'/audit',permission:'audit.read'},
   {label:'Security & roles',path:'/security',permission:'security.read'},
+  {label:'Communications',path:'/communications',permission:'messages.read'},
 ];
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const actor=await requireAdminPage();

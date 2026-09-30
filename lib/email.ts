@@ -182,6 +182,32 @@ export function createAdminNewDeviceEmailSender(env: Environment = process.env, 
   };
 }
 
+export function createAdminCampaignEmailSender(env: Environment = process.env, fetcher: typeof fetch = fetch) {
+  const { apiKey, senderEmail, senderName } = brevoConfiguration(env);
+  return async (details: { to: string; subject: string; message: string }) => {
+    if (!/^[^\\r\\n]{1,160}$/.test(details.subject) || details.message.length > 5000) throw new Error('Invalid administrator campaign email.');
+    let response: Response;
+    try {
+      response = await fetcher('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': apiKey, 'content-type': 'application/json', accept: 'application/json' },
+        signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({
+          sender: { name: senderName, email: senderEmail },
+          to: [{ email: details.to }],
+          subject: details.subject,
+          textContent: details.message,
+          htmlContent: `<html><body style="font-family:Arial,sans-serif;color:#171717"><main style="max-width:640px;margin:auto"><h1>RSTMC</h1><pre style="white-space:pre-wrap;font:inherit">${escapeHtml(details.message)}</pre></main></body></html>`,
+          tags: ['admin-campaign'],
+        }),
+      });
+    } catch { throw new Error('Brevo administrator campaign request failed.'); }
+    if (!response.ok) throw new Error(`Brevo administrator campaign rejected (HTTP ${response.status}).`);
+    const result = await response.json().catch(() => null) as { messageId?: unknown } | null;
+    if (typeof result?.messageId !== 'string') throw new Error('Brevo did not acknowledge the administrator campaign.');
+  };
+}
+
 export function createVerificationEmailSender(env: Environment = process.env, fetcher: typeof fetch = fetch) {
   const { apiKey, senderEmail, senderName } = brevoConfiguration(env);
   return async ({ user, url }: VerificationEmail) => {

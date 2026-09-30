@@ -13,7 +13,7 @@ import {assertAdminIpAllowed,isAdminIpAllowed,parseAdminIpAllowlist} from '../li
 import {auditFilters,exportAuditCsv,listAudit} from '../lib/admin/audit';
 import {createAdminNewDeviceEmailSender} from '../lib/email';
 
-const statements=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements];
+const statements=[...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements];
 async function fixture(){
  const db=new PGlite();for(const sql of statements)await db.exec(sql);
  const pool=serializedPool({async query(sql,values){const result=await db.query(sql,values);return {rows:result.rows as Record<string,unknown>[],rowCount:result.affectedRows??result.rows.length};}});
@@ -83,7 +83,7 @@ test('optional admin IP allowlist supports exact IPv4/IPv6 and CIDRs; invalid po
  assert.equal(isAdminIpAllowed(new Headers(),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
  assert.equal(isAdminIpAllowed(new Headers({'x-forwarded-for':'192.0.2.14, 10.0.0.2'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),true);
  assert.throws(()=>assertAdminIpAllowed(new Headers({'x-real-ip':'192.0.2.14'}),{ADMIN_IP_ALLOWLIST:'not-an-ip'}),{status:503});
- assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,10);
+ assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===10)?.statements,schema.adminHardeningUpgradeStatements);
 });
 
 test('new admin devices store only HMAC fingerprints, audit once, and trigger safe notices',async()=>{

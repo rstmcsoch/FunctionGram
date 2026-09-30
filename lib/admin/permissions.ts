@@ -17,6 +17,15 @@ export const ADMIN_PERMISSIONS = [
   'moderation.rates',
   'audit.read',
   'security.read',
+  'messages.read',
+  'messages.breakGlass',
+  'messages.moderate',
+  'messages.manage',
+  'notifications.manage',
+  'broadcast.send',
+  'email.send',
+  'pages.manage',
+  'announcements.manage',
 ] as const;
 export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
 

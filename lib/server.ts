@@ -163,7 +163,8 @@ export async function availablePost(viewer:string|null,id:string) {
 }
 export async function notifications(viewer:string) {
   const policy=await featurePolicy(viewer);if(!policy.flags.notifications)return {results:[]};
-  return db().prepare(`SELECT n.*,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
+  return db().prepare(`SELECT n.*,nt.template_text,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
+    JOIN admin_notification_templates nt ON nt.kind=n.kind AND nt.enabled=true
     JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
     WHERE ${policy.flags.stories?'TRUE':"(p.kind IS NULL OR p.kind!='story')"} AND ${policy.flags.reels?'TRUE':"(p.kind IS NULL OR p.kind!='reel')"} AND ${policy.flags.comments?'TRUE':"n.kind!='comment'"} AND ${policy.flags.likes?'TRUE':"n.kind!='like'"} AND ${policy.flags.follow?'TRUE':"n.kind!='follow'"} AND ${policy.flags.tagging?'TRUE':"n.kind!='tag'"} AND n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
     AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))

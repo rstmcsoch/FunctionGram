@@ -6,6 +6,7 @@ import { publicAppearance } from '@/lib/public-appearance';
 import {bootstrap} from '@/lib/server';
 import {missingConfiguration} from '@/lib/config';
 import type {SocialData} from '@/lib/types';
+import { activePublicAnnouncements, publicCmsFooterPages } from '@/lib/public-communications';
 import RstmcApp from '@/components/social/app';
 export const dynamic='force-dynamic';
 export default async function Home(){
@@ -17,5 +18,6 @@ export default async function Home(){
  if(!viewer&&!policy.flags.guestBrowsing)return <AccessScreen title={t("page.sign_in_to_continue")} message={t("page.browsing_is_available_to_signed_in_members_")} appearance={appearance} flags={policy.flags} maintenance={false}/>;
  let initial:SocialData|null=null;
  try{initial=await bootstrap();}catch(error){console.error('Feed unavailable',error);}
- return <RstmcApp initial={initial} appearance={await publicAppearance()}/>;
+ const [cmsPages,announcements]=await Promise.all([publicCmsFooterPages(),activePublicAnnouncements(!!viewer)]);
+ return <RstmcApp initial={initial} appearance={appearance} cmsPages={cmsPages} announcements={announcements}/>;
 }
