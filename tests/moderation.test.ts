@@ -15,7 +15,7 @@ async function addUser(id:string,role='user'){
  await pool.query('INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,\'\',\'\',0,1)',[id]);
 }
 async function seed(){
- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements])await db.exec(sql);
+ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements])await db.exec(sql);
  await addUser('owner','owner');await addUser('admin','admin');await addUser('guarded-admin','admin');await addUser('reporter');await addUser('target');await addUser('viewer');
  await pool.query("INSERT INTO posts(id,author_id,media,created_at,caption) VALUES('target-post','target','[]',1,'a safe caption'),('shadow-post','target','[]',2,'another safe caption')");
 }
@@ -23,7 +23,7 @@ const report=async(id:string,targetType:string,targetId:string,reason='spam')=>p
 
  test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
   await seed();
-  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11]);
+  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
   // Repeat only the additive version statements as the migration runner does.

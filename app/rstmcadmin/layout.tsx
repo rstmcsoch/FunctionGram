@@ -20,6 +20,10 @@ const navigation: {label:string;path:string;permission:AdminPermission}[] = [
   {label:'Audit',path:'/audit',permission:'audit.read'},
   {label:'Security & roles',path:'/security',permission:'security.read'},
   {label:'Communications',path:'/communications',permission:'messages.read'},
+  {label:'Analytics',path:'/analytics',permission:'analytics.read'},
+  {label:'Exports',path:'/exports',permission:'exports.read'},
+  {label:'System tools',path:'/system',permission:'system.read'},
+  {label:'Operator guide',path:'/guide',permission:'system.read'},
 ];
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const actor=await requireAdminPage();

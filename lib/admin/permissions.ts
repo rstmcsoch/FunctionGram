@@ -26,6 +26,13 @@ export const ADMIN_PERMISSIONS = [
   'email.send',
   'pages.manage',
   'announcements.manage',
+  'analytics.read',
+  'exports.read',
+  'system.read',
+  'system.cache',
+  'system.demo',
+  'system.prune',
+  'system.sql',
 ] as const;
 export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
 
@@ -33,7 +40,7 @@ export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
 // deployment; permission grants are never stored in editable site settings.
 export const ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
   owner: ADMIN_PERMISSIONS,
-  admin: ADMIN_PERMISSIONS.filter(permission => permission !== 'roles.manage'),
+  admin: ADMIN_PERMISSIONS.filter(permission => !['roles.manage','system.demo','system.prune','system.sql'].includes(permission)),
   moderator: [
     'admin.access', 'dashboard.read', 'content.read', 'content.moderate',
     'moderation.read', 'moderation.triage',
