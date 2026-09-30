@@ -10,6 +10,7 @@
      3. admin-shell.css      §6 app shell and §7 responsive rules
      4. admin-components.css §8 reusable primitives
      5. admin-pages.css      §9 page recipes and §10 designer touches
+     6. admin-fixes.css      fix pass 1 — layout, colour and responsive repairs
 
    Later layers must win at equal specificity, so they are imported last.
    ========================================================================== */
@@ -19,3 +20,4 @@
 @import './admin-shell.css';
 @import './admin-components.css';
 @import './admin-pages.css';
+@import './admin-fixes.css';

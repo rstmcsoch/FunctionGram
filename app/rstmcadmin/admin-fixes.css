@@ -1,0 +1,489 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — FIX PASS 1 (visual only)
+
+   Loaded last by admin.css so these corrections always win the cascade.
+   No text, route, API, data or behaviour is touched by this layer: it only
+   repairs layout, colour and responsive defects reported against Phase 12.
+
+     1. Sidebar overlap        5. Tables
+     2. Nav link colours       6. Buttons
+     3. Account card           7. Filter forms
+     4. Page head              8. Responsive self-check hardening
+   ========================================================================== */
+
+/* ==========================================================================
+   0. Field border tokens (§7 of the fix list)
+   ========================================================================== */
+
+.admin-shell,
+.admin-confirm-dialog {
+  --adm-field-border: #cfd3db;
+  --adm-field-border-hover: #b6bcc7;
+}
+
+html[data-theme="dark"] .admin-shell,
+html[data-theme="dark"] .admin-confirm-dialog,
+.dark .admin-shell,
+.dark .admin-confirm-dialog {
+  --adm-field-border: #3f3f49;
+  --adm-field-border-hover: #52525e;
+}
+
+@media (prefers-color-scheme: dark) {
+
+  html:not([data-theme]) .admin-shell,
+  html:not([data-theme]) .admin-confirm-dialog {
+    --adm-field-border: #3f3f49;
+    --adm-field-border-hover: #52525e;
+  }
+}
+
+/* ==========================================================================
+   1. Sidebar — nothing overlaps at any screen height
+   ========================================================================== */
+
+.admin-shell .admin-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--adm-s2);
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  background: var(--adm-bg);
+}
+
+/* Brand row: pinned to the top of the scroller, fully opaque. */
+.admin-shell .admin-sidebar > .admin-brand {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: none;
+  background: var(--adm-bg);
+}
+
+/* Nav: normal flow, never absolute, never a scroll container of its own. */
+.admin-shell .admin-nav {
+  position: static;
+  flex: none;
+  min-height: 0;
+  /* 8px shell gap + 4px = the 12px of clear space above the account card. */
+  padding-bottom: var(--adm-s1);
+}
+
+/* Account card: static, solid, pushed to the bottom only when there is room. */
+.admin-shell .admin-account {
+  position: static;
+  flex: none;
+  margin-top: auto;
+  background: var(--adm-muted-surface);
+}
+
+/* ==========================================================================
+   2. Nav link colours — must beat the global `.admin-shell a` accent rule
+   ========================================================================== */
+
+.admin-shell .admin-nav a.admin-nav-link {
+  color: var(--adm-text-2);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.admin-shell .admin-nav a.admin-nav-link svg {
+  color: var(--adm-text-3);
+}
+
+.admin-shell .admin-nav a.admin-nav-link:hover,
+.admin-shell .admin-nav a.admin-nav-link:focus-visible {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+  text-decoration: none;
+}
+
+.admin-shell .admin-nav a.admin-nav-link:hover svg,
+.admin-shell .admin-nav a.admin-nav-link:focus-visible svg {
+  color: var(--adm-text-2);
+}
+
+.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] {
+  background: var(--adm-active-bg);
+  color: var(--adm-accent-text);
+  font-weight: 600;
+}
+
+.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] svg {
+  color: var(--adm-accent-text);
+}
+
+/* ==========================================================================
+   3. Account card
+   ========================================================================== */
+
+.admin-shell .admin-account .admin-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-self: flex-start;
+}
+
+.admin-shell .admin-account-email {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   4. Page head — not sticky, nothing shows through it
+   ========================================================================== */
+
+.admin-shell .admin-page-head {
+  position: static;
+  top: auto;
+  z-index: auto;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.admin-shell .admin-page-head:not(.admin-page-head-banner) {
+  background: transparent;
+}
+
+/* ==========================================================================
+   5. Tables
+   ========================================================================== */
+
+.admin-shell .admin-table-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: auto;
+  scrollbar-color: var(--adm-text-3) transparent;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar-track {
+  background: var(--adm-muted-surface);
+  border-radius: 4px;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--adm-text-3);
+  border-radius: 4px;
+}
+
+.admin-shell .admin-table-scroll table {
+  table-layout: auto;
+  min-width: 720px;
+}
+
+/* Six columns or more need real breathing room. */
+.admin-shell .admin-table-scroll table.admin-table--wide {
+  min-width: 1180px;
+}
+
+/* Long identifiers wrap on word boundaries, never 1–6 characters per line. */
+.admin-shell .admin-table-scroll td,
+.admin-shell .admin-table-scroll td code,
+.admin-shell .admin-table-scroll td small {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.admin-shell .admin-table-scroll td.email-cell,
+.admin-shell .admin-table-scroll td.id-cell {
+  min-width: 220px;
+  word-break: normal;
+}
+
+/* Time. */
+.admin-shell .admin-table-scroll td.admin-cell-time,
+.admin-shell .admin-table-scroll th.admin-cell-time,
+.admin-shell .admin-table-scroll td.time-cell {
+  min-width: 190px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* Actor / identity. */
+.admin-shell .admin-table-scroll td.admin-cell-actor,
+.admin-shell .admin-table-scroll td.admin-cell-account {
+  min-width: 240px;
+  max-width: 360px;
+}
+
+.admin-shell .admin-cell-identity,
+.admin-shell .admin-actor-cell {
+  min-width: 0;
+}
+
+/* Action pill — the label always sits fully inside the pill. */
+.admin-shell .admin-table-scroll td.action-cell,
+.admin-shell .admin-table-scroll td.admin-cell-action {
+  min-width: 220px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.admin-shell .admin-table-scroll td.action-cell .admin-badge,
+.admin-shell .admin-table-scroll td.admin-cell-action .admin-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: none;
+  padding: 2px 10px;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Target. */
+.admin-shell .admin-table-scroll td.admin-cell-target {
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.admin-shell .admin-table-scroll td.admin-cell-target code {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* Reason, snapshot, network. */
+.admin-shell .admin-table-scroll td.admin-cell-reason {
+  min-width: 140px;
+}
+
+.admin-shell .admin-table-scroll td.admin-cell-diff {
+  min-width: 150px;
+  white-space: nowrap;
+}
+
+.admin-shell .admin-table-scroll td.admin-cell-diff pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 420px;
+}
+
+.admin-shell .admin-table-scroll td.admin-cell-network {
+  min-width: 160px;
+}
+
+/* Users, Content and Safety tables: identifiers keep a usable column. */
+.admin-shell .admin-table-scroll td .admin-cell-identity {
+  min-width: 200px;
+}
+
+.admin-shell .moderation-console .admin-table {
+  min-width: 720px;
+}
+
+/* ==========================================================================
+   6. Buttons — never stretch
+   ========================================================================== */
+
+.admin-shell .admin-button,
+.admin-confirm-dialog .admin-button {
+  width: auto;
+  max-width: 100%;
+  flex: none;
+}
+
+.admin-shell .admin-card > .admin-button,
+.admin-shell form > .admin-button,
+.admin-shell .admin-form-actions .admin-button,
+.admin-shell .admin-export-button {
+  align-self: flex-start;
+}
+
+/* Export row (Audit): a normal secondary button, left aligned. */
+.admin-shell .admin-export-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--adm-s2);
+  width: auto;
+  margin-top: var(--adm-s4);
+}
+
+@media (max-width: 479px) {
+
+  .admin-shell .admin-export-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   7. Filter forms
+   ========================================================================== */
+
+.admin-shell .admin-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: end;
+  gap: var(--adm-s3);
+  min-width: 0;
+}
+
+.admin-shell .admin-form-actions .admin-button,
+.admin-shell .admin-form-actions button {
+  align-self: center;
+  margin: 0;
+}
+
+@media (max-width: 479px) {
+
+  .admin-shell .admin-form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-shell .admin-form-actions .admin-button,
+  .admin-shell .admin-form-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Field borders. */
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea,
+.admin-confirm input,
+.admin-confirm select,
+.admin-confirm textarea,
+.admin-confirm-dialog input,
+.admin-confirm-dialog select,
+.admin-confirm-dialog textarea {
+  border-color: var(--adm-field-border);
+}
+
+.admin-shell input:hover:not(:disabled),
+.admin-shell select:hover:not(:disabled),
+.admin-shell textarea:hover:not(:disabled),
+.admin-confirm-dialog input:hover:not(:disabled),
+.admin-confirm-dialog select:hover:not(:disabled),
+.admin-confirm-dialog textarea:hover:not(:disabled) {
+  border-color: var(--adm-field-border-hover);
+}
+
+.admin-shell input:focus,
+.admin-shell select:focus,
+.admin-shell textarea:focus,
+.admin-confirm-dialog input:focus,
+.admin-confirm-dialog select:focus,
+.admin-confirm-dialog textarea:focus {
+  border-color: var(--adm-accent);
+  box-shadow: 0 0 0 3px var(--adm-accent-soft);
+}
+
+.admin-shell input[type="checkbox"],
+.admin-shell input[type="radio"],
+.admin-shell input[type="file"] {
+  width: auto;
+}
+
+/* ==========================================================================
+   8. Responsive hardening
+   ========================================================================== */
+
+/* No page-level sideways scroll; only the table cards scroll. */
+.admin-shell.admin-layout,
+.admin-shell .admin-panel,
+.admin-shell .admin-main,
+.admin-shell .admin-card,
+.admin-shell .admin-main > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-shell .admin-card,
+.admin-shell .admin-main section,
+.admin-shell .admin-main form,
+.admin-shell .admin-main fieldset {
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-main pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Grids collapse 4 → 2 → 1 instead of overflowing. */
+@media (max-width: 1023px) {
+
+  .admin-shell .analytics-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+
+  .admin-shell .admin-stats,
+  .admin-shell .analytics-chart-grid,
+  .admin-shell .feature-grid,
+  .admin-shell .comms-grid,
+  .admin-shell .media-settings-grid,
+  .admin-shell .media-filters,
+  .admin-shell .system-env-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell .admin-page-head-actions,
+  .admin-shell .admin-button-row,
+  .admin-shell .admin-action-grid {
+    width: 100%;
+  }
+}
+
+/* Mobile drawer: same structure, plus safe-area padding. */
+@media (max-width: 767px) {
+
+  .admin-shell .admin-sidebar {
+    height: 100dvh;
+    max-height: 100dvh;
+    padding-bottom: calc(var(--adm-s4) + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .admin-shell .admin-sidebar > .admin-brand {
+    position: sticky;
+    top: 0;
+    background: var(--adm-bg);
+  }
+
+  .admin-shell .admin-account {
+    margin-top: auto;
+  }
+}
+
+/* Short viewports: the account card simply follows the last link. */
+@media (max-height: 560px) {
+
+  .admin-shell .admin-account {
+    margin-top: var(--adm-s3);
+  }
+}
+
+/* Dialogs stay reachable on short screens. */
+.admin-confirm-dialog[data-slot="dialog-content"] {
+  max-height: min(90dvh, calc(100dvh - 32px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: max(var(--adm-s6), env(safe-area-inset-bottom, 0px));
+}
+
+/* Focus ring is always visible, including inside the scrolling sidebar. */
+.admin-shell .admin-nav a.admin-nav-link:focus-visible,
+.admin-shell .admin-button:focus-visible,
+.admin-shell .admin-topbar-button:focus-visible {
+  outline: 2px solid var(--adm-accent);
+  outline-offset: 2px;
+}
