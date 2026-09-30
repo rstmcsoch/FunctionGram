@@ -4,6 +4,7 @@ import { getPool } from '@/lib/postgres';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { dashboard } from '@/lib/admin/queries';
 import { StatCard, bytes } from '@/components/admin/ui';
+import { PageHead } from '@/components/admin/page-head';
 
 export default async function AdminHome() {
   const actor = await requireAdminPage();
@@ -12,8 +13,9 @@ export default async function AdminHome() {
   const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
   const number = (key: string) => Number(stats[key]).toLocaleString('en-IN');
   return <>
-    <p className="admin-eyebrow">Control room / Overview</p><h1>A pulse on your community.</h1>
+    <PageHead breadcrumb="Control room / Overview" title="A pulse on your community.">
     <p>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</p>
+    </PageHead>
     <section className="admin-stats" aria-label="Community statistics">
       <StatCard label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
       <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />

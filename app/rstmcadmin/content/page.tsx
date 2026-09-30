@@ -6,13 +6,16 @@ import { readSettings } from '@/lib/admin/settings';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { ContentSettings, ContentTable } from '@/components/admin/content';
 import { hasPermission } from '@/lib/admin/permissions';
+import { PageHead } from '@/components/admin/page-head';
 
 export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
   const actor=await requireAdminPage();let filter;
   try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
-  return <><p className="admin-eyebrow">Control room / Content</p><h1>Content & moderation</h1><p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
+  return <><PageHead breadcrumb="Control room / Content" title="Content & moderation">
+    <p>{data.total} matching items. Private, hidden and expired content is visible here to administrators only. Public views never bypass moderation.</p>
+    </PageHead>
     {settings&&hasPermission(actor.role,'settings.manage')&&<ContentSettings settings={settings}/>}<form className="admin-search" action={base}>
       <label>Search text<input name="q" maxLength={100} defaultValue={filter.q}/></label><label>Resource<select name="resource" defaultValue={filter.resource}><option value="posts">Posts, reels, stories</option><option value="comments">Comments</option></select></label>
       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
