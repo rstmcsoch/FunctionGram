@@ -146,6 +146,9 @@
   align-items: center;
   justify-content: center;
   gap: var(--adm-s2);
+  width: auto;
+  flex: none;
+  align-self: flex-start;
   min-height: 44px;
   padding: 0 var(--adm-s4);
   border: 1px solid var(--adm-border);
@@ -280,7 +283,7 @@
   min-height: 44px;
   width: 100%;
   padding: 10px var(--adm-s3);
-  border: 1px solid var(--adm-border);
+  border: 1px solid var(--adm-input-border, var(--adm-border));
   border-radius: var(--adm-r-control);
   background: var(--adm-card);
   color: var(--adm-text);
@@ -298,7 +301,7 @@
 .admin-shell input:hover:not(:disabled),
 .admin-shell select:hover:not(:disabled),
 .admin-shell textarea:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--adm-text-3) 60%, transparent);
+  border-color: var(--adm-input-border-hover, color-mix(in srgb, var(--adm-text-3) 60%, transparent));
 }
 
 .admin-shell input:focus,
@@ -512,6 +515,13 @@
   color: var(--adm-text-3);
 }
 
+/* Stat grids step 3 → 2 (700px, legacy layer) → 1 under 480px. */
+@media (max-width: 479px) {
+  .admin-shell .admin-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ==========================================================================
    Chips (§8.5)
    ========================================================================== */
@@ -660,6 +670,8 @@
 
    Tables stay tabular at every viewport. The scroll container owns the
    overflow so the admin page itself never develops sideways scrolling.
+   Column guards keep identities, IDs and actions readable: a long identifier
+   wraps inside a sane-width column instead of collapsing to a letter per line.
    ========================================================================== */
 
 .admin-shell .admin-table-scroll {
@@ -669,7 +681,7 @@
   overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: var(--adm-border) transparent;
+  scrollbar-color: color-mix(in srgb, var(--adm-text-3) 60%, transparent) transparent;
 }
 
 .admin-shell .admin-table-scroll::-webkit-scrollbar {
@@ -677,8 +689,12 @@
 }
 
 .admin-shell .admin-table-scroll::-webkit-scrollbar-thumb {
-  background: var(--adm-border);
+  background: color-mix(in srgb, var(--adm-text-3) 60%, transparent);
   border-radius: 4px;
+}
+
+.admin-shell .admin-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--adm-text-3);
 }
 
 .admin-shell .admin-table-scroll table {
@@ -686,6 +702,11 @@
   min-width: 720px;
   border-collapse: collapse;
   table-layout: auto;
+}
+
+/* Audited tables with 6+ columns (the audit log) get a wider floor. */
+.admin-shell .admin-table-scroll table.admin-table--wide {
+  min-width: 1180px;
 }
 
 .admin-shell .admin-table-scroll th,
@@ -701,10 +722,60 @@
   overflow-wrap: normal;
 }
 
-.admin-shell .admin-table-scroll td.email-cell,
+/* Column guards. min-widths stop the auto layout from squeezing an identity,
+   ID or action column into unreadable fragments; max-widths keep prose-y
+   columns from pushing the rest off-screen. */
+.admin-shell .admin-table-scroll td.action-cell {
+  min-width: 220px;
+}
+
+.admin-shell .admin-table-scroll td.target-cell {
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.admin-shell .admin-table-scroll td.actor-cell {
+  min-width: 240px;
+}
+
+.admin-shell .admin-table-scroll td.reason-cell {
+  min-width: 140px;
+}
+
+.admin-shell .admin-table-scroll td.snapshot-cell {
+  min-width: 150px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.admin-shell .admin-table-scroll td.network-cell {
+  min-width: 160px;
+}
+
+.admin-shell .admin-table-scroll td.email-cell {
+  min-width: 200px;
+}
+
 .admin-shell .admin-table-scroll td.id-cell {
+  min-width: 200px;
+}
+
+/* Identifiers wrap anywhere inside their guarded column, but never use
+   break-all-style shattering. */
+.admin-shell .admin-table-scroll td.email-cell,
+.admin-shell .admin-table-scroll td.id-cell,
+.admin-shell .admin-table-scroll td code {
   overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: normal;
+}
+
+/* The pill in an action cell hugs its text; the text always sits fully
+   inside it and is never clipped. */
+.admin-shell .admin-table-scroll td.action-cell .admin-badge {
+  display: inline-flex;
+  white-space: nowrap;
+  padding: 2px 10px;
+  overflow: visible;
 }
 
 .admin-shell .admin-actor-cell,
@@ -825,11 +896,16 @@
   box-shadow: none;
 }
 
-.admin-shell .admin-search button,
-.admin-shell .admin-search .admin-button,
-.admin-shell .moderation-filters button,
-.admin-shell .media-filters button {
-  align-self: end;
+/* Apply and Clear share one actions cell that spans the full row, so Clear
+   always sits right next to Apply instead of drifting to its own column. */
+.admin-shell .admin-search .admin-filter-actions,
+.admin-shell .moderation-filters .admin-filter-actions,
+.admin-shell .media-filters .admin-filter-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 @media (max-width: 479px) {
@@ -840,8 +916,28 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .admin-shell .admin-search .admin-button,
-  .admin-shell .admin-search button {
+  /* Under 480px the actions stack, each button full width. */
+  .admin-shell .admin-search .admin-filter-actions,
+  .admin-shell .moderation-filters .admin-filter-actions,
+  .admin-shell .media-filters .admin-filter-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-shell .admin-search .admin-filter-actions .admin-button,
+  .admin-shell .admin-search .admin-filter-actions button,
+  .admin-shell .moderation-filters .admin-filter-actions .admin-button,
+  .admin-shell .moderation-filters .admin-filter-actions button,
+  .admin-shell .media-filters .admin-filter-actions .admin-button,
+  .admin-shell .media-filters .admin-filter-actions button {
+    width: 100%;
+  }
+}
+
+/* The audit CSV export is a normal secondary button: natural width, left
+   aligned next to the filter card; full width only under 480px. */
+@media (max-width: 479px) {
+  .admin-shell .admin-audit-export {
     width: 100%;
   }
 }
@@ -1283,6 +1379,12 @@ body:has(.admin-confirm-dialog) [data-slot="dialog-overlay"] {
     width: 100%;
     max-width: none;
     max-height: 90dvh;
+    /* Tailwind v4 centres the dialog through the native `translate` property,
+       driven by these custom properties. Zeroing them docks the sheet at the
+       bottom edge; a literal `translate: 0 0` would be stripped as an initial
+       value by the CSS minifier, so the variables are reset instead. */
+    --tw-translate-x: 0;
+    --tw-translate-y: 0;
     transform: none;
     border-bottom: 0;
     border-radius: 20px 20px 0 0;
@@ -1332,3 +1434,4 @@ body:has(.admin-confirm-dialog) [data-slot="dialog-overlay"] {
     animation: none;
   }
 }
+

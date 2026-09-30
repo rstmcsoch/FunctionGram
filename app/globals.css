@@ -1439,9 +1439,13 @@ div[data-slot=dialog-content].post-viewer {
   .reel-actions{right:6px;bottom:96px}
   .reel-count{display:none}
 
-  /* modals become bottom sheets */
+  /* modals become bottom sheets. Tailwind v4 centers dialog-content with the
+     native translate property driven by --tw-translate-x/--tw-translate-y;
+     a literal `translate: 0 0` reset is dropped by the CSS minifier (it is
+     the property's initial value), so the vars have to be zeroed instead. */
   .social-modal[data-slot=dialog-content]{
-    top:auto;bottom:0;left:0;right:0;translate:0 0;
+    top:auto;bottom:0;left:0;right:0;
+    --tw-translate-x:0;--tw-translate-y:0;transform:none;
     width:100%;max-width:none;max-height:92dvh;
     border-radius:24px 24px 0 0;border-bottom:0;
   }

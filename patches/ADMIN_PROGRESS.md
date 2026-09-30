@@ -1,7 +1,7 @@
 # Admin panel progress
 
-Last updated: 2026-09-29 (Asia/Calcutta)  
-Branch: `arena/01a0e8f1-functiongram`  
+Last updated: 2026-09-30 (Asia/Calcutta)  
+Branch: `arena/01a0e8f1-functiongram` (redesign); fix pass 1 on `arena/01a0f148-functiongram`  
 Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
 
 ## Status
@@ -948,3 +948,98 @@ keeps the final table row fully visible.
 Patch: `patches/phase-3-pages-polish-qa.patch` (identical copy at
 `patches/phase-3-pages-polish-qa.patch.txt`), verified with `git apply --check`
 against a clean extraction of the Phase 2 commit `c7a5008`.
+
+## Fix pass 1 — fixbugs.md visual fixes (2026-09-30)
+
+Branch `arena/01a0f148-functiongram`, fix round over commit `7a1a14e`
+("Revise CSS for layout fixes in admin panel"). Visual only: CSS and markup,
+no text, feature, route, API, database, settings or logic changes.
+
+### fixbugs.md §1–§7
+
+| § | Fix | Where |
+| --- | --- | --- |
+| 1 | Sidebar is one flex column of `100dvh` that scrolls as a whole: brand row sticky at top with solid `var(--adm-bg)`, nav in normal flow (never absolute/fixed), account card `position:static` with `margin-top:auto` and a guaranteed >=12px gap; active link scrolled into view on load (`scrollIntoView({block:'nearest'})`); drawer mirrors the structure with `env(safe-area-inset-bottom)` padding | `admin-shell.css`, `admin-nav.tsx` |
+| 2 | Nav link colours scoped to `.admin-shell .admin-nav a` so the global accent link rule can never win; hover uses `var(--adm-text)` on `var(--adm-hover)`; only `[aria-current="page"]` gets `var(--adm-accent-text)` + weight 600 | `admin-shell.css` |
+| 3 | Role badge `inline-flex; width:fit-content; align-self:flex-start`; email `min-width:0` + ellipsis, full address in `title` | `admin-shell.css`, `admin-nav.tsx` |
+| 4 | Page head `position:static; background:transparent`; `backdrop-filter` removed | `admin-shell.css` |
+| 5 | `.admin-table--wide { min-width:1180px }` on the 7-column audit table; per-column min-widths (action 220, target 260-360, actor 240, reason 140, before/after 150, network/client 160), `nowrap` time cells, IDs `overflow-wrap:anywhere` (not `break-all`); right-edge scroll fade + visible 8px scrollbar; same rules on Users/Content/Safety tables | `admin-components.css`, `audit.tsx`, td classes across `users/content/media/moderation/cms/communications/analytics/security` |
+| 6 | Buttons never stretch (`width:auto; flex:none; align-self:flex-start`); audit export is a normal secondary button with a Download icon, left aligned, full width only under 480px; legacy `<768px` full-width stretch on card-footer buttons removed | `admin-components.css`, `audit.tsx`, `ui.tsx`, `admin-pages.css` |
+| 7 | Apply + Clear share one actions cell (`grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap`), stacked full-width under 480px; input borders `#3f3f49`/hover `#52525e` dark and `#cfd3db` light; 44px height and focus ring kept | `admin-components.css` + filter markup |
+
+### Bugs found by self-examination (beyond fixbugs.md)
+
+1. **Admin confirm dialog rendered half off-screen below 640px.** Tailwind v4
+   centers `dialog-content` with the native `translate` property
+   (`translate: var(--tw-translate-x) var(--tw-translate-y)`), and the CSS
+   minifier silently drops a literal `translate: 0 0` as an initial-value
+   declaration, so the bottom-sheet rule never docked the sheet
+   (top:-168/bottom:264 at 390x480). Fixed by zeroing `--tw-translate-x` /
+   `--tw-translate-y` (plus `transform:none`) inside the media query —
+   confirmed to survive the minifier and verified live.
+   `app/rstmcadmin/admin-components.css`.
+2. **Same toolchain bug in the public app.** `.social-modal` bottom sheets and
+   the fullscreen `.post-viewer` carried the same stripped `translate` reset,
+   so every public modal was shifted half off-screen on phones. Fixed with the
+   same custom-property reset; verified live at 390px: the sign-in sheet docks
+   bottom/full-width and the post viewer is exactly 390x844. `app/globals.css`.
+   (fixbugs.md's own guard rails do not prohibit `app/globals.css`; this is
+   flagged here explicitly because earlier phase notes treated it as
+   out-of-scope for admin phases.)
+3. **Security permission matrix widened the page at <=430px.** The
+   `.admin-visually-hidden` spans are absolutely positioned, so their
+   containing block escaped the table's scroll wrapper and extended the
+   document scroll width. `.admin-matrix-cell` is now `position:relative`,
+   keeping them inside the clipped scroll area. `admin-pages.css`.
+4. **Labels "Import JSON" overflowed at <=360px.** The button-styled label
+   wrapped a visible native file input. The input is now visually hidden but
+   stays focusable and label-activated; the file chooser was verified to open
+   (physical click at 1280px and 390px). `admin-legacy.css`.
+5. The mobile bottom-sheet dialog footer deliberately keeps its stacked
+   full-width actions (fixbugs §8 reachability); only page-level buttons were
+   converted to natural width.
+
+### Live browser QA
+
+Headless Chromium (built in-sandbox from source) + Playwright drove the admin
+and the public app against the dev server and the PGlite fixture — the first
+pass in this repo verified from a real browser rather than by reading compiled
+CSS:
+
+- Full §8 matrix: 16 admin routes x {320, 360, 390, 430, 768, 1024, 1280,
+  1440, 1920} x {480, 700, 900} x {dark, light} = 864 combos — **ALL CHECKS
+  PASSED**: no page-level sideways scroll, no nav/account overlap, all 16
+  links reachable at height 480, brand visible, focus ring visible, wide
+  tables carry `.admin-table--wide`.
+- Interactive at 390x480: drawer opens/closes with Esc and the backdrop and
+  focus returns to the menu button; audit table scrolls inside its card with
+  0px document overflow; confirm dialog fits the viewport, scrolls internally,
+  its buttons are reachable, and safe-area padding is present.
+- Nav hover verified after the 150ms transition: idle link hover =
+  `var(--adm-text)` on `var(--adm-hover)`, active link = accent + 600 only.
+- Public app at 390px: sign-in modal docks as a bottom sheet, post viewer goes
+  exactly fullscreen, guest feed has no document overflow.
+- Three reference screenshots captured from the running app:
+  `patches/phase-13-fix1-dark-1440.png` (dashboard, dark),
+  `patches/phase-13-fix1-light-1440.png` (dashboard, light),
+  `patches/phase-13-fix1-mobile-390.png` (audit, mobile dark).
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 8 warnings (all pre-existing `<img>` warnings in untouched `components/social/*`) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 116 tests, 113 pass, 0 fail, 3 skipped (identical to the phase-3 baseline) |
+| `npm run build` | pass; all `/rstmcadmin*` routes still dynamic |
+
+### Prohibited paths
+
+`git diff 7a1a14e --name-only` touches only `app/rstmcadmin/**`,
+`components/admin/**`, `app/globals.css` (the public modal dock fix above) and
+`patches/**`. No `lib/**`, `app/api/**`, migrations, package files, or
+visible-text changes.
+
+Patch: `patches/phase-13-fix1.patch` (identical copy at
+`patches/phase-13-fix1.patch.txt`), verified with `git apply --check` against a
+clean worktree of the baseline commit `7a1a14e`.

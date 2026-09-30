@@ -25,7 +25,9 @@
 .admin-sidebar {
   display: flex;
   flex-direction: column;
-  gap: var(--adm-s2);
+  /* 12px is the guaranteed floor of space above the account card: the flex
+     gap always applies, and margin-top:auto only adds more on tall screens. */
+  gap: 12px;
   height: 100dvh;
   min-width: 0;
   padding: var(--adm-s4);
@@ -34,7 +36,8 @@
   background: var(--adm-bg);
 }
 
-/* Brand row. */
+/* Brand row. It is the one sticky piece of the sidebar: it keeps a solid
+   background (never transparent) so scrolled links cannot show through. */
 .admin-brand {
   display: flex;
   align-items: center;
@@ -51,13 +54,22 @@
   color: var(--adm-brand-dot);
 }
 
-/* Navigation. */
+.admin-sidebar .admin-brand {
+  flex: none;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--adm-bg);
+}
+
+/* Navigation. Normal flow only: the sidebar itself owns the scrolling, so the
+   nav never collapses over the account card at any screen height. */
 .admin-nav {
   display: flex;
   flex-direction: column;
   gap: var(--adm-s3);
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: none;
+  min-width: 0;
 }
 
 .admin-nav-group {
@@ -76,7 +88,9 @@
   color: var(--adm-text-3);
 }
 
-.admin-nav-link {
+/* Link colours are scoped to `.admin-shell .admin-nav a` so the global accent
+   link rule in the tokens layer can never out-rank them. */
+.admin-shell .admin-nav a {
   position: relative;
   display: flex;
   align-items: center;
@@ -91,7 +105,7 @@
   transition: background-color var(--adm-dur) ease-out, color var(--adm-dur) ease-out;
 }
 
-.admin-nav-link svg {
+.admin-shell .admin-nav a svg {
   flex: none;
   width: 18px;
   height: 18px;
@@ -99,7 +113,7 @@
   transition: color var(--adm-dur) ease-out;
 }
 
-.admin-nav-label {
+.admin-shell .admin-nav a .admin-nav-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -107,28 +121,31 @@
   white-space: nowrap;
 }
 
-.admin-nav-link:hover {
+.admin-shell .admin-nav a:hover,
+.admin-shell .admin-nav a:focus-visible {
   background: var(--adm-hover);
   color: var(--adm-text);
   text-decoration: none;
 }
 
-.admin-nav-link:hover svg {
+.admin-shell .admin-nav a:hover svg,
+.admin-shell .admin-nav a:focus-visible svg {
   color: var(--adm-text-2);
 }
 
-.admin-nav-link[aria-current="page"] {
+/* Only the current page may use the accent colour and weight 600. */
+.admin-shell .admin-nav a[aria-current="page"] {
   background: var(--adm-active-bg);
   color: var(--adm-accent-text);
   font-weight: 600;
 }
 
-.admin-nav-link[aria-current="page"] svg {
+.admin-shell .admin-nav a[aria-current="page"] svg {
   color: var(--adm-accent-text);
 }
 
 /* §10.3 — 3x18 accent bar on the active item. */
-.admin-nav-link[aria-current="page"]::before {
+.admin-shell .admin-nav a[aria-current="page"]::before {
   content: "";
   position: absolute;
   left: 0;
@@ -140,17 +157,21 @@
   background: var(--adm-accent);
 }
 
-.admin-nav-external {
+.admin-shell .admin-nav .admin-nav-external {
   flex: none;
   margin-left: auto;
 }
 
-/* Account card (§6.2) — display only, never interactive. */
+/* Account card (§6.2) — display only, never interactive. Static, solid, and
+   pushed to the bottom by its own auto margin; the sidebar gap (>= 12px)
+   always keeps space above it. */
 .admin-account {
   display: flex;
   align-items: center;
   gap: var(--adm-s3);
+  flex: none;
   margin-top: auto;
+  position: static;
   padding: var(--adm-s3);
   border: 1px solid var(--adm-border-subtle);
   border-radius: 12px;
@@ -162,15 +183,28 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  align-items: flex-start;
 }
 
 .admin-account-email {
+  min-width: 0;
+  max-width: 100%;
   font-size: 13px;
   font-weight: 500;
   color: var(--adm-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Role badge never stretches the card; it hugs its own text. */
+.admin-shell .admin-account .admin-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ==========================================================================
@@ -204,28 +238,21 @@
   min-width: 0;
 }
 
-/* Page head (§6.3). Bleeds out of the main padding so the sticky glass bar
-   spans the panel, while the content below stays centred. */
+/* Page head (§6.3). Bleeds out of the main padding so its divider spans the
+   panel, while the content below stays centred. Never sticky and never
+   translucent: nothing may show through or slide under the header. */
 .admin-page-head {
-  position: sticky;
-  top: env(safe-area-inset-top, 0px);
-  z-index: 20;
+  position: static;
+  z-index: auto;
   display: flex;
   flex-direction: column;
   gap: var(--adm-s2);
   margin: calc(var(--adm-s6) * -1) calc(var(--adm-s7) * -1) 0;
   padding: var(--adm-s6) var(--adm-s7) var(--adm-s4);
   border-bottom: 1px solid var(--adm-border-subtle);
-  background: color-mix(in srgb, var(--adm-panel) 85%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-/* Browsers without color-mix keep a solid, readable bar. */
-@supports not (background: color-mix(in srgb, red 85%, transparent)) {
-  .admin-page-head {
-    background: var(--adm-panel);
-  }
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .admin-page-head-row {
@@ -317,13 +344,13 @@
     font-size: 18px;
   }
 
-  .admin-nav-link {
+  .admin-shell .admin-nav a {
     justify-content: center;
     padding: 0;
   }
 
-  .admin-nav-label,
-  .admin-nav-external {
+  .admin-shell .admin-nav a .admin-nav-label,
+  .admin-shell .admin-nav .admin-nav-external {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -335,7 +362,6 @@
     white-space: nowrap;
     border: 0;
   }
-
   /* Group labels become thin dividers. */
   .admin-nav-group-label {
     height: 1px;
@@ -412,7 +438,9 @@
     font-size: 20px;
   }
 
-  /* The sidebar becomes the drawer. Same nav, never duplicated in the DOM. */
+  /* The sidebar becomes the drawer. Same nav, never duplicated in the DOM.
+     Same flex column structure as the desktop sidebar, plus safe-area space
+     under the last row on notched devices. */
   .admin-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
@@ -420,6 +448,7 @@
     width: min(296px, 86vw);
     height: 100dvh;
     padding: var(--adm-s4);
+    padding-bottom: calc(var(--adm-s4) + env(safe-area-inset-bottom, 0px));
     border-right: 1px solid var(--adm-border);
     background: var(--adm-bg);
     transform: translateX(-100%);
@@ -462,13 +491,13 @@
     font-size: 22px;
   }
 
-  .admin-nav-link {
+  .admin-shell .admin-nav a {
     justify-content: flex-start;
     padding: 0 var(--adm-s3);
   }
 
-  .admin-nav-label,
-  .admin-nav-external {
+  .admin-shell .admin-nav a .admin-nav-label,
+  .admin-shell .admin-nav .admin-nav-external {
     position: static;
     width: auto;
     height: auto;
@@ -478,12 +507,12 @@
     clip-path: none;
   }
 
-  .admin-nav-label {
+  .admin-shell .admin-nav a .admin-nav-label {
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .admin-nav-external {
+  .admin-shell .admin-nav .admin-nav-external {
     margin-left: auto;
   }
 
@@ -524,7 +553,7 @@
     position: static;
     margin: calc(var(--adm-s4) * -1) calc(var(--adm-s4) * -1) 0;
     padding: var(--adm-s4) var(--adm-s4) var(--adm-s3);
-    background: var(--adm-panel);
+    background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
