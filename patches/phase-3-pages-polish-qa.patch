@@ -1,0 +1,1042 @@
+From f8035f94fcd1241d4f0e07781ae06c91352e24f4 Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 06:09:24 +0000
+Subject: [PATCH] redesign(admin): phase 3 pages, polish and QA
+
+Applies the guide's page recipes to every admin screen:
+- overview: banner with hex pattern and glow, six icon stat cards,
+  People & accounts header row, System status as label/value rows
+- users: export action in the page head, avatars, role/status/verified badges,
+  tabular storage with a proportional bar, chevron pagination
+- user detail: profile card, key-value cards, sessions before actions
+- content: bulk toolbar, kind and status badges, engagement stat tiles,
+  2-column editor grid, media rows, right-aligned save
+- settings pages: field grids, 44x24 switches, colour swatches, 2-column label rows
+- audit, safety, security matrix, analytics, exports, system, guide, error cards
+- table scroll regions on Media and Security are now focusable and named
+No text, control, action, route or data change beyond the recipe's own labels.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+ app/rstmcadmin/admin.css             |  15 +-
+ app/rstmcadmin/audit/page.tsx        |   5 +-
+ app/rstmcadmin/content/[id]/page.tsx |  29 ++-
+ app/rstmcadmin/content/page.tsx      |   7 +-
+ app/rstmcadmin/page.tsx              |  36 ++-
+ app/rstmcadmin/pages.css             | 313 +++++++++++++++++++++++++++
+ app/rstmcadmin/primitives.css        |   2 +-
+ app/rstmcadmin/security/page.tsx     |   5 +-
+ app/rstmcadmin/shell.css             |   6 +-
+ app/rstmcadmin/users/[id]/page.tsx   |  27 ++-
+ app/rstmcadmin/users/page.tsx        |  32 ++-
+ components/admin/actions.tsx         |   4 +-
+ components/admin/analytics.tsx       |   4 +-
+ components/admin/appearance.tsx      |   5 +-
+ components/admin/audit.tsx           |   4 +-
+ components/admin/cms.tsx             |   2 +-
+ components/admin/communications.tsx  |   6 +-
+ components/admin/content.tsx         |  13 +-
+ components/admin/exports.tsx         |   3 +-
+ components/admin/features.tsx        |   6 +-
+ components/admin/media.tsx           |   9 +-
+ components/admin/moderation.tsx      |   4 +-
+ components/admin/page-head.tsx       |  26 ++-
+ components/admin/system.tsx          |   4 +-
+ components/admin/ui.tsx              |   6 +-
+ 25 files changed, 492 insertions(+), 81 deletions(-)
+ create mode 100644 app/rstmcadmin/pages.css
+
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index bdad891..5908bb9 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -1,18 +1,7 @@
+ @import "./shell.css";
+ @import "./primitives.css";
++@import "./pages.css";
+ 
+-/* Page-level rules left from the previous stylesheet. Section 9 recipes replace them in phase 3. */
++/* The isolated two-factor enrolment screen is outside the redesigned panel shell. */
+ .admin-two-factor-page{min-height:calc(100vh - 48px);display:grid;place-items:center}.admin-two-factor-card{width:min(100%,720px)}.admin-two-factor-card ol{padding-left:24px;line-height:1.8}.admin-two-factor-card form{display:grid;gap:16px}.admin-two-factor-card label{display:grid;gap:8px}.admin-totp-secret{display:block;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--background);overflow-wrap:anywhere;user-select:all}.admin-backup-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0;list-style:none}.admin-backup-codes li{padding:10px;border-radius:10px;background:var(--background);text-align:center}
+-
+-.content-media{min-width:0;border:0;padding:0}.content-media p{color:var(--muted-foreground);margin:12px 0}.content-media-item{padding:12px 0;border-bottom:1px solid var(--border)}.content-media-item img,.content-media-item video{max-width:100%;width:auto;max-height:320px;object-fit:contain;background:var(--secondary);border-radius:12px}.content-media-item code,.admin-content-editor code{overflow-wrap:anywhere;word-break:break-word;display:block;font-size:12px}.admin-content-editor textarea{min-height:120px}.admin-content-editor .admin-button{align-self:start}
+-
+ .admin-content-fields{min-width:0;border:0;margin:0;padding:0}
+-.appearance-editor fieldset{min-width:0}.appearance-nav-row{border:1px solid var(--border);border-radius:12px;padding:16px}.appearance-editor select{min-height:44px;width:100%;padding:10px;border:1px solid var(--input);background:var(--background);color:var(--foreground);border-radius:12px}.appearance-editor .appearance-toggle{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:0 8px}.appearance-editor .appearance-toggle input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}.appearance-editor input[type=file]{font-size:12px;max-width:100%}.appearance-editor .admin-button{align-self:start}
+-.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-top:20px}.feature-grid fieldset{border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}.feature-grid legend{font-weight:650}.feature-editor .feature-switch{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:44px}.feature-editor .feature-switch input{width:20px;height:20px;min-height:20px;accent-color:var(--primary)}
+-.labels-editor{max-width:100%}.labels-rows{display:grid;gap:1rem}.label-row{min-width:0;display:grid;gap:.65rem;padding:1rem;border:1px solid var(--border);border-radius:12px}.label-row legend,.label-row code,.label-row p{overflow-wrap:anywhere;white-space:pre-wrap}.label-row label{display:grid;gap:.5rem}.label-row textarea{width:100%;min-height:72px;resize:vertical}.labels-toolbar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}.labels-toolbar input[type=file]{max-width:100%;min-width:0}.labels-toolbar label{display:grid;gap:.5rem}
+-.label-row label,.label-row textarea{min-width:0;max-width:100%}.label-row legend{max-width:100%}.labels-editor .admin-card{min-width:0}
+-.label-row label{grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
+-.media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
+-.moderation-console{display:grid;gap:20px;min-width:0}.moderation-tabs,.moderation-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.moderation-filters label{display:grid;gap:7px;flex:1 1 190px;min-width:min(100%,190px)}.moderation-report-list{display:grid;gap:14px}.moderation-report{display:grid;gap:12px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--background)}.moderation-report header{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;align-items:start}.moderation-report header p{margin:6px 0}.moderation-report p,.moderation-report code{overflow-wrap:anywhere}.moderation-report label{display:grid;gap:6px}.moderation-report textarea{width:100%;max-width:100%;min-width:0;min-height:80px;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-report input{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-console .admin-table-scroll{min-width:0;max-width:100%;overflow:auto}.moderation-console .admin-table{min-width:680px}.moderation-console .admin-card{min-width:0}
+-.admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
+-.analytics-dashboard,.system-tools{display:grid;gap:18px}.analytics-controls,.admin-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.analytics-controls label{min-width:150px}.analytics-controls h2,.analytics-controls p{margin-top:0}.analytics-summary{margin:0}.analytics-summary .admin-stat strong{font-size:clamp(20px,3vw,30px)}.analytics-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analytics-chart{min-width:0}.analytics-chart h3{margin:0 0 14px;font-size:15px}.analytics-bars{height:112px;display:flex;align-items:end;gap:3px;padding:4px 2px;border-bottom:1px solid var(--line);overflow:hidden}.analytics-bars span{flex:1 1 0;min-width:2px;background:var(--primary);border-radius:3px 3px 0 0;opacity:.82}.analytics-axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:12px}.analytics-caption{max-width:340px;max-height:4.5em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.analytics-ranked-list p{display:flex;justify-content:space-between;gap:12px;padding:7px 0;margin:0;border-bottom:1px solid var(--line)}.analytics-funnel-bar{height:18px;margin:16px 0 10px;background:var(--canvas);border-radius:999px;overflow:hidden}.analytics-funnel-bar span{display:block;height:100%;background:var(--primary);border-radius:inherit}.analytics-funnel strong{display:block}.migration-chips{display:flex;flex-wrap:wrap;gap:8px}.migration-chips span{padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}.migration-chips .is-applied{border-color:#21835d}.migration-chips .is-pending{border-color:#b45309;color:#b45309}.system-env-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:0 20px;margin:0}.system-env-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.system-env-list dt{font-weight:600}.system-env-list dd{margin:0;color:var(--muted)}.system-sql textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:150px}.system-sql-result{max-height:480px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);white-space:pre-wrap;overflow-wrap:anywhere}.admin-button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.admin-guide{max-width:900px}.admin-guide h2{margin-top:0}.export-manager .admin-detail{align-items:end}@media(max-width:700px){.analytics-chart-grid{grid-template-columns:minmax(0,1fr)}.analytics-controls,.admin-card-heading{flex-direction:column}.analytics-controls label{width:100%}.analytics-bars{height:90px}}
+diff --git a/app/rstmcadmin/audit/page.tsx b/app/rstmcadmin/audit/page.tsx
+index 1b29d40..f1e7e78 100644
+--- a/app/rstmcadmin/audit/page.tsx
++++ b/app/rstmcadmin/audit/page.tsx
+@@ -4,15 +4,16 @@ import {auditFilters,listAudit} from '@/lib/admin/audit';
+ import {AuditTable,AuditTools} from '@/components/admin/audit';
+ import {ADMIN_BASE_PATH} from '@/lib/admin/config';
+ import Link from 'next/link';
++import { ChevronLeft, ChevronRight } from 'lucide-react';
+ import { PageHead } from '@/components/admin/page-head';
+ 
+ export default async function AuditPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'audit.read');
+  let filters;
+- try{filters=auditFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid audit filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/audit'}>Clear filters</Link></section>;}
++ try{filters=auditFilters(await searchParams);}catch{return <section className="admin-card admin-error-card"><h1>Invalid audit filters</h1><div className="admin-card-footer"><Link className="admin-button" href={ADMIN_BASE_PATH+'/audit'}>Clear filters</Link></div></section>;}
+  const result=await listAudit(await getPool(),filters),pages=Math.max(1,Math.ceil(result.total/filters.limit));
+  const pageLink=(page:number)=>ADMIN_BASE_PATH+'/audit?'+new URLSearchParams({...Object.fromEntries(Object.entries(filters).map(([key,value])=>[key,String(value)])),page:String(page)});
+  return <><PageHead breadcrumb="Control room / Security" title="Administrator audit log">
+   <p>{result.total.toLocaleString('en-IN')} matching historical events. Older records remain readable. This viewer is read-only; no edit or delete action exists.</p>
+-  </PageHead><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}>Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next</Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
++  </PageHead><AuditTools filters={filters}/><AuditTable rows={result.rows}/><nav className="admin-pagination" aria-label="Audit pagination">{filters.page>1?<Link href={pageLink(filters.page-1)}><ChevronLeft aria-hidden="true" focusable="false" />Previous</Link>:<span/>}<span>Page {filters.page} of {pages}</span>{filters.page<pages&&<Link href={pageLink(filters.page+1)}>Next<ChevronRight aria-hidden="true" focusable="false" /></Link>}</nav><p className="admin-muted">CSV export applies the same filters and is capped at 5,000 rows.</p></>;
+ }
+diff --git a/app/rstmcadmin/content/[id]/page.tsx b/app/rstmcadmin/content/[id]/page.tsx
+index 5fa572f..390e476 100644
+--- a/app/rstmcadmin/content/[id]/page.tsx
++++ b/app/rstmcadmin/content/[id]/page.tsx
+@@ -9,6 +9,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentActions, ContentEditor } from '@/components/admin/content';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
+ import { PageHead } from '@/components/admin/page-head';
++import { Badge } from '@/components/admin/badge';
+ 
+ export default async function ContentItem({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{resource?:string}>}) {
+   const actor=await requireAdminPage();const {id}=await params;const query=await searchParams;
+@@ -16,13 +17,31 @@ export default async function ContentItem({params,searchParams}:{params:Promise<
+   const item=await contentDetail(await getPool(),resource,id).catch(error=>{if(error instanceof AdminError&&error.status===404)notFound();throw error;});
+   const operations=actor.role==='moderator'?(item.deleted_at?[]:['hide','unhide']):item.deleted_at?['restore',...actor.role==='owner'?['purge']:[]]:['hide','unhide','delete',...resource==='posts'?['pin','unpin',...item.kind==='story'?['expire','highlight']:[]]:[]];
+   const counts=item.counts as Record<string,unknown>|undefined;
+-  return <><PageHead breadcrumb={'Control room / ' + resource} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'}>
+-    <p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
++  return <>
++    <PageHead breadcrumb={'Control room / ' + resource} title={resource==='posts'?String(item.kind)+' detail':'Comment detail'}>
++      <p>@{String(item.username)} · <code>{id}</code> · {item.deleted_at?'In trash':item.hidden_at?'Hidden':'Unhidden'}</p>
+     </PageHead>
+-    <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
+-    {counts&&<section className="admin-card"><h2>Recorded engagement</h2><p>Real likes: {String(counts.real_likes)} · Base likes: {String(item.base_likes)} · Unhidden comments: {String(counts.real_comments)} · Story seen reactions: {String(counts.story_views)} · Reports: {String(counts.reports)}</p><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></section>}
++    <section className="admin-card">
++      <div className="admin-profile">
++        <div className="admin-profile-text">
++          <div className="admin-badges"><Badge>{String(item.kind)}</Badge><Badge>{item.deleted_at?'Trash':item.hidden_at?'Hidden':'Unhidden'}</Badge></div>
++          <code>{id}</code>
++        </div>
++      </div>
++      <p className="admin-muted">Reason: {String(item.hidden_reason||'—')} · Hidden by: {String(item.hidden_by||'—')}{item.deleted_at?' · Deleted: '+new Date(Number(item.deleted_at)).toISOString():''}</p>
++    </section>
++    {counts&&<section className="admin-card"><h2>Recorded engagement</h2>
++      <div className="admin-stat-row">
++        <div className="admin-stat-tile"><span>Real likes</span><strong>{String(counts.real_likes)}</strong></div>
++        <div className="admin-stat-tile"><span>Base likes</span><strong>{String(item.base_likes)}</strong></div>
++        <div className="admin-stat-tile"><span>Unhidden comments</span><strong>{String(counts.real_comments)}</strong></div>
++        <div className="admin-stat-tile"><span>Story seen reactions</span><strong>{String(counts.story_views)}</strong></div>
++        <div className="admin-stat-tile"><span>Reports</span><strong>{String(counts.reports)}</strong></div>
++      </div>
++      <div className="admin-card-footer"><Link className="admin-button" href={`${ADMIN_BASE_PATH}/content?resource=comments&post=${encodeURIComponent(id)}`}>Manage comments on this post</Link></div>
++    </section>}
+     {resource==='posts'&&actor.role!=='moderator'&&<section className="admin-card"><h2>Counter baselines</h2><CounterEditor key={String(item.base_likes)+':'+String(item.base_comments)+':'+String(item.base_views)} id={id} likes={Number(item.base_likes)} comments={Number(item.base_comments)} views={Number(item.base_views)} disabled={!!item.deleted_at}/></section>}
+     <section className="admin-card"><h2>Moderation actions</h2><ContentActions ids={[id]} resource={resource} operations={operations} targetNames={{[id]:contentConfirmationName(item)}}/></section>
+-    {actor.role!=='moderator'&&<section className="admin-card"><h2>{item.deleted_at?'Preview (trashed)':'Edit content'}</h2>{!!item.deleted_at&&<p>Restore before editing. Restoration preserves any moderation hide. Purged media files are not automatically deleted from storage.</p>}<fieldset className="admin-content-fields" disabled={!!item.deleted_at}><ContentEditor key={String(item.edited_at)+String(item.body)} item={item} resource={resource}/></fieldset></section>}
++    {actor.role!=='moderator'&&<section className="admin-card"><h2>{item.deleted_at?'Preview (trashed)':'Edit content'}</h2>{!!item.deleted_at&&<p className="admin-alert">Restore before editing. Restoration preserves any moderation hide. Purged media files are not automatically deleted from storage.</p>}<fieldset className="admin-content-fields" disabled={!!item.deleted_at}><ContentEditor key={String(item.edited_at)+String(item.body)} item={item} resource={resource}/></fieldset></section>}
+   </>;
+ }
+diff --git a/app/rstmcadmin/content/page.tsx b/app/rstmcadmin/content/page.tsx
+index 2c9eeb1..28ad8eb 100644
+--- a/app/rstmcadmin/content/page.tsx
++++ b/app/rstmcadmin/content/page.tsx
+@@ -7,10 +7,11 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import { ContentSettings, ContentTable } from '@/components/admin/content';
+ import { hasPermission } from '@/lib/admin/permissions';
+ import { PageHead } from '@/components/admin/page-head';
++import { ChevronLeft, ChevronRight } from 'lucide-react';
+ 
+ export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
+   const actor=await requireAdminPage();let filter;
+-  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card"><h1>Invalid content filters</h1><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
++  try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card admin-error-card"><h1>Invalid content filters</h1><div className="admin-card-footer"><Link className="admin-button" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></div></section>;}
+   const data=await listContent(await getPool(),filter);const settings=actor.role==='moderator'?null:await readSettings();const base=ADMIN_BASE_PATH+'/content';
+   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));
+   return <><PageHead breadcrumb="Control room / Content" title="Content & moderation">
+@@ -21,9 +22,9 @@ export default async function Content({searchParams}:{searchParams:Promise<Recor
+       <label>Kind (posts)<select name="kind" defaultValue={filter.kind}>{['','post','reel','story'].map(v=><option key={v} value={v}>{v||'All kinds'}</option>)}</select></label>
+       <label>Status<select name="status" defaultValue={filter.status}>{['all','visible','hidden','trash','pinned'].map(v=><option key={v}>{v}</option>)}</select></label>
+       <label>Author ID<input name="author" maxLength={100} defaultValue={filter.author}/></label><label>Post ID (comments)<input name="post" maxLength={100} defaultValue={filter.post}/></label><label>Category (posts)<select name="category" defaultValue={filter.category}>{['','For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(v=><option key={v} value={v}>{v||'All categories'}</option>)}</select></label>
+-      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button">Filter content</button><Link className="admin-button" href={base}>Clear</Link>
++      <label>From (UTC)<input type="date" name="from" defaultValue={filter.from}/></label><label>Through (UTC)<input type="date" name="to" defaultValue={filter.to}/></label><label>Reports<select name="flagged" defaultValue={filter.flagged?'1':''}><option value="">Any</option><option value="1">Has report (parent post for comments)</option></select></label><button className="admin-button admin-primary">Filter content</button><Link className="admin-button" data-tone="ghost" href={base}>Clear</Link>
+     </form><ContentTable key={JSON.stringify(filter)} items={data.items} resource={filter.resource} trash={filter.status==='trash'} role={actor.role}/>
+-    <nav className="admin-pagination" aria-label="Content pagination">{filter.page>1?<Link href={pageLink(filter.page-1)}>Previous</Link>:<span/>}<span>Page {filter.page} of {Math.max(1,Math.ceil(data.total/50))}</span>{filter.page*50<data.total&&<Link href={pageLink(filter.page+1)}>Next</Link>}</nav>
++    <nav className="admin-pagination" aria-label="Content pagination">{filter.page>1?<Link href={pageLink(filter.page-1)}><ChevronLeft aria-hidden="true" focusable="false" />Previous</Link>:<span/>}<span>Page {filter.page} of {Math.max(1,Math.ceil(data.total/50))}</span>{filter.page*50<data.total&&<Link href={pageLink(filter.page+1)}>Next<ChevronRight aria-hidden="true" focusable="false" /></Link>}</nav>
+     <p className="admin-muted">Trash can be restored for 30 days. No automatic purge runs; only owners can permanently purge one confirmed item at a time. Unhidden is not necessarily public: expiry, private profiles and account trash also apply.</p>
+   </>;
+ }
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+index eb69e6e..ac731e4 100644
+--- a/app/rstmcadmin/page.tsx
++++ b/app/rstmcadmin/page.tsx
+@@ -1,4 +1,5 @@
+ import Link from 'next/link';
++import { Activity, Flag, HardDrive, LayoutGrid, UserPlus, Users } from 'lucide-react';
+ import { requireAdminPage } from '@/lib/admin/guard';
+ import { getPool } from '@/lib/postgres';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+@@ -12,19 +13,34 @@ export default async function AdminHome() {
+   const migrations = await db.query('SELECT version FROM functiongram_migrations ORDER BY version');
+   const { rows: [settings] } = await db.query('SELECT COUNT(*) AS count FROM app_settings');
+   const number = (key: string) => Number(stats[key]).toLocaleString('en-IN');
++  const icon = (glyph: React.ReactNode) => <span aria-hidden="true">{glyph}</span>;
+   return <>
+-    <PageHead breadcrumb="Control room / Overview" title="A pulse on your community.">
+-    <p>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</p>
++    <PageHead banner breadcrumb="Control room / Overview" title="A pulse on your community.">
++      <p>Signed in as <strong>{actor.email}</strong> · {actor.role}. Private, server-verified access.</p>
+     </PageHead>
+     <section className="admin-stats" aria-label="Community statistics">
+-      <StatCard label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
+-      <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
+-      <StatCard label="Recently active sessions" value={number('active_users')} hint="Users with sessions updated in the last 7 days; not DAU" />
+-      <StatCard label="Content items" value={number('posts')} hint="Posts, reels and stories outside trash" />
+-      <StatCard label="Open reports" value={number('reports')} hint="New or in triage; review the Safety inbox" />
+-      <StatCard label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
++      <StatCard tone="blue" icon={icon(<Users />)} label="Registered accounts" value={number('users')} hint="Includes accounts in trash" />
++      <StatCard tone="green" icon={icon(<UserPlus />)} label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
++      <StatCard tone="purple" icon={icon(<Activity />)} label="Recently active sessions" value={number('active_users')} hint="Users with sessions updated in the last 7 days; not DAU" />
++      <StatCard tone="amber" icon={icon(<LayoutGrid />)} label="Content items" value={number('posts')} hint="Posts, reels and stories outside trash" />
++      <StatCard tone="red" icon={icon(<Flag />)} label="Open reports" value={number('reports')} hint="New or in triage; review the Safety inbox" />
++      <StatCard tone="cyan" icon={icon(<HardDrive />)} label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
++    </section>
++    <section className="admin-card">
++      <div className="admin-card-header">
++        <span className="admin-icon-tile" aria-hidden="true">{icon(<Users />)}</span>
++        <div className="admin-card-header-body"><h2>People & accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p></div>
++      </div>
++      <div className="admin-card-footer"><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></div>
++    </section>
++    <section className="admin-card">
++      <h2>System status</h2>
++      <dl className="admin-status-rows">
++        <div><dt>Applied migrations:</dt><dd>{migrations.rows.map(row => row.version).join(', ')}</dd></div>
++        <div><dt>· Stored settings:</dt><dd>{Number(settings.count)}</dd></div>
++      </dl>
++      <p><Link href={ADMIN_BASE_PATH + '/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH + '/exports'}>Export lists</Link> · <Link href={ADMIN_BASE_PATH + '/system'}>System tools</Link></p>
++      <p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p>
+     </section>
+-    <section className="admin-card"><h2>People & accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></section>
+-    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p><Link href={ADMIN_BASE_PATH + '/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH + '/exports'}>Export lists</Link> · <Link href={ADMIN_BASE_PATH + '/system'}>System tools</Link></p><p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p></section>
+   </>;
+ }
+diff --git a/app/rstmcadmin/pages.css b/app/rstmcadmin/pages.css
+new file mode 100644
+index 0000000..c0b84a6
+--- /dev/null
++++ b/app/rstmcadmin/pages.css
+@@ -0,0 +1,313 @@
++/* ============================================================
++   Admin page recipes (guide section 9) and the remaining
++   designer touches from section 10.
++   ============================================================ */
++
++/* ---------- Shared card pieces ---------- */
++
++.admin-card-header { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
++.admin-card-header-body { min-width: 0; flex: 1 1 auto; }
++.admin-card-header-body h2 { margin-bottom: 4px; }
++.admin-card-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
++.admin-badges { display: flex; flex-wrap: wrap; gap: 8px; }
++.admin-badge svg { width: 12px; height: 12px; }
++.admin-alert {
++  display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px;
++  border: 1px solid color-mix(in srgb, var(--adm-accent) 30%, transparent);
++  border-radius: 10px; background: color-mix(in srgb, var(--adm-accent) 10%, transparent);
++  color: var(--adm-text); font-size: 14px; line-height: 22px;
++}
++.admin-alert::before {
++  content: ""; width: 16px; height: 16px; flex: none; margin-top: 3px; background: var(--adm-accent-text);
++  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 16v-4.5'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E") center / contain no-repeat;
++  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 16v-4.5'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E") center / contain no-repeat;
++}
++.admin-status-rows { display: grid; margin: 8px 0 0; }
++.admin-status-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--adm-border-subtle); }
++.admin-status-rows dt { color: var(--adm-text-2); font-size: 13px; line-height: 20px; }
++.admin-status-rows dd { margin: 0; text-align: right; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
++.admin-status-rows > div:last-child { border-bottom: 0; }
++.admin-stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
++.admin-stat-tile {
++  display: flex; flex-direction: column; gap: 4px; min-width: 132px; flex: 1 1 132px; padding: 14px 16px;
++  border: 1px solid var(--adm-border); border-radius: 12px; background: var(--adm-muted-surface);
++}
++.admin-stat-tile span { color: var(--adm-text-2); font-size: 12px; line-height: 16px; }
++.admin-stat-tile strong { font-size: 20px; line-height: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
++.admin-error-card { max-width: 480px; margin: 24px auto; text-align: center; }
++.admin-error-card .admin-icon-tile { margin: 0 auto 12px; }
++.admin-error-card p { margin-top: 8px; }
++.admin-danger-zone { border-color: color-mix(in srgb, var(--adm-danger) 40%, transparent); }
++
++/* ---------- 9.1 Overview banner ---------- */
++
++.admin-page-head.is-banner {
++  position: static; overflow: hidden; margin-bottom: 20px; padding: 28px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
++  background:
++    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--adm-accent) 10%, transparent) 0%, transparent 60%),
++    var(--adm-card);
++  box-shadow: var(--adm-shadow);
++  backdrop-filter: none; -webkit-backdrop-filter: none;
++}
++.admin-page-head.is-banner h1 { font-size: 28px; line-height: 36px; }
++.admin-page-head.is-banner .admin-banner-pattern {
++  position: absolute; top: 0; right: 0; width: 320px; height: 220px;
++  color: var(--adm-accent-text); opacity: .06; pointer-events: none;
++}
++.admin-page-head.is-banner .admin-page-head-text,
++.admin-page-head.is-banner .admin-page-head-intro { position: relative; }
++@media (max-width: 639px) {
++  .admin-page-head.is-banner { padding: 20px; }
++  .admin-page-head.is-banner h1 { font-size: 24px; line-height: 32px; }
++  .admin-page-head.is-banner .admin-banner-pattern { display: none; }
++}
++
++/* ---------- 9.3 User detail ---------- */
++
++.admin-profile { display: flex; align-items: center; gap: 16px; min-width: 0; }
++.admin-profile-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
++.admin-profile-text h2 { font-size: 20px; line-height: 28px; }
++.admin-profile-text p { color: var(--adm-text-2); }
++
++/* ---------- 9.4 Content list and detail ---------- */
++
++.admin-bulk-toolbar {
++  display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap;
++  margin: 20px 0 0; padding: 12px;
++  border: 1px solid var(--adm-border-subtle); border-radius: 12px; background: var(--adm-muted-surface);
++}
++.admin-bulk-toolbar .admin-action-grid { margin: 0; }
++.admin-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
++.admin-field-grid > .admin-button { align-self: end; justify-self: start; }
++.admin-content-editor { min-width: 0; }
++.admin-content-editor .admin-card-footer { justify-content: flex-end; }
++.content-media { display: grid; gap: 12px; min-width: 0; border: 0; padding: 0; margin-top: 8px; }
++.content-media legend { font-weight: 600; }
++.content-media p { color: var(--adm-text-2); }
++.content-media-item {
++  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
++  padding: 12px; border: 1px solid var(--adm-border); border-radius: 12px; background: var(--adm-muted-surface);
++}
++.content-media-item img, .content-media-item video {
++  width: 96px; height: 96px; max-width: 96px; object-fit: contain; flex: none;
++  border-radius: 8px; background: var(--adm-card);
++}
++.content-media-item code { flex: 1 1 200px; min-width: 0; display: block; }
++.content-media-item .admin-action-grid { margin: 0; }
++.admin-table-name-text small .admin-badge { display: inline-flex; }
++@media (max-width: 767px) {
++  .admin-field-grid { grid-template-columns: minmax(0, 1fr); }
++  .content-media-item img, .content-media-item video { width: 100%; max-width: 100%; max-height: 240px; height: auto; }
++}
++
++/* ---------- 9.5 Settings-style pages ---------- */
++
++.admin-shell fieldset { min-width: 0; }
++.appearance-editor .admin-detail { align-items: start; }
++.appearance-editor fieldset.admin-confirm legend { font-weight: 600; color: var(--adm-text); }
++.appearance-editor fieldset { padding: 16px; border: 1px solid var(--adm-border-subtle); border-radius: 12px; }
++.appearance-editor .appearance-nav-row { padding: 16px; border: 1px solid var(--adm-border); border-radius: 12px; }
++.appearance-editor .admin-input-suffix { position: relative; display: block; }
++.admin-color-swatch {
++  position: absolute; top: 12px; right: 12px; width: 20px; height: 20px; z-index: 1;
++  border: 1px solid var(--adm-border); border-radius: 6px; box-shadow: var(--adm-shadow);
++}
++.appearance-editor .admin-input-suffix input { padding-right: 40px; font-family: var(--adm-mono); font-size: 12px; }
++.appearance-editor input[type="file"] { max-width: 100%; font-size: 12px; color: var(--adm-text-2); }
++.appearance-editor .admin-action-grid { margin: 0; }
++
++/* 44x24 switch for rows that are a single labelled checkbox */
++.admin-shell .admin-switch input[type="checkbox"] {
++  appearance: none; position: relative; width: 44px; height: 24px; min-height: 24px;
++  border-radius: 999px; border: 1px solid var(--adm-border); background: var(--adm-muted-surface);
++  display: block; transition: background-color .15s ease-out, border-color .15s ease-out;
++}
++.admin-shell .admin-switch input[type="checkbox"]::after {
++  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
++  border-radius: 50%; background: var(--adm-text-3); transition: transform .15s ease-out, background-color .15s ease-out;
++  -webkit-mask: none; mask: none; transform: none;
++}
++.admin-shell .admin-switch input[type="checkbox"]:checked { background: var(--adm-accent); border-color: var(--adm-accent); }
++.admin-shell .admin-switch input[type="checkbox"]:checked::after { transform: translateX(20px); background: var(--adm-on-accent); }
++.admin-switch { flex-direction: row !important; align-items: center; gap: 10px; min-height: 44px; }
++
++/* Features: one flag per row, control on the right, divider between rows */
++.feature-grid { display: block; margin-top: 8px; }
++.feature-grid fieldset {
++  display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
++  padding: 12px 0; border: 0; border-bottom: 1px solid var(--adm-border-subtle); border-radius: 0; background: none;
++}
++.feature-grid fieldset:last-child { border-bottom: 0; }
++.feature-grid legend { flex: 1 1 180px; min-width: 0; padding: 0; font-family: var(--adm-mono); font-size: 12px; font-weight: 600; }
++.feature-grid fieldset > label { flex-direction: row; align-items: center; gap: 8px; }
++.feature-grid fieldset > label input[type="number"] { width: 88px; }
++.feature-editor .admin-confirm { gap: 16px; }
++.feature-editor .admin-card + .admin-card { margin-top: 20px; }
++
++/* Labels: two key/value columns on desktop, stacked on mobile */
++.labels-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
++.labels-toolbar label { min-width: 0; }
++.labels-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; align-items: start; }
++.label-row {
++  display: grid; gap: 8px; align-content: start;
++  padding: 16px; border: 1px solid var(--adm-border); border-radius: 12px; background: var(--adm-muted-surface);
++}
++.label-row legend { padding: 0 4px; }
++.label-row legend code { font-family: var(--adm-mono); font-size: 12px; font-weight: 600; }
++.label-row p { font-size: 12px; line-height: 16px; }
++.label-row label { display: grid; gap: 6px; }
++.label-row textarea { min-height: 72px; resize: vertical; }
++.label-row .admin-button { justify-self: start; }
++.labels-editor .admin-card + .admin-card { margin-top: 20px; }
++.labels-editor > .admin-button { margin-top: 16px; }
++
++/* Media inventory and settings */
++.media-settings-grid, .media-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
++.media-filters {
++  margin: 20px 0; padding: 20px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card); background: var(--adm-card);
++}
++.media-settings-grid { padding: 4px 0; }
++.media-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
++.media-confirm { margin-top: 20px; }
++.media-reservation { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
++.media-reservation code { min-width: 0; overflow-wrap: anywhere; }
++
++/* ---------- 9.6 Audit ---------- */
++
++.admin-table-scroll details > summary {
++  display: flex; align-items: center; min-height: 44px; cursor: pointer;
++  font-size: 14px; font-weight: 500; color: var(--adm-accent-text); list-style: none;
++}
++.admin-table-scroll details > summary::-webkit-details-marker { display: none; }
++.admin-table-scroll details strong { display: block; margin-top: 8px; font-size: 12px; color: var(--adm-text-2); }
++
++/* ---------- 9.7 Safety ---------- */
++
++.moderation-console { display: grid; gap: 20px; min-width: 0; }
++.moderation-tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
++.moderation-tabs button {
++  display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px;
++  border: 1px solid var(--adm-border); border-radius: 999px;
++  background: var(--adm-card); color: var(--adm-text-2);
++  font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
++}
++.moderation-tabs button.active { background: var(--adm-accent); border-color: var(--adm-accent); color: var(--adm-on-accent); }
++.moderation-filters {
++  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 16px; align-items: end;
++  padding: 20px; border: 1px solid var(--adm-border); border-radius: var(--adm-r-card); background: var(--adm-card);
++}
++.moderation-report-list { display: grid; gap: 14px; }
++.moderation-report {
++  display: grid; gap: 12px; min-width: 0; padding: 20px;
++  border: 1px solid var(--adm-border); border-radius: var(--adm-r-card); background: var(--adm-card); box-shadow: var(--adm-shadow);
++}
++.moderation-report header { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
++.moderation-report header .admin-badges { margin-top: 4px; }
++.moderation-report textarea, .moderation-report input { width: 100%; max-width: 100%; min-width: 0; }
++.moderation-report .media-row-actions { margin-top: 4px; }
++
++/* ---------- 9.8 Security & roles ---------- */
++
++.admin-matrix-yes { color: var(--adm-success-text); }
++.admin-matrix-no { color: var(--adm-text-3); }
++.admin-matrix-yes svg, .admin-matrix-no svg { width: 16px; height: 16px; vertical-align: middle; }
++
++/* ---------- 9.9 Analytics ---------- */
++
++.analytics-dashboard, .system-tools { display: grid; gap: 20px; }
++.analytics-controls, .admin-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
++.analytics-controls label { min-width: 150px; }
++.analytics-controls h2, .analytics-controls p { margin-top: 0; }
++.analytics-summary { margin: 0; }
++.analytics-summary .admin-stat strong { font-size: 24px; line-height: 30px; }
++.analytics-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
++.analytics-chart { min-width: 0; }
++.analytics-chart h3 { margin: 0 0 14px; }
++.analytics-bars {
++  display: flex; align-items: end; gap: 4px; height: 112px; padding: 4px 2px;
++  border-bottom: 1px dashed var(--adm-border); overflow: hidden;
++}
++.analytics-bars span { flex: 1 1 0; min-width: 2px; background: var(--adm-accent); border-radius: 6px 6px 0 0; opacity: .85; }
++.analytics-bars span:hover { background: var(--adm-accent-hover); opacity: 1; }
++.analytics-axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--adm-text-3); font-size: 12px; }
++.analytics-caption { max-width: 340px; max-height: 4.5em; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
++.analytics-ranked-list p { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; margin: 0; border-bottom: 1px solid var(--adm-border-subtle); }
++.analytics-funnel-bar { height: 18px; margin: 16px 0 10px; border-radius: 999px; background: var(--adm-muted-surface); overflow: hidden; }
++.analytics-funnel-bar span { display: block; height: 100%; border-radius: inherit; background: var(--adm-accent); }
++.analytics-funnel strong { display: block; }
++.migration-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
++.migration-chips span { padding: 4px 10px; border: 1px solid var(--adm-border); border-radius: var(--adm-r-pill); font-size: 12px; color: var(--adm-text-2); }
++.migration-chips .is-applied { border-color: color-mix(in srgb, var(--adm-success) 45%, transparent); color: var(--adm-success-text); }
++.migration-chips .is-pending { border-color: color-mix(in srgb, var(--adm-warning) 45%, transparent); color: var(--adm-warning-text); }
++
++/* ---------- 9.10 Exports ---------- */
++
++.export-manager .admin-icon-tile { margin-bottom: 12px; }
++.export-manager .admin-detail { align-items: end; }
++.export-manager .admin-button { margin-top: 16px; }
++
++/* ---------- 9.11 System tools ---------- */
++
++.system-tools .admin-card h2 { margin-bottom: 8px; }
++.system-env-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0 20px; margin: 0; }
++.system-env-list div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--adm-border-subtle); }
++.system-env-list dt { font-weight: 600; }
++.system-env-list dd { margin: 0; color: var(--adm-text-2); }
++.system-sql textarea { font-family: var(--adm-mono); font-size: 12px; min-height: 150px; }
++.system-sql-result { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
++.admin-button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
++
++/* ---------- 9.12 Operator guide ---------- */
++
++.admin-guide { max-width: 760px; margin-left: auto; margin-right: auto; }
++.admin-guide h2 { margin: 32px 0 12px; font-size: 20px; line-height: 28px; }
++.admin-guide h2:first-child { margin-top: 0; }
++.admin-guide h3 { margin: 24px 0 8px; }
++.admin-guide p { margin: 12px 0; color: var(--adm-text-2); font-size: 15px; line-height: 26px; }
++.admin-guide ul, .admin-guide ol { margin: 12px 0; padding-left: 24px; display: grid; gap: 8px; color: var(--adm-text-2); }
++.admin-guide .admin-table-scroll { margin: 20px 0; }
++
++/* ---------- 9.13 Errors inside admin ---------- */
++
++.admin-error-state { display: grid; place-items: center; text-align: center; padding: 48px 24px; }
++.admin-error-state .admin-icon-tile { margin-bottom: 16px; }
++.admin-error-state h1, .admin-error-state h2 { margin-bottom: 8px; }
++
++/* ---------- Communications ---------- */
++
++.comms-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 20px; align-items: start; }
++.comms-page-manager { display: grid; gap: 20px; }
++.admin-message-row { margin-top: 16px; padding: 16px; border: 1px solid var(--adm-border); border-radius: 12px; background: var(--adm-muted-surface); }
++.notification-template-row {
++  display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(200px, 2fr) auto;
++  align-items: end; gap: 12px; margin: 12px 0; padding: 14px; border: 1px solid var(--adm-border); border-radius: 12px;
++}
++.admin-tabs { display: flex; gap: 8px; overflow-x: auto; margin: 18px 0 24px; padding-bottom: 4px; }
++.admin-tabs button {
++  flex: none; min-height: 44px; padding: 0 16px; border: 1px solid var(--adm-border); border-radius: 999px;
++  background: var(--adm-card); color: var(--adm-text-2); font-family: inherit; font-size: 14px; cursor: pointer;
++}
++.admin-tabs button.active { background: var(--adm-accent); border-color: var(--adm-accent); color: var(--adm-on-accent); }
++
++/* ---------- Responsive ---------- */
++
++@media (max-width: 1023px) {
++  .analytics-chart-grid { grid-template-columns: minmax(0, 1fr); }
++  .analytics-controls, .admin-card-heading { flex-direction: column; }
++  .analytics-controls label { width: 100%; }
++  .analytics-bars { height: 90px; }
++  .notification-template-row { grid-template-columns: minmax(0, 1fr); }
++}
++@media (max-width: 767px) {
++  .admin-card-footer { justify-content: stretch; }
++  .admin-card-footer .admin-button { width: 100%; }
++  .admin-page-head-actions .admin-button { width: 100%; }
++  .admin-status-rows > div { flex-direction: column; gap: 4px; }
++  .admin-status-rows dd { text-align: left; }
++  .admin-profile { flex-direction: column; align-items: flex-start; }
++  .admin-bulk-toolbar { align-items: stretch; }
++  .admin-stat-tile { min-width: 108px; flex-basis: 108px; }
++  .content-media-item { align-items: flex-start; }
++}
+diff --git a/app/rstmcadmin/primitives.css b/app/rstmcadmin/primitives.css
+index 5d46345..4e6b82b 100644
+--- a/app/rstmcadmin/primitives.css
++++ b/app/rstmcadmin/primitives.css
+@@ -107,7 +107,7 @@
+   border: 1px solid var(--adm-border); border-radius: var(--adm-r-card);
+   background: var(--adm-card); box-shadow: var(--adm-shadow);
+ }
+-.admin-stat p { color: var(--adm-text-2); font-size: 13px; line-height: 20px; font-weight: 500; }
++.admin-stat p, .admin-stat > span { color: var(--adm-text-2); font-size: 13px; line-height: 20px; font-weight: 500; }
+ .admin-stat strong { display: block; font-size: 30px; line-height: 36px; font-weight: 600; font-variant-numeric: tabular-nums; }
+ .admin-stat small { color: var(--adm-text-3); font-size: 12px; line-height: 16px; }
+ .admin-icon-tile {
+diff --git a/app/rstmcadmin/security/page.tsx b/app/rstmcadmin/security/page.tsx
+index 76fcc69..0cb4df1 100644
+--- a/app/rstmcadmin/security/page.tsx
++++ b/app/rstmcadmin/security/page.tsx
+@@ -3,6 +3,7 @@ import {getPool} from '@/lib/postgres';
+ import {ADMIN_ROLES} from '@/lib/admin/config';
+ import {ROLE_PERMISSIONS,ADMIN_PERMISSIONS} from '@/lib/admin/permissions';
+ import {parseAdminIpAllowlist} from '@/lib/admin/network';
++import { Check } from 'lucide-react';
+ import { PageHead } from '@/components/admin/page-head';
+ 
+ const labels:Record<string,string>={
+@@ -18,7 +19,7 @@ export default async function SecurityPage(){
+  const allowlist=parseAdminIpAllowlist(process.env.ADMIN_IP_ALLOWLIST);
+  return <><PageHead breadcrumb="Control room / Security" title="Security & administrator roles" />
+   <section className="admin-card"><h2>Enforced account policy</h2><dl className="admin-definition-list"><dt>Your role</dt><dd>{actor.role}</dd><dt>Two-factor authentication</dt><dd>{user?.twoFactorEnabled?'Enabled — required on every admin request':'Setup required'}</dd><dt>Admin session lifetime</dt><dd>12 hours absolute; public account session settings are unchanged.</dd><dt>Optional IP allowlist</dt><dd>{allowlist.length?`Enabled (${allowlist.length} configured network${allowlist.length===1?'':'s'})`:'Disabled — ADMIN_IP_ALLOWLIST is unset.'}</dd><dt>Verified owners with 2FA</dt><dd>{Number(owners.secured)} of {Number(owners.total)}</dd></dl><p>Administrator accounts cannot disable 2FA through the account endpoint. An owner account must never be left with password-only panel access. Configure optional networks as comma-separated IPv4/IPv6 addresses or CIDRs in the deployment environment; this page deliberately does not reveal the configured addresses.</p></section>
+-  <section className="admin-card"><h2>Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}>{role}</th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role}>{ROLE_PERMISSIONS[role].includes(permission)?'Allowed':'—'}</td>)}</tr>)}</tbody></table></div></section>
+-  <section className="admin-card"><h2>Known sign-in devices for your account</h2><p>Only an HMAC fingerprint is stored. A new IP/browser tuple generates a security email and an audit event; raw device details are not persisted in the device registry.</p><div className="admin-table-scroll"><table><thead><tr><th>Fingerprint (partial)</th><th>First seen (UTC)</th><th>Last seen (UTC)</th></tr></thead><tbody>{devices.map(device=><tr key={device.fingerprint_hash}><td><code>{String(device.fingerprint_hash).slice(0,16)}…</code></td><td>{new Date(Number(device.first_seen)).toISOString()}</td><td>{new Date(Number(device.last_seen)).toISOString()}</td></tr>)}{!devices.length&&<tr><td colSpan={3}>No device fingerprints recorded. The current network may not provide an IP or browser identifier.</td></tr>}</tbody></table></div></section>
++  <section className="admin-card"><h2 id="role-matrix">Role permission matrix</h2><p>Permissions are compiled into the server-side policy and cannot be edited from the browser. Owners alone may grant or revoke administrator roles; account role changes require typing the exact target email and recording a reason.</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-labelledby="role-matrix"><table><thead><tr><th>Permission</th>{ADMIN_ROLES.map(role=><th key={role}>{role}</th>)}</tr></thead><tbody>{ADMIN_PERMISSIONS.map(permission=><tr key={permission}><th>{labels[permission]||permission}</th>{ADMIN_ROLES.map(role=><td key={role} className={ROLE_PERMISSIONS[role].includes(permission)?'admin-matrix-yes':'admin-matrix-no'}>{ROLE_PERMISSIONS[role].includes(permission)?<><Check aria-hidden="true" focusable="false" /><span className="sr-only">Allowed</span></>:<><span aria-hidden="true">—</span><span className="sr-only">Not allowed</span></>}</td>)}</tr>)}</tbody></table></div></section>
++  <section className="admin-card"><h2 id="signin-devices">Known sign-in devices for your account</h2><p>Only an HMAC fingerprint is stored. A new IP/browser tuple generates a security email and an audit event; raw device details are not persisted in the device registry.</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-labelledby="signin-devices"><table><thead><tr><th>Fingerprint (partial)</th><th>First seen (UTC)</th><th>Last seen (UTC)</th></tr></thead><tbody>{devices.map(device=><tr key={device.fingerprint_hash}><td><code>{String(device.fingerprint_hash).slice(0,16)}…</code></td><td>{new Date(Number(device.first_seen)).toISOString()}</td><td>{new Date(Number(device.last_seen)).toISOString()}</td></tr>)}{!devices.length&&<tr><td colSpan={3} className="is-empty">No device fingerprints recorded. The current network may not provide an IP or browser identifier.</td></tr>}</tbody></table></div></section>
+  </>;
+ }
+diff --git a/app/rstmcadmin/shell.css b/app/rstmcadmin/shell.css
+index 50dabe5..b9c28c6 100644
+--- a/app/rstmcadmin/shell.css
++++ b/app/rstmcadmin/shell.css
+@@ -46,7 +46,11 @@
+ 
+   display: grid;
+   grid-template-columns: var(--adm-sidebar-w) minmax(0, 1fr);
++  /* Desktop: the shell owns the viewport so the sidebar stays still and the
++     panel scrolls inside itself. Mobile reverts to normal page scrolling. */
++  height: 100dvh;
+   min-height: 100dvh;
++  overflow: hidden;
+   background: var(--adm-bg);
+   color: var(--adm-text);
+   font-family: var(--adm-font);
+@@ -277,7 +281,7 @@ html[data-theme="light"] body .admin-shell {
+ }
+ 
+ @media (max-width: 767px) {
+-  .admin-shell { display: block; min-height: 100dvh; overflow: visible; }
++  .admin-shell { display: block; height: auto; min-height: 100dvh; overflow: visible; }
+   .admin-topbar {
+     display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 60;
+     height: 56px; padding: env(safe-area-inset-top) 12px 0; box-sizing: content-box;
+diff --git a/app/rstmcadmin/users/[id]/page.tsx b/app/rstmcadmin/users/[id]/page.tsx
+index c06f539..b28a130 100644
+--- a/app/rstmcadmin/users/[id]/page.tsx
++++ b/app/rstmcadmin/users/[id]/page.tsx
+@@ -1,4 +1,5 @@
+ import { notFound } from 'next/navigation';
++import { Check } from 'lucide-react';
+ import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
+ import { getPool } from '@/lib/postgres';
+ import { userDetail } from '@/lib/admin/queries';
+@@ -7,6 +8,8 @@ import { USER_ACTIONS, type UserAction } from '@/lib/admin/users';
+ import { Drawer, DataTable, bytes } from '@/components/admin/ui';
+ import { UserActions } from '@/components/admin/actions';
+ import { PageHead } from '@/components/admin/page-head';
++import { Avatar } from '@/components/admin/avatar';
++import { Badge } from '@/components/admin/badge';
+ 
+ export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
+   const actor = await requireAdminPage(); assertAdminPagePermission(actor,'users.read'); const { id } = await params;
+@@ -18,15 +21,31 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
+   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
+   else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
+   const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
+-  return <><PageHead breadcrumb="Control room / Account detail" title={user.name}>
+-    <p>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</p>
++  const access = user.deleted_at != null ? 'In trash' : user.banned ? 'Banned' : 'Active';
++  return <>
++    <PageHead breadcrumb="Control room / Account detail" title={user.name}>
++      <p>{user.email} · {user.role} {user.deleted_at != null && '· In trash'}</p>
+     </PageHead>
++    <section className="admin-card">
++      <div className="admin-profile">
++        <Avatar name={user.name} seed={user.id} size={64} />
++        <div className="admin-profile-text">
++          <h2>{user.name}</h2>
++          <p>{user.username ? '@' + user.username : 'No profile yet'}</p>
++          <div className="admin-badges">
++            <Badge>{user.role}</Badge>
++            <Badge>{access}</Badge>
++            {user.emailVerified ? <Badge tone="success"><Check aria-hidden="true" focusable="false" />Verified</Badge> : <Badge tone="warning">Unverified</Badge>}
++          </div>
++        </div>
++      </div>
++    </section>
+     <div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
+     <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
+-    <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+     <DataTable caption="Active sessions — newest 50. No session tokens are exposed. Times are UTC." headings={['Created','Expires','IP address','Device / user agent']}>
+       {sessions.map(session => <tr key={session.id}><td>{date(session.createdAt)}</td><td>{date(session.expiresAt)}</td><td>{session.ipAddress || 'Not recorded'}</td><td>{session.userAgent || 'Not recorded'}</td></tr>)}
+-      {!sessions.length && <tr><td colSpan={4}>No active sessions.</td></tr>}
++      {!sessions.length && <tr><td colSpan={4} className="is-empty">No active sessions.</td></tr>}
+     </DataTable>
++    <section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+   </>;
+ }
+diff --git a/app/rstmcadmin/users/page.tsx b/app/rstmcadmin/users/page.tsx
+index c4f60e4..a32f361 100644
+--- a/app/rstmcadmin/users/page.tsx
++++ b/app/rstmcadmin/users/page.tsx
+@@ -1,4 +1,5 @@
+ import Link from 'next/link';
++import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
+ import { assertAdminPagePermission,requireAdminPage } from '@/lib/admin/guard';
+ import { getPool } from '@/lib/postgres';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+@@ -6,22 +7,39 @@ import { listUsers, userFilters } from '@/lib/admin/queries';
+ import { DataTable, SearchBar, FilterChips, bytes } from '@/components/admin/ui';
+ import { ExportUsers } from '@/components/admin/actions';
+ import { PageHead } from '@/components/admin/page-head';
++import { Avatar } from '@/components/admin/avatar';
++import { Badge } from '@/components/admin/badge';
+ 
+ export default async function Users({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+   const actor=await requireAdminPage();assertAdminPagePermission(actor,'users.read');
+   let filters;
+   try { filters = userFilters(await searchParams); }
+-  catch { return <section className="admin-card"><h1>Invalid filters</h1><p role="alert">Use a search up to 100 characters and a page size from 1 to 200.</p><Link className="admin-button" href={ADMIN_BASE_PATH + '/users'}>Reset filters</Link></section>; }
++  catch { return <section className="admin-card admin-error-card"><h1>Invalid filters</h1><p role="alert">Use a search up to 100 characters and a page size from 1 to 200.</p><div className="admin-card-footer"><Link className="admin-button" href={ADMIN_BASE_PATH + '/users'}>Reset filters</Link></div></section>; }
+   const result = await listUsers(await getPool(), filters);
+   const pages = Math.max(1, Math.ceil(result.total / filters.limit));
+   const pageLink = (page: number) => ADMIN_BASE_PATH + '/users?' + new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([k,v]) => [k,String(v)])), page: String(page) });
+-  return <><PageHead breadcrumb="Control room / People" title="Users & accounts">
+-    <p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
++  const sizes = result.users.map(user => Number(user.storage_bytes) || 0);
++  const largest = Math.max(0, ...sizes);
++  return <>
++    <PageHead breadcrumb="Control room / People" title="Users & accounts" actions={<ExportUsers filters={filters} />}>
++      <p>{result.total.toLocaleString('en-IN')} matching accounts. Newest first. Standalone demo profiles without login accounts are not included.</p>
+     </PageHead>
+-    <SearchBar filters={filters} /><FilterChips filters={filters} /><ExportUsers filters={filters} />
++    <SearchBar filters={filters} /><FilterChips filters={filters} />
+     <DataTable caption={`Accounts · page ${filters.page} of ${pages}. CSV exports only this page (maximum 200).`} headings={['Account','Role','Email','Access','Storage']}>
+-      {result.users.map(user => <tr key={user.id}><td><Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link><small>{user.username ? '@' + user.username : 'No profile yet'}</small></td><td>{user.role}</td><td>{user.email}<small>{user.emailVerified ? 'Verified' : 'Unverified'}</small></td><td>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</td><td>{bytes(user.storage_bytes)}</td></tr>)}
+-      {!result.users.length && <tr><td colSpan={5}>No accounts match these filters.</td></tr>}
+-    </DataTable><nav className="admin-pagination" aria-label="Users pagination">{filters.page > 1 ? <Link href={pageLink(filters.page-1)}>Previous</Link> : <span /> }<span>Page {filters.page} of {pages}</span>{filters.page < pages && <Link href={pageLink(filters.page+1)}>Next</Link>}</nav>
++      {result.users.map((user, index) => <tr key={user.id}>
++        <td><span className="admin-table-name">
++          <Avatar name={user.name} seed={user.id} size={36} />
++          <span className="admin-table-name-text">
++            <Link href={ADMIN_BASE_PATH + '/users/' + encodeURIComponent(user.id)}>{user.name}</Link>
++            <small>{user.username ? '@' + user.username : 'No profile yet'}</small>
++          </span>
++        </span></td>
++        <td><Badge>{user.role}</Badge></td>
++        <td>{user.email}<small><Badge tone={user.emailVerified ? 'success' : 'warning'}>{user.emailVerified ? <><Check aria-hidden="true" focusable="false" />Verified</> : 'Unverified'}</Badge></small></td>
++        <td><Badge>{user.deleted_at != null ? 'In trash' : user.ban_active ? 'Banned' : 'Active'}</Badge></td>
++        <td className="is-numeric">{bytes(user.storage_bytes)}{largest > 0 ? <span className="admin-storage-bar"><span style={{ width: `${Math.max(4, Math.round(sizes[index] / largest * 100))}%` }} /></span> : null}</td>
++      </tr>)}
++      {!result.users.length && <tr><td colSpan={5} className="is-empty">No accounts match these filters.</td></tr>}
++    </DataTable><nav className="admin-pagination" aria-label="Users pagination">{filters.page > 1 ? <Link href={pageLink(filters.page-1)}><ChevronLeft aria-hidden="true" focusable="false" />Previous</Link> : <span /> }<span>Page {filters.page} of {pages}</span>{filters.page < pages && <Link href={pageLink(filters.page+1)}>Next<ChevronRight aria-hidden="true" focusable="false" /></Link>}</nav>
+   </>;
+ }
+diff --git a/components/admin/actions.tsx b/components/admin/actions.tsx
+index 622817d..5a559a5 100644
+--- a/components/admin/actions.tsx
++++ b/components/admin/actions.tsx
+@@ -26,9 +26,9 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
+     finally { setPending(false); }
+   }
+   return <div className="admin-actions">
+-    <p className="admin-muted">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
++    <p className="admin-muted admin-alert">Every action is permission-checked and audited. Ban and trash revoke all sessions. Account trash disables login and hides the profile and its content. Restoring an account preserves separate content moderation decisions.</p>
+     <div className="admin-action-grid">{actions.map(action => <button className="admin-button" data-tone={['ban', 'delete'].includes(action) ? 'danger' : undefined} key={action} onClick={event => { trigger.current = event.currentTarget; setSelected(action); setConfirmation(''); setReason(''); setExpires(''); setMessage(''); }}>{labels[action]}</button>)}</div>
+-    {!actions.length && <p>This account is protected. No actions are available for your role.</p>}
++    {!actions.length && <p className="admin-alert">This account is protected. No actions are available for your role.</p>}
+     {!selected && message && <p role="status">{message}</p>}
+     <ConfirmDialog onRestoreFocus={() => { trigger.current?.focus(); }} open={selected !== null} title={selected ? labels[selected] : 'Confirm action'} onClose={() => { if (!pending) setSelected(null); }}>
+       <form onSubmit={submit} className="admin-confirm">
+diff --git a/components/admin/analytics.tsx b/components/admin/analytics.tsx
+index 309f27e..8334666 100644
+--- a/components/admin/analytics.tsx
++++ b/components/admin/analytics.tsx
+@@ -47,8 +47,8 @@ export function AnalyticsDashboard({ initial }: { initial: AnalyticsSnapshot })
+     </section>
+     <div className="analytics-chart-grid">{metrics.map(metric => <Chart key={metric.key} data={data.daily} metric={metric}/>)}</div>
+     <div className="comms-grid analytics-lists">
+-      <section className="admin-card"><h2>Top content</h2><p>Visible, non-demo posts and reels from the selected window; ordered by real likes plus comments.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top content"><table><thead><tr><th>Creator / caption</th><th>Kind · category</th><th>Likes</th><th>Comments</th><th>Views</th></tr></thead><tbody>{data.topPosts.map(row => <tr key={row.id}><td><strong>{row.username}</strong><small>{row.name}</small><div className="analytics-caption">{row.caption}</div></td><td>{row.kind} · {row.category}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td><td>{number(row.views)}</td></tr>)}{!data.topPosts.length && <tr><td colSpan={5}>No eligible content in this window.</td></tr>}</tbody></table></div></section>
+-      <section className="admin-card"><h2>Top creators</h2><p>Content created in the selected window; interactions are real, not boosted display counts.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top creators"><table><thead><tr><th>Creator</th><th>Creations</th><th>Likes</th><th>Comments</th></tr></thead><tbody>{data.topCreators.map(row => <tr key={row.id}><td>{row.username}<small>{row.name}</small></td><td>{number(row.creations)}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td></tr>)}{!data.topCreators.length && <tr><td colSpan={4}>No eligible creators in this window.</td></tr>}</tbody></table></div></section>
++      <section className="admin-card"><h2>Top content</h2><p>Visible, non-demo posts and reels from the selected window; ordered by real likes plus comments.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top content"><table><thead><tr><th>Creator / caption</th><th>Kind · category</th><th>Likes</th><th>Comments</th><th>Views</th></tr></thead><tbody>{data.topPosts.map(row => <tr key={row.id}><td><strong>{row.username}</strong><small>{row.name}</small><div className="analytics-caption">{row.caption}</div></td><td>{row.kind} · {row.category}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td><td>{number(row.views)}</td></tr>)}{!data.topPosts.length && <tr><td colSpan={5} className="is-empty">No eligible content in this window.</td></tr>}</tbody></table></div></section>
++      <section className="admin-card"><h2>Top creators</h2><p>Content created in the selected window; interactions are real, not boosted display counts.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top creators"><table><thead><tr><th>Creator</th><th>Creations</th><th>Likes</th><th>Comments</th></tr></thead><tbody>{data.topCreators.map(row => <tr key={row.id}><td>{row.username}<small>{row.name}</small></td><td>{number(row.creations)}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td></tr>)}{!data.topCreators.length && <tr><td colSpan={4} className="is-empty">No eligible creators in this window.</td></tr>}</tbody></table></div></section>
+       <section className="admin-card"><h2>Category usage</h2><div className="analytics-ranked-list">{data.categories.map((row,index) => <p key={row.category}><span>{index+1}. {row.category}</span><strong>{number(row.creations)}</strong></p>)}{!data.categories.length && <p>No categories in this window.</p>}</div></section>
+       <section className="admin-card"><h2>Hashtag usage</h2><div className="analytics-ranked-list">{data.hashtags.map((row,index) => <p key={row.hashtag}><span>{index+1}. #{row.hashtag}</span><strong>{number(row.uses)}</strong></p>)}{!data.hashtags.length && <p>No hashtags in this window.</p>}</div></section>
+     </div>
+diff --git a/components/admin/appearance.tsx b/components/admin/appearance.tsx
+index f0e5356..a21947f 100644
+--- a/components/admin/appearance.tsx
++++ b/components/admin/appearance.tsx
+@@ -3,8 +3,9 @@ import {useState} from 'react';
+ import {useRouter} from 'next/navigation';
+ import {DEFAULT_APPEARANCE,NAV_ICONS,NAV_TARGETS,validateAppearance,type Appearance,type NavItem,type Palette} from '@/lib/appearance';
+ import {upload,request} from '@/components/social/common';
+-function Text({label,value,onChange,max=500,type='text'}:{label:string;value:string|number;onChange:(value:string)=>void;max?:number;type?:string}){return <label>{label}<input type={type} value={value} maxLength={max} onChange={e=>onChange(e.target.value)}/></label>;}
+-function Toggle({label,value,onChange}:{label:string;value:boolean;onChange:(value:boolean)=>void}){return <label className="appearance-toggle"><input type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/>{label}</label>;}
++// max=7 marks the palette fields, which are the only six-digit hex colour inputs.
++function Text({label,value,onChange,max=500,type='text'}:{label:string;value:string|number;onChange:(value:string)=>void;max?:number;type?:string}){return <label>{label}<span className="admin-input-suffix">{max===7?<span className="admin-color-swatch" style={{background:String(value)}} aria-hidden="true"/>:null}<input type={type} value={value} maxLength={max} onChange={e=>onChange(e.target.value)}/></span></label>;}
++function Toggle({label,value,onChange}:{label:string;value:boolean;onChange:(value:boolean)=>void}){return <label className="appearance-toggle admin-switch"><input type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/>{label}</label>;}
+ export function AppearanceEditor({initial,localUploads}:{initial:Appearance;localUploads:boolean}){
+  const router=useRouter();const [a,setA]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState('');
+  const set=(patch:Partial<Appearance>)=>setA(current=>({...current,...patch}));
+diff --git a/components/admin/audit.tsx b/components/admin/audit.tsx
+index 1b848f8..db89f13 100644
+--- a/components/admin/audit.tsx
++++ b/components/admin/audit.tsx
+@@ -12,7 +12,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
+   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
+   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
+   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
+-  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" href="/rstmcadmin/audit">Clear</a>
++  <button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a>
+  </form><button className="admin-button" disabled={busy} onClick={async()=>{
+   setBusy(true);setError('');
+   try{
+@@ -28,6 +28,6 @@ function pretty(value:string|null){if(!value)return '—';try{return JSON.string
+ export function AuditTable({rows}:{rows:AuditRow[]}){
+  return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Read-only administrator audit log"><table><caption>Newest first · read-only historical records</caption><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th><th>Before / after</th><th>Network / client</th></tr></thead><tbody>
+   {rows.map(row=><tr key={row.id}><td>{new Date(Number(row.created_at)).toISOString()}</td><td>{row.actor_email}<small>{row.actor_id}</small></td><td><code>{row.action}</code></td><td>{row.target_type||'—'}<small>{row.target_id||'—'}</small></td><td>{row.reason||'—'}</td><td><details><summary>View snapshot</summary><strong>Before</strong><pre>{pretty(row.before)}</pre><strong>After</strong><pre>{pretty(row.after)}</pre></details></td><td>{row.ip||'Not recorded'}<small>{row.user_agent||'Not recorded'}</small></td></tr>)}
+-  {!rows.length&&<tr><td colSpan={7}>No historical audit rows match these filters.</td></tr>}
++  {!rows.length&&<tr><td colSpan={7} className="is-empty">No historical audit rows match these filters.</td></tr>}
+  </tbody></table></div>;
+ }
+diff --git a/components/admin/cms.tsx b/components/admin/cms.tsx
+index ed68abf..1061f93 100644
+--- a/components/admin/cms.tsx
++++ b/components/admin/cms.tsx
+@@ -15,7 +15,7 @@ export function CmsPageManager(){
+  const field=(name:keyof Editor,label:string,max:number,type='text')=><label>{label}<input type={type} maxLength={max} value={String(editor[name])} onChange={event=>setEditor({...editor,[name]:event.target.value})}/></label>;
+  return <div className="comms-page-manager">
+   <section className="admin-card"><h2>CMS pages</h2><p>Markdown pages are inert drafts until published. Public routes use `/p/&lt;slug&gt;`; raw HTML is never rendered. Published pages can be added to the public footer.</p><div className="admin-action-grid"><button className="admin-button" type="button" onClick={()=>{setEditor(empty());setMessage('New page draft.');}}>New page</button><button className="admin-button" type="button" onClick={()=>{setEditor(empty('privacy'));setMessage('Create the privacy page, then add its content.');}}>New privacy page</button><button className="admin-button" type="button" onClick={()=>{setEditor(empty('terms'));setMessage('Create the terms page, then add its content.');}}>New terms page</button></div>
+-   <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="CMS page list"><table><caption>Existing public pages and drafts</caption><thead><tr><th>Page</th><th>Status</th><th>Footer</th><th>Updated</th><th>Action</th></tr></thead><tbody>{pages.map(page=><tr key={page.id}><td>{page.title}<small>/p/{page.slug}</small></td><td>{page.published?'Published':'Draft'}</td><td>{page.show_in_footer?'Visible':'Hidden'}</td><td>{new Date(Number(page.updated_at)).toLocaleString()}</td><td><button className="admin-button" type="button" disabled={busy} onClick={()=>void edit(page.id)}>Edit</button> {page.published&&<a className="admin-button" href={'/p/'+page.slug} target="_blank" rel="noreferrer">View</a>}</td></tr>)}{!pages.length&&<tr><td colSpan={5}>No CMS pages yet.</td></tr>}</tbody></table></div>
++   <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="CMS page list"><table><caption>Existing public pages and drafts</caption><thead><tr><th>Page</th><th>Status</th><th>Footer</th><th>Updated</th><th>Action</th></tr></thead><tbody>{pages.map(page=><tr key={page.id}><td>{page.title}<small>/p/{page.slug}</small></td><td>{page.published?'Published':'Draft'}</td><td>{page.show_in_footer?'Visible':'Hidden'}</td><td>{new Date(Number(page.updated_at)).toLocaleString()}</td><td><button className="admin-button" type="button" disabled={busy} onClick={()=>void edit(page.id)}>Edit</button> {page.published&&<a className="admin-button" href={'/p/'+page.slug} target="_blank" rel="noreferrer">View</a>}</td></tr>)}{!pages.length&&<tr><td colSpan={5} className="is-empty">No CMS pages yet.</td></tr>}</tbody></table></div>
+   </section>
+   <form className="admin-card admin-confirm" onSubmit={save}><h2>{editor.id?'Edit page':'Create page'}</h2><div className="admin-detail">{field('title','Public page title',120)}{field('slug','URL slug',80)}{field('seoTitle','SEO title',160)}{field('seoDescription','SEO description',320)}{field('ogImage','Open Graph image (safe HTTPS or local path)',2048)}<label>Footer order<input type="number" min={0} max={1000} value={editor.footerOrder} onChange={event=>setEditor({...editor,footerOrder:Number(event.target.value)})}/></label></div>
+    <label>Markdown content<textarea rows={18} maxLength={50000} value={editor.body} onChange={event=>setEditor({...editor,body:event.target.value})} placeholder={'# Privacy\n\nWrite your page in Markdown. Raw HTML is displayed as text.'}/></label>
+diff --git a/components/admin/communications.tsx b/components/admin/communications.tsx
+index c8c6973..582bcd3 100644
+--- a/components/admin/communications.tsx
++++ b/components/admin/communications.tsx
+@@ -22,7 +22,7 @@ function MessageInspector(){
+  useEffect(()=>{let active=true;request<{conversations:Conversation[];total:number}>('/api/admin/comms?view=conversations&q=').then(result=>{if(active){setItems(result.conversations);setTotal(result.total);}}).catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load conversations.');});return()=>{active=false;};},[]);
+  const inspect=async(event:React.FormEvent)=>{event.preventDefault();if(!selected)return;setBusy(true);setError('');try{const result=await request<{messages:Message[];total:number;truncated:boolean}>('/api/admin/comms',{action:'inspectConversation',firstId:selected.first_id,secondId:selected.second_id,reason,confirmation});setMessages(result.messages);setConfirmation('');setError(`Audited break-glass access: ${result.total} messages${result.truncated?' (showing newest 100)':''}.`);}catch(e){setError(e instanceof Error?e.message:'Could not inspect conversation.');}finally{setBusy(false);}};
+  const moderate=async(message:Message,action:'redact'|'delete',reasonText:string,confirmText:string)=>{setBusy(true);setError('');try{await request('/api/admin/comms',{action:'moderateMessage',operation:action,id:message.id,confirmation:confirmText,reason:reasonText});setMessages(items=>action==='delete'?items.filter(item=>item.id!==message.id):items.map(item=>item.id===message.id?{...item,body:'[Message removed by moderation]',redacted_at:Date.now(),redaction_reason:reasonText}:item));setError(action==='redact'?'Message redacted and audited.':'Message removed and audited.');}catch(e){setError(e instanceof Error?e.message:'Could not change message.');}finally{setBusy(false);}};
+- return <div className="comms-grid"><section className="admin-card"><h2>Private message inventory</h2><p>Conversation listings show participant metadata only. Message text is revealed only after entering a reason and the exact break-glass phrase. Each access is audited before the text is returned.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setError(e.message));}}><label>Search participants<input maxLength={100} value={q} onChange={event=>setQ(event.target.value)} placeholder="Username, name, email, or ID"/></label><button className="admin-button">Search</button><button type="button" className="admin-button" onClick={()=>void load().catch(e=>setError(e.message))}>Refresh</button></form><p>{total.toLocaleString()} conversations</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Message conversations"><table><thead><tr><th>Participants</th><th>Messages</th><th>Last activity</th><th>Action</th></tr></thead><tbody>{items.map(item=><tr key={item.first_id+':'+item.second_id}><td>{item.first_name} <small>{item.first_email||item.first_id}</small><br/>{item.second_name} <small>{item.second_email||item.second_id}</small></td><td>{Number(item.message_count)}</td><td>{new Date(Number(item.last_at)).toLocaleString()}</td><td><button className="admin-button" type="button" onClick={()=>{setSelected(item);setMessages([]);setReason('');setConfirmation('');setError('');}}>Break glass</button></td></tr>)}{!items.length&&<tr><td colSpan={4}>No conversations match.</td></tr>}</tbody></table></div></section>
++ return <div className="comms-grid"><section className="admin-card"><h2>Private message inventory</h2><p>Conversation listings show participant metadata only. Message text is revealed only after entering a reason and the exact break-glass phrase. Each access is audited before the text is returned.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setError(e.message));}}><label>Search participants<input maxLength={100} value={q} onChange={event=>setQ(event.target.value)} placeholder="Username, name, email, or ID"/></label><button className="admin-button">Search</button><button type="button" className="admin-button" onClick={()=>void load().catch(e=>setError(e.message))}>Refresh</button></form><p>{total.toLocaleString()} conversations</p><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Message conversations"><table><thead><tr><th>Participants</th><th>Messages</th><th>Last activity</th><th>Action</th></tr></thead><tbody>{items.map(item=><tr key={item.first_id+':'+item.second_id}><td>{item.first_name} <small>{item.first_email||item.first_id}</small><br/>{item.second_name} <small>{item.second_email||item.second_id}</small></td><td>{Number(item.message_count)}</td><td>{new Date(Number(item.last_at)).toLocaleString()}</td><td><button className="admin-button" type="button" onClick={()=>{setSelected(item);setMessages([]);setReason('');setConfirmation('');setError('');}}>Break glass</button></td></tr>)}{!items.length&&<tr><td colSpan={4} className="is-empty">No conversations match.</td></tr>}</tbody></table></div></section>
+   {selected&&<section className="admin-card admin-confirm"><h2>Audited conversation inspection</h2><p>{selected.first_name} ↔ {selected.second_name} · {selected.first_id} / {selected.second_id}</p><form onSubmit={inspect}><label>Reason for access<input required minLength={8} maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Type BREAK GLASS<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} required/></label><button className="admin-button admin-primary" disabled={busy||confirmation!=='BREAK GLASS'}>Reveal and audit</button></form>{error&&<p role="status">{error}</p>}
+    {messages.map(message=><MessageRow key={message.id} message={message} busy={busy} onModerate={moderate}/>)}
+   </section>}
+@@ -37,7 +37,7 @@ function DirectMessageControls(){
+  const load=async()=>setItems(await request<Account[]>('/api/admin/comms?view=accounts&q='+encodeURIComponent(q)));
+  useEffect(()=>{let active=true;request<Account[]>('/api/admin/comms?view=accounts&q=').then(rows=>{if(active)setItems(rows);}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load accounts.');});return()=>{active=false;};},[]);
+  const save=async(account:Account,disabled:boolean)=>{setBusy(true);setMessage('');try{await request('/api/admin/comms',{action:'setDirectMessageControl',profileId:account.id,disabled,reason:reasons[account.id]||'',confirmation:confirms[account.id]||''});await load();setConfirms({...confirms,[account.id]:''});setMessage('Direct-message restriction saved and audited.');}catch(e){setMessage(e instanceof Error?e.message:'Could not update direct-message access.');}finally{setBusy(false);}};
+- return <section className="admin-card"><h2>Per-account direct-message controls</h2><p>The existing global Messages feature switch remains under Features. These per-account controls deny new sends when either participant is restricted; historical conversations are not hidden or deleted.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><button className="admin-button">Search</button></form><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Direct-message account controls"><table><thead><tr><th>Account</th><th>Current state</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(account=><tr key={account.id}><td>{account.username||account.name}<small>{account.email}<br/>{account.id}</small></td><td>{account.dm_disabled?'Restricted':'Allowed'}</td><td><input aria-label={'Reason for '+account.email} value={reasons[account.id]??account.dm_reason} maxLength={500} onChange={event=>setReasons({...reasons,[account.id]:event.target.value})}/></td><td><input aria-label={'Confirmation for '+account.email} value={confirms[account.id]||''} onChange={event=>setConfirms({...confirms,[account.id]:event.target.value})}/></td><td><button className="admin-button" disabled={busy||confirms[account.id]!==account.id||(!account.dm_disabled&&!(reasons[account.id]||'').trim())} onClick={()=>void save(account,!account.dm_disabled)}>{account.dm_disabled?'Allow DMs':'Restrict DMs'}</button></td></tr>)}{!items.length&&<tr><td colSpan={5}>Search for a member to manage DM access.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
++ return <section className="admin-card"><h2>Per-account direct-message controls</h2><p>The existing global Messages feature switch remains under Features. These per-account controls deny new sends when either participant is restricted; historical conversations are not hidden or deleted.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><button className="admin-button">Search</button></form><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Direct-message account controls"><table><thead><tr><th>Account</th><th>Current state</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(account=><tr key={account.id}><td>{account.username||account.name}<small>{account.email}<br/>{account.id}</small></td><td>{account.dm_disabled?'Restricted':'Allowed'}</td><td><input aria-label={'Reason for '+account.email} value={reasons[account.id]??account.dm_reason} maxLength={500} onChange={event=>setReasons({...reasons,[account.id]:event.target.value})}/></td><td><input aria-label={'Confirmation for '+account.email} value={confirms[account.id]||''} onChange={event=>setConfirms({...confirms,[account.id]:event.target.value})}/></td><td><button className="admin-button" disabled={busy||confirms[account.id]!==account.id||(!account.dm_disabled&&!(reasons[account.id]||'').trim())} onClick={()=>void save(account,!account.dm_disabled)}>{account.dm_disabled?'Allow DMs':'Restrict DMs'}</button></td></tr>)}{!items.length&&<tr><td colSpan={5} className="is-empty">Search for a member to manage DM access.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
+ }
+ function NotificationTemplateEditor(){
+  const [templates,setTemplates]=useState<Template[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+@@ -76,7 +76,7 @@ function AnnouncementEditor(){
+  const value=(row:Announcement):AnnouncementForm=>({...blank(),id:row.id,title:row.title,body:row.body,href:row.href||'',tone:(['info','success','warning'].includes(row.tone)?row.tone:'info') as AnnouncementForm['tone'],startsAt:row.starts_at?localDateTime(Number(row.starts_at)):'',endsAt:row.ends_at?localDateTime(Number(row.ends_at)):'',dismissible:row.dismissible,audience:row.audience==='members'?'members':'all',published:row.published});
+  const save=async(event:React.FormEvent)=>{event.preventDefault();setBusy(true);try{const result=await request<{id:string}>('/api/admin/comms',{action:'saveAnnouncement',...form});setForm({...form,id:result.id});await load();setMessage('Announcement saved and audited.');}catch(e){setMessage(e instanceof Error?e.message:'Could not save announcement.');}finally{setBusy(false);}};
+  const remove=async()=>{setBusy(true);try{await request('/api/admin/comms',{action:'deleteAnnouncement',id:form.id,confirmation});setForm(blank());setConfirmation('');await load();setMessage('Announcement deleted and audited.');}catch(e){setMessage(e instanceof Error?e.message:'Could not delete announcement.');}finally{setBusy(false);}};
+- return <div className="comms-grid"><section className="admin-card"><h2>Announcements</h2><p>Published announcements appear on the public home feed, respect their schedule and audience, and can be dismissed on a browser. Existing Appearance banners remain separate.</p><table><thead><tr><th>Title</th><th>State</th><th>Audience</th><th>Action</th></tr></thead><tbody>{rows.map(row=><tr key={row.id}><td>{row.title}</td><td>{row.published?'Published':'Draft'}</td><td>{row.audience}</td><td><button type="button" className="admin-button" onClick={()=>{setForm(value(row));setConfirmation('');}}>Edit</button></td></tr>)}{!rows.length&&<tr><td colSpan={4}>No announcements.</td></tr>}</tbody></table><button type="button" className="admin-button" onClick={()=>{setForm(blank());setConfirmation('');}}>New announcement</button></section>
++ return <div className="comms-grid"><section className="admin-card"><h2>Announcements</h2><p>Published announcements appear on the public home feed, respect their schedule and audience, and can be dismissed on a browser. Existing Appearance banners remain separate.</p><table><thead><tr><th>Title</th><th>State</th><th>Audience</th><th>Action</th></tr></thead><tbody>{rows.map(row=><tr key={row.id}><td>{row.title}</td><td>{row.published?'Published':'Draft'}</td><td>{row.audience}</td><td><button type="button" className="admin-button" onClick={()=>{setForm(value(row));setConfirmation('');}}>Edit</button></td></tr>)}{!rows.length&&<tr><td colSpan={4} className="is-empty">No announcements.</td></tr>}</tbody></table><button type="button" className="admin-button" onClick={()=>{setForm(blank());setConfirmation('');}}>New announcement</button></section>
+   <form className="admin-card admin-confirm" onSubmit={save}><h2>{form.id?'Edit announcement':'Create announcement'}</h2><label>Title<input required maxLength={120} value={form.title} onChange={event=>setForm({...form,title:event.target.value})}/></label><label>Message<textarea required maxLength={2000} rows={5} value={form.body} onChange={event=>setForm({...form,body:event.target.value})}/></label><label>Optional link<input maxLength={2048} value={form.href||''} onChange={event=>setForm({...form,href:event.target.value})}/></label><div className="admin-detail"><label>Style<select value={form.tone} onChange={event=>setForm({...form,tone:event.target.value as AnnouncementForm['tone']})}><option value="info">Info</option><option value="success">Success</option><option value="warning">Warning</option></select></label><label>Audience<select value={form.audience} onChange={event=>setForm({...form,audience:event.target.value as AnnouncementForm['audience']})}><option value="all">Everyone</option><option value="members">Signed-in members</option></select></label><label>Start<input type="datetime-local" value={form.startsAt?localDateTime(Date.parse(form.startsAt)):''} onChange={event=>setForm({...form,startsAt:isoDateTime(event.target.value)})}/></label><label>End<input type="datetime-local" value={form.endsAt?localDateTime(Date.parse(form.endsAt)):''} onChange={event=>setForm({...form,endsAt:isoDateTime(event.target.value)})}/></label></div><label className="feature-switch"><input type="checkbox" checked={form.dismissible} onChange={event=>setForm({...form,dismissible:event.target.checked})}/>Dismissible</label><label className="feature-switch"><input type="checkbox" checked={form.published} onChange={event=>setForm({...form,published:event.target.checked})}/>Published</label>{form.id&&<label>Type announcement ID to delete<input value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label>}{message&&<p role="status">{message}</p>}<div className="admin-action-grid"><button className="admin-button admin-primary" disabled={busy}>Save and audit</button>{form.id&&<button type="button" className="admin-button admin-danger" disabled={busy||confirmation!==form.id} onClick={()=>void remove()}>Delete</button>}</div></form>
+  </div>;
+ }
+diff --git a/components/admin/content.tsx b/components/admin/content.tsx
+index 8dc122f..97cc913 100644
+--- a/components/admin/content.tsx
++++ b/components/admin/content.tsx
+@@ -10,6 +10,7 @@ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { ContentResource } from '@/lib/admin/content';
+ import type { Settings, AdminRole } from '@/lib/admin/config';
+ import { contentConfirmationName } from '@/lib/admin/content-label';
++import { Badge } from './badge';
+ 
+ async function send(body:Record<string,unknown>) {
+   const response=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+@@ -38,11 +39,13 @@ export function ContentTable({items,resource,trash,role}:{items:Record<string,un
+   const [selected,setSelected]=useState<string[]>([]);
+   const targetNames=Object.fromEntries(items.map(item=>[String(item.id),contentConfirmationName(item)]));
+   const operations=role==='moderator'?['hide','unhide']:trash?['restore']:resource==='posts'?['hide','unhide','delete','pin','unpin']:['hide','unhide','delete'];
+-  return <><p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
++  return <><div className="admin-bulk-toolbar">
++    <p className="admin-muted">{selected.length} selected · Bulk moderation actions affect at most 50 items. Trash requires one item and its exact name. {role!=='moderator'&&'Open an item for editing, media and permanent purge.'}</p>
+     <ContentActions resource={resource} ids={selected} operations={operations} targetNames={targetNames} onDone={()=>setSelected([])} />
++  </div>
+     <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Content table"><table><caption>Newest first · 50 items per page</caption><thead><tr><th><label className="content-checkbox"><input type="checkbox" aria-label="Select all on page" checked={items.length>0&&selected.length===items.length} onChange={event=>setSelected(event.target.checked?items.map(row=>String(row.id)):[])} /></label></th><th>Content</th><th>Author</th><th>Status</th><th>Created</th></tr></thead><tbody>
+-      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small>{String(row.kind||'comment')} · {String(row.id)}</small></td><td>@{String(row.username)}</td><td>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}{row.pinned_at?' · Pinned':''}</td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
+-      {!items.length&&<tr><td colSpan={5}>No content matches these filters.</td></tr>}
++      {items.map(row=><tr key={String(row.id)}><td><label className="content-checkbox"><input type="checkbox" aria-label={'Select '+row.id} checked={selected.includes(String(row.id))} onChange={event=>setSelected(event.target.checked?[...selected,String(row.id)]:selected.filter(id=>id!==row.id))} /></label></td><td><span className="admin-table-name"><span className="admin-table-name-text"><Link href={`${ADMIN_BASE_PATH}/content/${encodeURIComponent(String(row.id))}?resource=${resource}`}>{String(row.caption||row.body||'Untitled').slice(0,100)}</Link><small><Badge>{String(row.kind||'comment')}</Badge> · {String(row.id)}</small></span></span></td><td>@{String(row.username)}</td><td><span className="admin-badges"><Badge>{row.deleted_at?'Trash':row.hidden_at?'Hidden':'Unhidden'}</Badge>{Boolean(row.pinned_at)&&<Badge tone="primary">Pinned</Badge>}</span></td><td>{new Date(Number(row.created_at)).toISOString().slice(0,10)}</td></tr>)}
++      {!items.length&&<tr><td colSpan={5} className="is-empty">No content matches these filters.</td></tr>}
+     </tbody></table></div>
+   </>;
+ }
+@@ -74,7 +77,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
+   }}>
+     <label>{post?'Caption':'Comment text'}<textarea maxLength={post?2200:1000} value={caption} onChange={event=>setCaption(event.target.value)} required={!post} /></label>
+     {post&&<>
+-      <div className="admin-detail"><label>Location<input value={location} maxLength={100} onChange={event=>setLocation(event.target.value)} /></label><label>Category<select value={category} onChange={event=>setCategory(event.target.value)}>{['For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(value=><option key={value}>{value}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}>{['post','reel','story'].map(value=><option key={value}>{value}</option>)}</select></label><label>Expiry (UTC; blank means no expiry)<input type="datetime-local" value={expires} onChange={event=>{setExpires(event.target.value);setExpiryChanged(true);}} /><button type="button" className="admin-button" onClick={()=>{setExpires('');setExpiryChanged(true);}}>Clear expiry</button></label></div>
++      <div className="admin-field-grid"><label>Location<input value={location} maxLength={100} onChange={event=>setLocation(event.target.value)} /></label><label>Category<select value={category} onChange={event=>setCategory(event.target.value)}>{['For you','Travel','Nature','Photography','Architecture','Lifestyle'].map(value=><option key={value}>{value}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}>{['post','reel','story'].map(value=><option key={value}>{value}</option>)}</select></label><label>Expiry (UTC; blank means no expiry)<input type="datetime-local" value={expires} onChange={event=>{setExpires(event.target.value);setExpiryChanged(true);}} /><button type="button" className="admin-button" onClick={()=>{setExpires('');setExpiryChanged(true);}}>Clear expiry</button></label></div>
+       <label>Tagged account IDs (comma-separated, maximum 10)<input value={tags} onChange={event=>setTags(event.target.value)} maxLength={1100} /></label>
+       <fieldset className="content-media"><legend>Media preview & order</legend><p>New items must be verified uploads owned by you or the author. Reordering preserves each item’s layout and alt text.</p>{media.map((url,index)=><div className="content-media-item" key={url+index}>
+         {safeMedia(url)&&(item.media_type==='video'||kind==='reel'?<video src={url} controls preload="metadata" aria-label={'Preview media '+(index+1)} />:<Image unoptimized width={800} height={800} src={url} alt={'Content preview '+(index+1)} />)}
+@@ -84,7 +87,7 @@ export function ContentEditor({item,resource}:{item:Record<string,unknown>;resou
+       <label>Aspect ratios (JSON array, or null to clear)<input value={aspects} onChange={event=>setAspects(event.target.value)} /></label><button type="button" className="admin-button" disabled={pending||!media.length} onClick={regenerate}>Regenerate aspects from media</button>
+     </>}
+     <label>Type content ID to confirm: <code>{String(item.id)}</code><input aria-label="Edit confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" required /></label>
+-    {message&&<p role="status">{message}</p>}<button className="admin-button admin-primary" disabled={pending||confirmation!==item.id} type="submit">{pending?'Working…':'Save content'}</button>
++    {message&&<p role="status">{message}</p>}<div className="admin-card-footer"><button className="admin-button admin-primary" disabled={pending||confirmation!==item.id} type="submit">{pending?'Working…':'Save content'}</button></div>
+   </form>;
+ }
+ export function ContentSettings({settings}:{settings:Settings}) {
+diff --git a/components/admin/exports.tsx b/components/admin/exports.tsx
+index 157c087..3458f87 100644
+--- a/components/admin/exports.tsx
++++ b/components/admin/exports.tsx
+@@ -1,5 +1,6 @@
+ 'use client';
+ import { useState } from 'react';
++import { Download } from 'lucide-react';
+ 
+ type Resource = 'users'|'posts'|'reports'|'audit';
+ export function ExportManager(){
+@@ -20,7 +21,7 @@ export function ExportManager(){
+   }catch(error){setMessage(error instanceof Error?error.message:'Export failed.');}
+   finally{setBusy(false);}
+  };
+- return <section className="admin-card export-manager"><h2>List export</h2><p>Exports are streamed from the server, capped at 1,000 rows, formula-neutralized for CSV, and audited. Choose only the data you need; user exports include email addresses and audit exports include client metadata.</p>
++ return <section className="admin-card export-manager"><span className="admin-icon-tile" aria-hidden="true"><Download /></span><h2>List export</h2><p>Exports are streamed from the server, capped at 1,000 rows, formula-neutralized for CSV, and audited. Choose only the data you need; user exports include email addresses and audit exports include client metadata.</p>
+   <div className="admin-detail"><label>List<select value={resource} onChange={event=>{setResource(event.target.value as Resource);setStatus('all');}}><option value="users">Users</option><option value="posts">Posts</option><option value="reports">Reports</option><option value="audit">Audit</option></select></label><label>Format<select value={format} onChange={event=>setFormat(event.target.value as 'csv'|'json')}><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+   <label>Search{resource==='audit'?' (action, actor, target, reason)':' text'}<input maxLength={160} value={q} onChange={event=>setQ(event.target.value)}/></label>
+   {resource==='users'&&<><label>User status<select value={status} onChange={event=>setStatus(event.target.value)}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(item=><option key={item}>{item}</option>)}</select></label><label>Role<select value={role} onChange={event=>setRole(event.target.value)}>{['all','user','moderator','admin','owner'].map(item=><option key={item}>{item}</option>)}</select></label></>}
+diff --git a/components/admin/features.tsx b/components/admin/features.tsx
+index 49d8b40..855c5e9 100644
+--- a/components/admin/features.tsx
++++ b/components/admin/features.tsx
+@@ -6,9 +6,9 @@ import {request} from '@/components/social/common';
+ export function FeatureEditor({initial}:{initial:FeatureConfig}){
+  const [value,setValue]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState(''),[confirmation,setConfirmation]=useState('');const router=useRouter();
+  return <form className="admin-confirm feature-editor" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/features',{value,confirmation});setMessage('Feature controls saved and audited. Existing public tabs should reload.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not save.');}finally{setPending(false);}}}>
+- <section className="admin-card"><h2>Feature rollouts</h2><p>Assignments are deterministic per feature and account ID. Anonymous visitors (including signup requests) share one stable cohort, not a random percentage of visitors. 100% is everyone; 0% is nobody. Feature flags do not grant permissions or bypass private accounts.</p><div className="feature-grid">{FEATURE_KEYS.map(key=><fieldset key={key}><legend>{key}</legend><label className="feature-switch"><input type="checkbox" checked={value.flags[key].enabled} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],enabled:e.target.checked}}})}/>Enabled</label><label>Rollout percent<input aria-label={key+' rollout percent'} type="number" min={0} max={100} step={1} value={value.flags[key].percent} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],percent:Number(e.target.value)}}})}/></label></fieldset>)}</div></section>
+- <section className="admin-card admin-confirm"><h2>Maintenance</h2><p>Verified, active admins/owners bypass maintenance only. Feature flags still apply to them. Admin pages, sign-in, recovery and sign-out remain reachable. Existing private content stays private.</p><label className="feature-switch"><input type="checkbox" checked={value.maintenance.enabled} onChange={e=>setValue({...value,maintenance:{...value.maintenance,enabled:e.target.checked}})}/>Enable maintenance mode</label><label>Public title<input maxLength={100} required value={value.maintenance.title} onChange={e=>setValue({...value,maintenance:{...value.maintenance,title:e.target.value}})}/></label><label>Public message<input maxLength={500} value={value.maintenance.message} onChange={e=>setValue({...value,maintenance:{...value.maintenance,message:e.target.value}})}/></label>{value.maintenance.enabled&&<label>Type MAINTENANCE to confirm<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required/></label>}</section>
+- <section className="admin-card admin-confirm"><h2>Displayed engagement</h2><p>Displayed total = floor((real interactions + per-post baseline) × multiplier + deterministic jitter), clamped to 0–1 trillion. Jitter is a stable per-post offset, not a fresh random number on each request. Views count unique recorded “seen” reactions, not video plays.</p><label>Multiplier (0–100)<input type="number" min={0} max={100} step="0.01" value={value.counters.multiplier} onChange={e=>setValue({...value,counters:{...value.counters,multiplier:Number(e.target.value)}})}/></label><label>Jitter amplitude (0–1000)<input type="number" min={0} max={1000} step={1} value={value.counters.jitter} onChange={e=>setValue({...value,counters:{...value.counters,jitter:Number(e.target.value)}})}/></label><label className="feature-switch"><input type="checkbox" checked={value.counters.hide} onChange={e=>setValue({...value,counters:{...value.counters,hide:e.target.checked}})}/>Hide public post engagement counts</label><p>Open a post in Content for baseline editing. Hiding displayed counts does not erase actual engagement or alter private-profile access.</p></section>
++ <section className="admin-card"><h2>Feature rollouts</h2><p>Assignments are deterministic per feature and account ID. Anonymous visitors (including signup requests) share one stable cohort, not a random percentage of visitors. 100% is everyone; 0% is nobody. Feature flags do not grant permissions or bypass private accounts.</p><div className="feature-grid">{FEATURE_KEYS.map(key=><fieldset key={key}><legend>{key}</legend><label className="feature-switch admin-switch"><input type="checkbox" checked={value.flags[key].enabled} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],enabled:e.target.checked}}})}/>Enabled</label><label>Rollout percent<input aria-label={key+' rollout percent'} type="number" min={0} max={100} step={1} value={value.flags[key].percent} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],percent:Number(e.target.value)}}})}/></label></fieldset>)}</div></section>
++ <section className="admin-card admin-confirm"><h2>Maintenance</h2><p>Verified, active admins/owners bypass maintenance only. Feature flags still apply to them. Admin pages, sign-in, recovery and sign-out remain reachable. Existing private content stays private.</p><label className="feature-switch admin-switch"><input type="checkbox" checked={value.maintenance.enabled} onChange={e=>setValue({...value,maintenance:{...value.maintenance,enabled:e.target.checked}})}/>Enable maintenance mode</label><label>Public title<input maxLength={100} required value={value.maintenance.title} onChange={e=>setValue({...value,maintenance:{...value.maintenance,title:e.target.value}})}/></label><label>Public message<input maxLength={500} value={value.maintenance.message} onChange={e=>setValue({...value,maintenance:{...value.maintenance,message:e.target.value}})}/></label>{value.maintenance.enabled&&<label>Type MAINTENANCE to confirm<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required/></label>}</section>
++ <section className="admin-card admin-confirm"><h2>Displayed engagement</h2><p>Displayed total = floor((real interactions + per-post baseline) × multiplier + deterministic jitter), clamped to 0–1 trillion. Jitter is a stable per-post offset, not a fresh random number on each request. Views count unique recorded “seen” reactions, not video plays.</p><label>Multiplier (0–100)<input type="number" min={0} max={100} step="0.01" value={value.counters.multiplier} onChange={e=>setValue({...value,counters:{...value.counters,multiplier:Number(e.target.value)}})}/></label><label>Jitter amplitude (0–1000)<input type="number" min={0} max={1000} step={1} value={value.counters.jitter} onChange={e=>setValue({...value,counters:{...value.counters,jitter:Number(e.target.value)}})}/></label><label className="feature-switch admin-switch"><input type="checkbox" checked={value.counters.hide} onChange={e=>setValue({...value,counters:{...value.counters,hide:e.target.checked}})}/>Hide public post engagement counts</label><p>Open a post in Content for baseline editing. Hiding displayed counts does not erase actual engagement or alter private-profile access.</p></section>
+  {message&&<p role="status">{message}</p>}<button type="submit" className="admin-button admin-primary" disabled={pending||(value.maintenance.enabled&&confirmation!=='MAINTENANCE')}>{pending?'Saving…':'Publish feature controls'}</button>
+  </form>;
+ }
+diff --git a/components/admin/media.tsx b/components/admin/media.tsx
+index c6a8e39..d7eeb1e 100644
+--- a/components/admin/media.tsx
++++ b/components/admin/media.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { ChevronLeft, ChevronRight } from 'lucide-react';
+ import {useState} from 'react';
+ import {useRouter} from 'next/navigation';
+ import Link from 'next/link';
+@@ -22,11 +23,11 @@ export function StorageInventory({report,owner}:{report:Awaited<ReturnType<typeo
+  const url=(page:number)=>'/rstmcadmin/media?'+new URLSearchParams({...report.filter,page:String(page)}).toString();
+  const manage=(key:string,next:string)=>{setSelected(key);setAction(next);setConfirmation('');setReason('');setMessage('');};
+  return <section className="admin-card admin-confirm"><h2>Storage inventory</h2><p>Registered objects: {String(report.summary.assets)} · {formatBytes(Number(report.summary.bytes))} · retained originals: {formatBytes(Number(report.summary.retained_source_bytes))}. Quarantined: {String(report.summary.quarantined)} · Trash: {String(report.summary.trashed)}.</p><p>Active reservations: {String(report.pending.reservations)} · {formatBytes(Number(report.pending.reserved_bytes))} reserved, not confirmed storage. Totals include quarantine and trash. Bundled demo media and unrelated objects in a shared Blob store are excluded.</p>
+- <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button">Filter assets</button></form>
++ <form className="media-filters" action="/rstmcadmin/media"><label>Status<select name="status" defaultValue={report.filter.status}>{['all','ready','quarantined','trash','purging','orphans'].map(value=><option key={value}>{value}</option>)}</select></label><label>Order<select name="sort" defaultValue={report.filter.sort}><option value="newest">Newest</option><option value="largest">Biggest assets</option></select></label><label>Owner ID<input name="owner" defaultValue={report.filter.owner} maxLength={100}/></label><button className="admin-button admin-primary">Filter assets</button></form>
+  <p>Orphans have no references from any posts (including hidden, expired and trashed posts), avatars, account images or branding settings. Trash is restorable for 30 days. Permanent deletion requires an owner and a typed asset key. Quarantine blocks the application media URL immediately; already-known public Blob URLs and downloaded bytes cannot be recalled.</p>
+- <div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
+- {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}>Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next</Link>}</nav>
+- <h3>Storage by account (25 accounts per page)</h3><div className="admin-table-scroll"><table className="admin-table"><thead><tr><th>Owner ID</th><th>Assets</th><th>Bytes</th></tr></thead><tbody>{report.owners.map(item=><tr key={item.owner_id||'unknown'}><td>{item.owner_id||'Unknown'}</td><td>{String(item.assets)}</td><td>{formatBytes(Number(item.bytes))}</td></tr>)}</tbody></table></div>
++ <div className="admin-table-scroll" tabIndex={0} role="region" aria-labelledby="media-assets-title"><table className="admin-table"><thead><tr><th id="media-assets-title">Asset / owner</th><th>Stored size / type</th><th>State</th><th>Actions</th></tr></thead><tbody>{report.items.map(item=><tr key={item.key}><td><code>{item.key}</code><small>{item.storage_owner||item.owner_id||'Deleted account'}</small></td><td>{formatBytes(Number(item.size)+Number(item.source_retained_bytes))}<small>{item.mime}</small></td><td>{item.status}{item.referenced?' · referenced':' · unreferenced'}{item.reason&&<p>{item.reason}</p>}</td><td><div className="media-row-actions">{item.status==='ready'&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'quarantine')}>Quarantine</button>}{item.status==='quarantined'&&item.verified&&<button className="admin-button" onClick={()=>manage(item.key,'release')}>Release</button>}{['ready','quarantined'].includes(item.status)&&!item.referenced&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'trash')}>Trash unreferenced</button>}{item.status==='trash'&&<button className="admin-button" onClick={()=>manage(item.key,'restore')}>Restore</button>}{owner&&['trash','purging'].includes(item.status)&&<button className="admin-button" data-tone="danger" onClick={()=>manage(item.key,'purge')}>Permanently delete</button>}</div></td></tr>)}</tbody></table></div>
++ {!report.items.length&&<p>No matching assets.</p>}<nav className="admin-pagination" aria-label="Media pages">{report.filter.page>1&&<Link className="admin-button" href={url(report.filter.page-1)}><ChevronLeft aria-hidden="true" focusable="false" />Previous</Link>}<span>Page {report.filter.page} · {report.total} matching assets</span>{report.total>report.filter.page*50&&<Link className="admin-button" href={url(report.filter.page+1)}>Next<ChevronRight aria-hidden="true" focusable="false" /></Link>}</nav>
++ <h3 id="media-owners-title">Storage by account (25 accounts per page)</h3><div className="admin-table-scroll" tabIndex={0} role="region" aria-labelledby="media-owners-title"><table className="admin-table"><thead><tr><th>Owner ID</th><th>Assets</th><th>Bytes</th></tr></thead><tbody>{report.owners.map(item=><tr key={item.owner_id||'unknown'}><td>{item.owner_id||'Unknown'}</td><td>{String(item.assets)}</td><td>{formatBytes(Number(item.bytes))}</td></tr>)}</tbody></table></div>
+  <h3>Expired reservations (25 per page)</h3><p>Reconcile checks for an abandoned object from a known app reservation, then registers it in quarantine for safe cleanup. Missing objects are not reported as deleted. Unknown objects from other applications are never swept.</p>{report.expired.map(item=><div key={item.key} className="media-reservation"><code>{item.key}</code><span>{formatBytes(Number(item.expected_size))}</span><button className="admin-button" onClick={()=>manage(item.key,'reconcile')}>Reconcile reservation</button></div>)}{(report.owners.length===25||report.expired.length===25)&&<Link className="admin-button" href={url(report.filter.page+1)}>Next accounts / reservations</Link>}
+  {selected&&<form className="admin-confirm media-confirm" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/media',{action,key:selected,confirmation,reason});setMessage('Media operation completed and audited.');setSelected('');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not change media.');}finally{setPending(false);}}}><h3>Confirm {action}</h3><p><code>{selected}</code></p><label>Reason<input maxLength={500} required={action==='quarantine'} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type asset key<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></label><button className="admin-button admin-primary" disabled={pending||confirmation!==selected}>{pending?'Working…':'Confirm media operation'}</button><button type="button" className="admin-button" disabled={pending} onClick={()=>setSelected('')}>Cancel</button></form>}{message&&<p role="status">{message}</p>}
+  </section>;
+diff --git a/components/admin/moderation.tsx b/components/admin/moderation.tsx
+index a080ac4..f62bf1d 100644
+--- a/components/admin/moderation.tsx
++++ b/components/admin/moderation.tsx
+@@ -3,6 +3,8 @@ import {useState} from 'react';
+ import Link from 'next/link';
+ import type {ModerationConfig} from '@/lib/moderation-policy';
+ import type {AdminRole} from '@/lib/admin/config';
++import { Avatar } from './avatar';
++import { Badge } from './badge';
+ type Report={id:string;reporter_id:string;reporter_username:string|null;target_type:string;target_id:string;reason:string;details:string;created_at:number;status:string;assigned_to:string|null;assignee_username:string|null;notes:string|null;action_taken:string|null;action_target_type:string|null;action_target_id:string|null;target_username:string|null;target_author_id:string|null;target_email:string|null};
+ type Queue={filter:{status:string;reason:string;target:string;q:string;page:number};total:number;items:Report[];counts:Record<string,number>};
+ type Rate={page:number;total:number;hits:number;items:{client:string;path:string;count:number;lastRequest:number;clientToken:string}[]};
+@@ -37,7 +39,7 @@ export function ModerationConsole({actorId,role,initialReports,initialConfig,ini
+ }
+ function ReportCard({report,busy,actorId,role,onAssign,onSaveNotes,onAction,onLoadAccount}:{report:Report;busy:boolean;actorId:string;role:AdminRole;onAssign:()=>void;onSaveNotes:(notes:string)=>void;onAction:(action:string,reason:string,confirmation?:string)=>void;onLoadAccount:(id:string)=>void}){
+  const [notes,setNotes]=useState(report.notes||''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(''),[banConfirm,setBanConfirm]=useState('');const target=report.target_type==='post'?report.target_author_id||report.target_id:report.target_id;const resolved=['actioned','dismissed'].includes(report.status);
+- return <article className="moderation-report"><header><div><strong>{report.reason.replaceAll('_',' ')}</strong> · {report.status} · {report.target_type}<p>From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p>Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
++ return <article className="moderation-report"><header><div><span className="admin-badges"><Badge>{report.reason.replaceAll('_',' ')}</Badge><Badge>{report.status}</Badge><Badge>{report.target_type}</Badge></span><p><Avatar seed={report.reporter_id} name={report.reporter_username} size={28} />From {report.reporter_username||'deleted profile'} ({report.reporter_id}) · {ago(report.created_at)}</p></div><code>{report.id}</code></header><p>{report.details||'No additional report details.'}</p><p><Avatar seed={String(target)} name={report.target_username} size={28} />Target: <code>{report.target_id}</code>{report.target_username&&' · @'+report.target_username}{report.target_email&&' · '+report.target_email}</p><div className="media-row-actions">{report.target_type==='post'?<Link className="admin-button" href={'/rstmcadmin/content/'+encodeURIComponent(report.target_id)}>Open post</Link>:<Link className="admin-button" href={'/rstmcadmin/users/'+encodeURIComponent(report.target_id)}>Open account</Link>}<button className="admin-button" disabled={resolved||busy} onClick={onAssign}>{report.assigned_to===actorId?'Assigned to you':report.assignee_username?'Assigned to @'+report.assignee_username:'Assign to me'}</button>{role!=='moderator'&&<button className="admin-button" disabled={resolved||busy} onClick={()=>onLoadAccount(target)}>Account safety</button>}</div>{report.action_taken&&<p>Action: {report.action_taken} · <Link href={report.action_target_type==='post'?'/rstmcadmin/content/'+encodeURIComponent(report.action_target_id||''):'/rstmcadmin/users/'+encodeURIComponent(report.action_target_id||'')}>{report.action_target_type} {report.action_target_id}</Link></p>}
+  <label>Moderator notes<textarea rows={3} maxLength={2000} value={notes} disabled={resolved} onChange={e=>setNotes(e.target.value)}/></label><button className="admin-button" disabled={resolved||busy} onClick={()=>onSaveNotes(notes)}>Save notes</button>
+  {!resolved&&<><label>Action reason (required)<input maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label><label>Type report ID to hide or dismiss<input maxLength={100} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{role!=='moderator'&&<label>Type reported account email to ban<code>{report.target_email||'No linked account email'}</code><input type="email" maxLength={254} value={banConfirm} onChange={e=>setBanConfirm(e.target.value)}/></label>}<div className="media-row-actions">{report.target_type==='post'&&<button className="admin-button" disabled={busy||!reason.trim()||confirm!==report.id} data-tone="danger" onClick={()=>onAction('hide',reason,report.id)}>Hide reported post &amp; resolve</button>}{role!=='moderator'&&<button className="admin-button" data-tone="danger" disabled={busy||!reason.trim()||!report.target_email||banConfirm!==report.target_email} onClick={()=>onAction('ban',reason,banConfirm)}>Ban reported account &amp; resolve</button>}<button className="admin-button" disabled={busy||confirm!==report.id} onClick={()=>onAction('dismiss',reason,report.id)}>Dismiss report</button></div></>}
+  </article>;
+diff --git a/components/admin/page-head.tsx b/components/admin/page-head.tsx
+index 1cba24d..e9e6d9e 100644
+--- a/components/admin/page-head.tsx
++++ b/components/admin/page-head.tsx
+@@ -1,7 +1,29 @@
+ import type { ReactNode } from 'react';
+ 
+-export function PageHead({ breadcrumb, title, actions, children }: { breadcrumb: string; title: string; actions?: ReactNode; children?: ReactNode }) {
+-  return <header className="admin-page-head">
++function hexes() {
++  const radius = 15;
++  const stepX = radius * 1.5;
++  const stepY = radius * Math.sqrt(3);
++  const cells: { key: string; points: string }[] = [];
++  for (let column = -1; column < 7; column += 1) {
++    for (let row = -1; row < 6; row += 1) {
++      const cx = column * stepX;
++      const cy = row * stepY + (column % 2 ? stepY / 2 : 0);
++      const points = Array.from({ length: 6 }, (_, index) => {
++        const angle = (Math.PI / 180) * (60 * index - 30);
++        return `${(cx + radius * Math.cos(angle)).toFixed(1)},${(cy + radius * Math.sin(angle)).toFixed(1)}`;
++      }).join(' ');
++      cells.push({ key: `${column}-${row}`, points });
++    }
++  }
++  return cells;
++}
++
++export function PageHead({ breadcrumb, title, actions, banner, children }: { breadcrumb: string; title: string; actions?: ReactNode; banner?: boolean; children?: ReactNode }) {
++  return <header className={`admin-page-head${banner ? ' is-banner' : ''}`}>
++    {banner ? <svg className="admin-banner-pattern" viewBox="0 0 260 200" aria-hidden="true" focusable="false">
++      <g fill="none" stroke="currentColor" strokeWidth="1">{hexes().map(cell => <polygon key={cell.key} points={cell.points} />)}</g>
++    </svg> : null}
+     <div className="admin-page-head-row">
+       <div className="admin-page-head-text">
+         <h1>{title}</h1>
+diff --git a/components/admin/system.tsx b/components/admin/system.tsx
+index 12d4028..85ea695 100644
+--- a/components/admin/system.tsx
++++ b/components/admin/system.tsx
+@@ -21,8 +21,8 @@ export function SystemTools({ initial, canOwnerTools, canPrune }: { initial: Ove
+     <section className="admin-card"><div className="admin-card-heading"><div><h2>Migration status</h2><p>Applied database migrations compared with the registered application sequence. This screen never runs migrations.</p></div><button className="admin-button" type="button" disabled={busy} onClick={()=>void refresh()}>Refresh status</button></div><p>{overview.migrationCount} applied · latest registered version {overview.latestRegisteredMigration} · {overview.missingMigrations.length?`missing ${overview.missingMigrations.join(', ')}`:'up to date'}</p><div className="migration-chips">{overview.migrations.map(item=><span className={item.applied?'is-applied':'is-pending'} key={item.version}>v{item.version} {item.applied?'applied':'pending'}</span>)}</div></section>
+     <section className="admin-card"><h2>Environment inspector</h2><p>Only whether each setting is present is exposed. Values, addresses, and secret names are never returned.</p><dl className="system-env-list">{env.map(([key,value])=><div key={key}><dt>{key.replace(/([A-Z])/g,' $1')}</dt><dd>{booleanLabel(value)}</dd></div>)}</dl></section>
+     <section className="admin-card"><h2>Cache invalidation</h2><p>Purges the settings cache and revalidates the public root layout. It does not clear browser/CDN caches or database data.</p><label>Audit reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Type PURGE SITE CACHE<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label><button className="admin-button" disabled={busy||confirmation!=='PURGE SITE CACHE'||reason.trim().length<8} onClick={()=>void run('purgeCache')}>Purge settings and public cache</button></section>
+-    <section className="admin-card"><h2>Demo-data controls</h2><p>Seeded demo profiles are separate from real accounts. Re-seeding inserts missing fixture rows without replacing edits; wiping permanently removes demo profiles and their cascaded demo content, then disables automatic re-seeding.</p><p>{overview.demoProfiles} demo profiles · {overview.demoPosts} posts · automatic seed {overview.demoSeedEnabled?'enabled':'disabled'}</p>{canOwnerTools?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={overview.demoProfiles?`WIPE ${overview.demoProfiles} DEMO PROFILES or RESEED DEMO DATA`:'RESEED DEMO DATA'}/></label><div className="admin-button-row"><button className="admin-button" disabled={busy||confirmation!=='RESEED DEMO DATA'||reason.trim().length<8} onClick={()=>void run('reseedDemoData')}>Re-seed demo fixtures</button><button className="admin-button admin-danger" disabled={busy||confirmation!==`WIPE ${overview.demoProfiles} DEMO PROFILES`||reason.trim().length<8} onClick={()=>void run('wipeDemoData')}>Wipe demo data</button></div></>:<p>Owner-only tools.</p>}</section>
+-    <section className="admin-card"><h2>Retention and orphan pruning</h2><p>Expired stories are permanently removed only after 30 days past expiry. Orphan assets are only staged into the existing Trash workflow after seven days; no Blob object is physically deleted. Each batch is capped at 100 and audited.</p><p>{overview.expiredStories} expired stories eligible · {overview.orphanAssets} old orphan assets eligible.</p>{canPrune?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={`PRUNE ${storyBatch} EXPIRED STORIES or MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`}/></label><div className="admin-button-row"><button className="admin-button admin-danger" disabled={busy||!storyBatch||confirmation!==`PRUNE ${storyBatch} EXPIRED STORIES`||reason.trim().length<8} onClick={()=>void run('pruneExpiredStories')}>Prune expired stories</button><button className="admin-button" disabled={busy||!orphanBatch||confirmation!==`MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`||reason.trim().length<8} onClick={()=>void run('pruneOrphanAssets')}>Move orphan assets to Trash</button></div></>:<p>Owner-only tools.</p>}</section>
++    <section className="admin-card admin-danger-zone"><h2>Demo-data controls</h2><p>Seeded demo profiles are separate from real accounts. Re-seeding inserts missing fixture rows without replacing edits; wiping permanently removes demo profiles and their cascaded demo content, then disables automatic re-seeding.</p><p>{overview.demoProfiles} demo profiles · {overview.demoPosts} posts · automatic seed {overview.demoSeedEnabled?'enabled':'disabled'}</p>{canOwnerTools?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={overview.demoProfiles?`WIPE ${overview.demoProfiles} DEMO PROFILES or RESEED DEMO DATA`:'RESEED DEMO DATA'}/></label><div className="admin-button-row"><button className="admin-button" disabled={busy||confirmation!=='RESEED DEMO DATA'||reason.trim().length<8} onClick={()=>void run('reseedDemoData')}>Re-seed demo fixtures</button><button className="admin-button admin-danger" disabled={busy||confirmation!==`WIPE ${overview.demoProfiles} DEMO PROFILES`||reason.trim().length<8} onClick={()=>void run('wipeDemoData')}>Wipe demo data</button></div></>:<p>Owner-only tools.</p>}</section>
++    <section className="admin-card admin-danger-zone"><h2>Retention and orphan pruning</h2><p>Expired stories are permanently removed only after 30 days past expiry. Orphan assets are only staged into the existing Trash workflow after seven days; no Blob object is physically deleted. Each batch is capped at 100 and audited.</p><p>{overview.expiredStories} expired stories eligible · {overview.orphanAssets} old orphan assets eligible.</p>{canPrune?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={`PRUNE ${storyBatch} EXPIRED STORIES or MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`}/></label><div className="admin-button-row"><button className="admin-button admin-danger" disabled={busy||!storyBatch||confirmation!==`PRUNE ${storyBatch} EXPIRED STORIES`||reason.trim().length<8} onClick={()=>void run('pruneExpiredStories')}>Prune expired stories</button><button className="admin-button" disabled={busy||!orphanBatch||confirmation!==`MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`||reason.trim().length<8} onClick={()=>void run('pruneOrphanAssets')}>Move orphan assets to Trash</button></div></>:<p>Owner-only tools.</p>}</section>
+     {canOwnerTools&&<section className="admin-card system-sql"><h2>Read-only SQL runner · owner only</h2><p>Exactly one SELECT; approved application tables only, no auth/session/account/settings tables, joins only, 500-row cap, five-second database timeout. The query is logged by SHA-256 hash and is never stored in the audit record. A read-only transaction is enforced by PostgreSQL.</p><label>SELECT query<textarea rows={7} maxLength={4000} spellCheck={false} value={query} onChange={event=>setQuery(event.target.value)}/></label><label>Reason for running this query<input maxLength={500} value={sqlReason} onChange={event=>setSqlReason(event.target.value)}/></label><button className="admin-button admin-primary" type="button" disabled={busy||!query.trim()||sqlReason.trim().length<10} onClick={()=>void runSql()}>{busy?'Running…':'Run SELECT'}</button>{result&&<><p>{result.rows.length} rows · {result.columns.length} columns · hash {result.queryHash}</p><pre className="system-sql-result">{JSON.stringify(result.rows,null,2)}</pre></>}</section>}
+     {(message||error)&&<p role={error?'alert':'status'} className={error?'admin-error':''}>{error||message}</p>}
+   </div>;
+diff --git a/components/admin/ui.tsx b/components/admin/ui.tsx
+index fe897d9..334c884 100644
+--- a/components/admin/ui.tsx
++++ b/components/admin/ui.tsx
+@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
+ import { ADMIN_BASE_PATH } from '@/lib/admin/config';
+ import type { UserFilters } from '@/lib/admin/queries';
+ 
+-export function StatCard({ label, value, hint, icon }: { label: string; value: string; hint?: string; icon?: ReactNode }) {
+-  return <article className="admin-stat">{icon ? <span className="admin-icon-tile">{icon}</span> : null}<p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
++export function StatCard({ label, value, hint, icon, tone }: { label: string; value: string; hint?: string; icon?: ReactNode; tone?: string }) {
++  return <article className="admin-stat">{icon ? <span className={`admin-icon-tile${tone ? ` admin-icon-tile-${tone}` : ''}`}>{icon}</span> : null}<p>{label}</p><strong>{value}</strong>{hint && <small>{hint}</small>}</article>;
+ }
+ export function DataTable({ caption, headings, children }: { caption: string; headings: string[]; children: ReactNode }) {
+   return <div className="admin-table-scroll" tabIndex={0} role="region" aria-label={caption}><table><caption>{caption}</caption><thead><tr>{headings.map(heading => <th scope="col" key={heading}>{heading}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+@@ -18,7 +18,7 @@ export function SearchBar({ filters }: { filters: UserFilters }) {
+     <label>Status<select name="status" defaultValue={filters.status}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
+     <label>Role<select name="role" defaultValue={filters.role}>{['all','user','moderator','admin','owner'].map(role => <option key={role}>{role}</option>)}</select></label>
+     <label>Per page<select name="limit" defaultValue={filters.limit}>{[25,50,100,200].map(limit => <option key={limit}>{limit}</option>)}</select></label>
+-    <button className="admin-button" type="submit">Apply filters</button>
++    <button className="admin-button admin-primary" type="submit">Apply filters</button>
+   </form>;
+ }
+ export function FilterChips({ filters }: { filters: UserFilters }) {
+-- 
+2.39.5
+

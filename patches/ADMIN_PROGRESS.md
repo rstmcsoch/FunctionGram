@@ -646,7 +646,7 @@ database object, migration, setting semantic or public-site behaviour changes.
 | --- | --- | --- | --- |
 | 1 | Foundation: tokens, typography, app shell | Done locally | `phase-1-foundation.patch` |
 | 2 | Primitives: reusable component styling | Done locally | `phase-2-primitives.patch` |
-| 3 | Pages + polish + QA | Pending | `phase-3-pages-polish-qa.patch` |
+| 3 | Pages + polish + QA | Done locally; browser QA pending | `phase-3-pages-polish-qa.patch` |
 
 ### Phase 1 — Foundation: done locally
 
@@ -765,3 +765,90 @@ instead; the existing focus/Escape behaviour in `ConfirmDialog` was not modified
 `patches/phase-2-primitives.patch` (identical `.patch.txt` copy) contains only the
 Phase 2 changes and passes `git apply --check` on top of the Phase 1 commit
 (`bff9708`).
+
+### Phase 3 — Pages + polish + QA: done locally
+
+**Guide sections implemented:** all of section 9 (9.1 to 9.13), the remaining safe
+items of section 10, the remaining refinements of section 11, and the section 13
+delivery checks that can be performed without a browser.
+
+#### Files changed
+
+- `app/rstmcadmin/pages.css` (new) — the page recipes: card header/footer rows,
+  info alerts, status rows, engagement stat tiles, error cards, danger zones, the
+  overview banner, the profile card, bulk toolbar, editor field grid, media rows,
+  appearance swatches and switches, feature flag rows, label grids, media filters,
+  audit details, moderation report cards, the permission matrix, analytics charts,
+  exports, system tools, the operator-guide article column, tabs and the responsive
+  rules for all of them.
+- `app/rstmcadmin/admin.css` — imports `pages.css`; every remaining page-level rule
+  from the previous stylesheet is deleted. Only the isolated two-factor enrolment
+  screen (outside the panel shell) keeps its old rules.
+- `app/rstmcadmin/shell.css` — the desktop shell owns the viewport (`height: 100dvh`,
+  `overflow: hidden`) so the sidebar stays still and the panel scrolls inside
+  itself; below 768px the page scrolls normally with the sticky top bar.
+- `app/rstmcadmin/primitives.css` — analytics stat labels may be a `span`.
+- `components/admin/page-head.tsx` — optional banner variant with the inline SVG hex
+  pattern.
+- `app/rstmcadmin/page.tsx`, `users/page.tsx`, `users/[id]/page.tsx`, `content/page.tsx`,
+  `content/[id]/page.tsx`, `audit/page.tsx`, `security/page.tsx` and the admin
+  components (`ui`, `content`, `actions`, `appearance`, `features`, `moderation`,
+  `media`, `analytics`, `audit`, `cms`, `communications`, `exports`, `system`) —
+  the wrappers, badges, avatars and class names each recipe needs.
+
+#### Validation actually run
+
+- `npm run lint` — passed, 0 errors, the same 7 pre-existing public `<img>` warnings.
+- `npm run typecheck` — passed.
+- `npm run test:vercel` — 116 tests, 113 passed, 0 failed, 3 optional managed
+  PostgreSQL tests skipped. Identical to the pre-change baseline.
+- `npm run build` — passed; all 17 admin routes are in the production manifest.
+- `node --import tsx scripts/admin-check.mts check` on freshly seeded isolated PGlite
+  fixtures — passed: 8 identities x 16 admin pages plus the admin APIs return the same
+  401/403/200 matrix, `X-Robots-Tag: noindex, nofollow` is present, and denied
+  responses contain no panel markup. One earlier run reported 401 instead of 403 for
+  the `regular` identity; that was the fixture's own session being consumed by the
+  script's sign-out test, and the matrix passed again after re-seeding.
+- Shell checker (17 pages): one admin `<nav>`, 16 links in the original order and
+  targets, five labelled groups, exactly one `aria-current="page"` per route, skip
+  link first in the shell, one `<main id="admin-main">`, one page head, footer, and
+  no leftover `admin-header` / `admin-eyebrow` markup.
+- QA checker (17 pages, 2 stylesheets): 31 required stylesheet rules are present in
+  the served CSS (both theme switches, the rail/drawer/mobile breakpoints, 44px hit
+  areas, `overflow-wrap: anywhere`, `min-width: 720px` tables scrolling inside their
+  card, tabular numbers, hex pattern, storage bar, switches, swatches, matrix, glass
+  header, reduced motion, safe-area insets), light tokens come after the dark defaults,
+  every table scroll region is focusable with `role="region"`, the noindex meta and
+  `X-Robots-Tag` are intact, and guests are refused with no panel markup.
+- Visible-text comparison: the rendered text of all 17 admin pages was captured from
+  pristine `main` against the same database and re-run after the redesign. Decorative
+  `aria-hidden` icons, avatar initials and `sr-only` text are excluded. Three
+  intentional differences remain, all required by section 9:
+  1. `/rstmcadmin/users/regular` — the 9.3 profile card shows the handle and the
+     status/verified badges (`@regular`, `Active`, `Verified`). These are the item's
+     own values in the panel's existing status vocabulary.
+  2. `/rstmcadmin/content/qa_post_1` — the 9.4 engagement sentence became five stat
+     tiles, so the colons and middle-dot separators are gone; every word and number
+     is unchanged. (The `Control room / posts` breadcrumb difference is an artifact of
+     how the comparison tool splits lines, not a rendered change.)
+  3. `/rstmcadmin/security` — the 9.8 matrix cell reads as a green check or a muted
+     dash; the original words stay in the DOM for screen readers (`Allowed`,
+     `Not allowed`) and the visible dash is unchanged.
+- No file under `lib/`, `app/api/`, migrations, `package.json`, `package-lock.json`,
+  `app/globals.css` or `components/social/**` is touched by this branch, and no npm
+  package was added.
+
+#### Not verified locally
+
+This sandbox cannot run a browser: the Chromium download and its system libraries are
+unavailable, so the 320/390/768/1024/1440 px screenshots, measured 44px hit areas,
+drawer gestures, dialog bottom sheets, horizontal table scrolling, keyboard-only
+traversal, contrast reading and the light/dark visual comparison could not be captured
+here. Everything verifiable from the served HTML and CSS was checked with the scripts
+above, and no browser claim is made. Those checks remain owed before release.
+
+#### Patch
+
+`patches/phase-3-pages-polish-qa.patch` (identical `.patch.txt` copy) contains only
+the Phase 3 changes and passes `git apply --check` on top of the Phase 2 commit
+(`5107396`). This progress document is committed beside the patch, not inside it.
