@@ -1,5 +1,6 @@
 import {requireAllowedText,requireCommentPermission} from '@/lib/moderation-policy';
 import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
+import {avatarAssetReady} from '@/lib/avatar';
 import {MIB} from '@/lib/media-config';
 import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
 import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
@@ -168,7 +169,10 @@ export async function POST(request:Request){try{
     const name=clean(input.name,60,true),bio=clean(input.bio,150),avatar=clean(input.avatar,200),website=clean(input.website||'',200);
     if(website){let url:URL;try{url=new URL(website);}catch{throw new AppError('Enter a complete website URL, starting with https://.');}if(!['https:','http:'].includes(url.protocol)||!url.hostname||url.username||url.password)throw new AppError('Enter a valid http(s) website URL.');}
     const currentAvatar=(await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>())?.avatar;
-    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
+    // A new photo must be an image this member owns *and* must have come out of
+    // the avatar pipeline (512px WebP inside the 200 KB budget). Unchanged
+    // values are never re-checked, so photos stored before this rule keep working.
+    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');const asset=avatar.startsWith('/api/media/')?await database.prepare("SELECT key,mime,size,purpose FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first<{mime:string;size:number;purpose:string}>():null;if(!avatarAssetReady(asset))throw new AppError('Please upload a profile photo.');}
     const taken=await database.prepare('SELECT id FROM profiles WHERE username=? AND id!=?').bind(username,user).first();if(taken)throw new AppError('That username is taken. Try another.',409);
     const update=database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user);
     if(avatar&&avatar!==currentAvatar)await commitMediaUse(await getPool(),[avatar],[user],await readMediaConfig(await getPool()),[update]);else await update.run();return json({ok:true});

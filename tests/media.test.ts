@@ -21,7 +21,7 @@ async function asset(owner='member',extra:{size?:number;source?:number;status?:s
 const operation=(key:string,action:string)=>({key,action,confirmation:key,reason:'Test quarantine'});
 let photo:Buffer;
 before(async()=>{
- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements])await db.exec(sql);
+ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.avatarUpgradeStatements])await db.exec(sql);
  await user('admin','admin');await user('owner','owner');await user('member');
  await db.query("INSERT INTO assets(key,owner_id,mime,size,created_at,blob_url) VALUES($1,'member','image/jpeg',100,1,'local')",[legacyKey]);
  await db.query("INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,'member',100,'image/jpeg',1)",[legacyKey]);

@@ -101,6 +101,10 @@
   /* chart colors (unused tokens kept for ui kit) */
   --chart-1:#eb456e;--chart-2:#3b83f6;--chart-3:#f2b555;--chart-4:#69bca4;--chart-5:#8e72dc;
   --story-bg:#131316;
+
+  /* avatar crop dialog: scrim outside the circle, and the circle's guide ring */
+  --crop-scrim:rgba(17,14,20,.42);
+  --crop-ring:rgba(255,255,255,.92);
 }
 
 [data-theme=dark] {
@@ -148,6 +152,9 @@
   --shadow-2:0 2px 6px rgba(0,0,0,.45),0 8px 24px -8px rgba(0,0,0,.5);
   --shadow-3:0 4px 12px rgba(0,0,0,.5),0 24px 64px -16px rgba(0,0,0,.66);
   --glass-shadow:0 12px 40px -12px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);
+
+  --crop-scrim:rgba(0,0,0,.58);
+  --crop-ring:rgba(255,255,255,.78);
 }
 
 @theme inline {
@@ -430,16 +437,24 @@ h1,h2,h3,p{margin:0}
   .glass-card{background:var(--background)}
 }
 
-/* avatars */
-.avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
-.avatar img{width:100%;height:100%;object-fit:cover}
+/* avatars
+   Every avatar is a fixed square box: the element carries matching width and
+   height attributes AND CSS, plus aspect-ratio 1/1, so the circle is reserved
+   before the bytes land (no layout shift) and an old, huge, non-square photo
+   is cropped by object-fit instead of overflowing. The muted background is the
+   placeholder while a lazy image is still in flight. */
+.avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;flex-shrink:0;aspect-ratio:1/1;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
+.avatar img,.avatar-photo{display:block;width:100%;height:100%;max-width:100%;max-height:100%;aspect-ratio:1/1;object-fit:cover;object-position:center;border-radius:50%;background:var(--muted);font-size:0;color:transparent;-webkit-user-drag:none;user-select:none}
 .avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
 [data-theme=dark] .avatar-initial{background:linear-gradient(140deg,#3a2029,#33202c);color:#ff7497}
 .avatar-ring{padding:3px;background:conic-gradient(from 200deg,#ffbe49,#f74774 45%,#e931a9 75%,#b83dff);border:0}
 .avatar-ring img,.avatar-ring .avatar-initial{border:3px solid var(--background);border-radius:50%;width:100%;height:100%}
 .story-seen .avatar-ring{background:var(--input)}
-.avatar-button{display:flex;flex-shrink:0;border-radius:50%}
+.avatar-button{display:flex;flex:none;flex-shrink:0;aspect-ratio:1/1;border-radius:50%}
 button:hover>.avatar{transform:scale(1.04)}
+/* Same contract for the shadcn avatar primitive used by the UI kit. */
+[data-slot=avatar]{aspect-ratio:1/1;flex:none;background:var(--muted)}
+[data-slot=avatar-image]{width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;object-position:center;border-radius:50%}
 
 /* ============================================================
    5. STATES — empty, loading, skeletons
@@ -1047,6 +1062,28 @@ div[data-slot=dialog-content].post-viewer {
 .edit-form input,.edit-form textarea{border:1px solid var(--input);border-radius:12px;padding:10px 12px;width:100%;background:var(--background);font-weight:400;font-size:14.5px;color:var(--foreground);resize:vertical}
 .edit-form input:focus-visible,.edit-form textarea:focus-visible{outline:2px solid var(--ring);outline-offset:0;border-color:transparent}
 
+/* avatar crop dialog — same glass sheet, radius and tokens as every other
+   modal, so it docks as a bottom sheet on phones with the shared rule below. */
+.avatar-crop-modal[data-slot=dialog-content]{max-width:440px}
+.avatar-crop-body{padding:18px 24px 22px;display:flex;flex-direction:column;gap:14px}
+.avatar-crop-frame{position:relative;width:100%;max-width:320px;margin:0 auto;aspect-ratio:1/1;border-radius:calc(var(--radius) + 4px);overflow:hidden;background:var(--muted);border:1px solid var(--border);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
+.avatar-crop-frame:active{cursor:grabbing}
+.avatar-crop-frame:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.avatar-crop-canvas{display:block;width:100%;height:100%}
+/* The spread shadow paints every pixel outside the circle and is clipped by
+   the frame, so the square crop stays visible while the circle reads clearly. */
+.avatar-crop-circle{position:absolute;inset:0;box-sizing:border-box;border-radius:50%;border:2px solid var(--crop-ring);box-shadow:0 0 0 9999px var(--crop-scrim);pointer-events:none}
+.avatar-crop-busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+.avatar-crop-help{font-size:12.5px;line-height:1.6;color:var(--muted-foreground);text-align:center;margin:0}
+.avatar-crop-zoom{display:flex;align-items:center;gap:10px}
+.avatar-crop-zoom .icon-button{min-width:44px;min-height:44px}
+.avatar-crop-slider{flex:1 1 auto;min-width:0;min-height:44px;accent-color:var(--primary);background:transparent;cursor:pointer}
+.avatar-crop-slider:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:999px}
+.avatar-crop-slider:disabled{opacity:.45;cursor:default}
+.avatar-crop-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.avatar-crop-actions button{min-height:44px}
+.avatar-crop-body .form-error{padding:0;text-align:center}
+
 /* ============================================================
    10. DISCOVERY — search, explore, saved
    ============================================================ */
@@ -1450,6 +1487,11 @@ div[data-slot=dialog-content].post-viewer {
     border-radius:24px 24px 0 0;border-bottom:0;
   }
   .modal-heading{padding:18px 20px 15px;padding-right:48px;border-radius:24px 24px 0 0}
+  /* Crop sheet: full-width, thumb-reachable actions, still 44px tall. */
+  .avatar-crop-body{padding:14px 16px calc(18px + env(safe-area-inset-bottom));gap:12px}
+  .avatar-crop-frame{max-width:min(320px,74vw)}
+  .avatar-crop-actions{gap:8px}
+  .avatar-crop-actions button{flex:1 1 30%;padding:10px 12px}
   .create-form{padding:12px 16px 18px}
   .upload-drop{min-height:210px}
   .relations-modal .relations-list{max-height:56dvh}

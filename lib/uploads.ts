@@ -7,12 +7,23 @@ import {AdminError} from './admin/validation';
 import {checkUploadInput,readMediaConfig,MEDIA_LOCK} from './media-policy';
 import {MIB} from './media-config';
 import {processMedia,readBounded,type ProcessedMedia} from './media-processing';
+import {processAvatarUpload} from './avatar-image';
+import {AVATAR_INPUT_TYPES,AVATAR_SOURCE_MAX_BYTES,type AvatarPurpose} from './avatar';
 import {promises as fs} from 'node:fs';
 export const uploadKeyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HOUR=3600000,LEASE=5*60000;
+/** Only the browser's declared intent; every avatar rule is re-checked on the bytes. */
+export function uploadPurpose(value:unknown):AvatarPurpose{return value==='avatar'?'avatar':'media';}
 export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload:string|null){
  if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload name.');
- let input:{size:number;type:string};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
+ let input:{size:number;type:string;purpose?:unknown};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
+ const purpose=uploadPurpose(input.purpose);
+ // Avatars keep the shared media gate and add their own: images only, and a
+ // hard ceiling on the pre-crop bytes the safety net has to re-encode.
+ if(purpose==='avatar'){
+  if(!(AVATAR_INPUT_TYPES as readonly string[]).includes(input.type))throw new AdminError('Choose a JPEG, PNG, WebP or GIF photo.');
+  if(!Number.isSafeInteger(input.size)||input.size<1||input.size>AVATAR_SOURCE_MAX_BYTES)throw new AdminError('That profile photo is too large. Choose a smaller photo.');
+ }
  return transaction(pool,async db=>{
   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
   // Serialize quota reservations with settings changes and media attach/quarantine.
@@ -20,13 +31,13 @@ export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload
   const config=await readMediaConfig(db);checkUploadInput(config,input.size,input.type);
   const now=Date.now();
   const {rows:[existing]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);
-  if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
+  if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||(existing.purpose||'media')!==purpose||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
   // Active reservations prevent parallel requests from oversubscribing quota.
   // Completed transfers are charged at completion, including quarantined bytes.
   const {rows:[usage]}=await db.query(`SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND key<>$2 AND ((completed=true AND COALESCE(completed_at,created_at)>$3) OR (completed=false AND (created_at>$4 OR processing_at>$5)))`,[owner,key,now-86400000,now-HOUR,now-LEASE]);
   if(Number(usage.total)+input.size>config.dailyQuotaMb*MIB)throw new AdminError('You have reached today’s upload limit. Try again tomorrow.',429);
-  if(!existing)await db.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,$2,$3,$4,$5)',[key,owner,input.size,input.type,now]);
-  return input;
+  if(!existing)await db.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at,purpose) VALUES($1,$2,$3,$4,$5,$6)',[key,owner,input.size,input.type,now,purpose]);
+  return {size:input.size,type:input.type,purpose};
  });
 }
 export async function reserveUpload(key:string,owner:string,payload:string|null){await requireUpload(owner);return reserveClaim(await getPool(),key,owner,payload);}
@@ -75,7 +86,10 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
   if(source.size!==Number(start.claim.expected_size))throw new AdminError('The upload size did not match. Try again.');
   const bytes=await store.read(source.url,start.config.maxFileMb*MIB);
   if(bytes.length!==source.size)throw new AdminError('The upload size did not match. Try again.');
-  const media=await processMedia(bytes,start.claim.mime,start.config);
+  const purpose=uploadPurpose(start.claim.purpose);
+  // Profile photos never reach the generic image path: they are squared,
+  // resized and re-encoded to WebP inside the 200 KB avatar budget.
+  const media=purpose==='avatar'?await processAvatarUpload(bytes,start.claim.mime,start.config):await processMedia(bytes,start.claim.mime,start.config);
   const output=store===blobUploadStore&&(media.mime.startsWith('video/'))?source.url:await store.write(key,media,lease);
   if(output!==source.url)produced={url:output,size:media.bytes.length};
   await access();
@@ -84,7 +98,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
    await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
    const current=await readMediaConfig(db);if(JSON.stringify(current)!==JSON.stringify(start.config))throw new AdminError('Upload rules changed. Please start a new upload.',409);
    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)throw new AdminError('Upload processing expired. Please retry.',409);
-   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0]);
+   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes,purpose) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0,purpose]);
    await db.query('UPDATE upload_claims SET completed=true,completed_at=$1,processing_at=NULL WHERE key=$2',[Date.now(),key]);
   });
   if(source.url!==output){try{await store.remove(source.url);await pool.query('UPDATE assets SET source_blob_url=NULL,source_retained_bytes=0 WHERE key=$1',[key]);}catch{/* Retained source bytes remain in the inventory until cleanup. */}}
@@ -99,7 +113,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
   await transaction(pool,async db=>{
    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)return;
    const invalidTransfer=error instanceof AdminError&&error.status!==503;
-   if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
+   if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes,purpose) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9,$10) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0,uploadPurpose(start.claim.purpose)]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
    await db.query('UPDATE upload_claims SET processing_at=NULL WHERE key=$1',[key]);
   });throw error;
  }

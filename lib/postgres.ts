@@ -2,7 +2,7 @@ import path from 'node:path';
 import { Pool, types, type QueryResultRow } from 'pg';
 import { serializedPool } from './serialized-pool';
 import { postgresQuery } from './sql';
-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements, adminSystemUpgradeStatements } from './postgres-schema';
+import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements, adminSystemUpgradeStatements, avatarUpgradeStatements } from './postgres-schema';
 
 types.setTypeParser(20, value => Number(value));
 types.setTypeParser(1700, value => Number(value));
@@ -29,6 +29,7 @@ export const DATABASE_MIGRATIONS = [
   { version: 10, statements: adminHardeningUpgradeStatements },
   { version: 11, statements: adminCommsUpgradeStatements },
   { version: 12, statements: adminSystemUpgradeStatements },
+  { version: 13, statements: avatarUpgradeStatements },
 ];
 
 let pool: Pool | undefined;

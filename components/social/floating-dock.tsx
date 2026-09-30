@@ -98,7 +98,7 @@ export const FloatingDock = memo(function FloatingDock({ items, active, me, onSe
                 title={item.label}
               >
                 <span className="dock-glyph">
-                  {item.target === 'profile' && item.icon === 'user' && me ? <Avatar person={me} size={28}/> : <Icon strokeWidth={isActive?2.15:1.85}/>} {item.badge&&<small className="appearance-badge">{item.badge}</small>}
+                  {item.target === 'profile' && item.icon === 'user' && me ? <Avatar person={me} size={28} eager/> : <Icon strokeWidth={isActive?2.15:1.85}/>} {item.badge&&<small className="appearance-badge">{item.badge}</small>}
                 </span>
               </button>
             );

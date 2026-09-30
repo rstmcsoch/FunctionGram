@@ -18,7 +18,7 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
       <div className="stories" ref={rail}>
         <Feature name="uploads"><button className="story story-yours" onClick={onCreate}>
           <span className="your-story">
-            <Avatar person={me} size={66} />
+            <Avatar person={me} size={66} eager />
             <span className="story-plus"><Plus size={15} /></span>
           </span>
           <span>{t("stories.your_story")}</span>

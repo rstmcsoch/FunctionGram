@@ -16,7 +16,10 @@ export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[]
  for(const url of urls){if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('Use registered media.');
   const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1 AND owner_id=ANY($2::text[])',[url.slice(11),owners]);
   if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('One of your uploads is unavailable. Please upload it again.');
-  checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);
+  // Profile photos are re-encoded to WebP by the server, never by the browser,
+  // so the media-type gate applies to the type the member actually chose.
+  const gatedMime=asset.purpose==='avatar'?String(asset.source_mime||asset.mime):asset.mime;
+  checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),gatedMime);
   if(asset.source_mime&&!config.allowedTypes.includes(asset.source_mime))throw new AdminError('This media type is currently disabled.');
   if(asset.mime.startsWith('video/')&&config.videoMaxSeconds&&asset.duration!=null&&Number(asset.duration)>config.videoMaxSeconds)throw new AdminError('The video exceeds the current duration limit.');
   assets.push(asset);

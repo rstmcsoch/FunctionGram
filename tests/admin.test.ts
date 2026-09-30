@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
 const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
 async function fixture() {
   const db = new PGlite();
-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
+  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements,...schema.avatarUpgradeStatements]) await db.exec(sql);
   const pool = serializedPool({ async query(sql, values) {
     const result = await db.query(sql, values);
     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
@@ -26,12 +26,12 @@ async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = tru
   await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
 }
 
-test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
+test('migrations 5–13 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
   const db = new PGlite();
   try {
     for (const sql of old) await db.exec(sql);
     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
+    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements,...schema.avatarUpgradeStatements]) await db.exec(sql);
     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
     assert.deepEqual(existing, { role: 'user', banned: false });
     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
@@ -40,8 +40,8 @@ test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; p
       const columns = new Set(rows.map(row => row.column_name));
       for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
     }
-    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
-    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12,13]);
+    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements],[13,schema.avatarUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
   } finally { await db.close(); }
 });
 

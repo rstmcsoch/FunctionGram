@@ -1043,3 +1043,142 @@ visible-text changes.
 Patch: `patches/phase-13-fix1.patch` (identical copy at
 `patches/phase-13-fix1.patch.txt`), verified with `git apply --check` against a
 clean worktree of the baseline commit `7a1a14e`.
+
+# Avatar upgrade — crop + auto-compress (2026-09-30)
+
+Branch `arena/01a0f1be-functiongram`, over baseline commit `e8bdd43`
+("Update admin progress and add patch files"). Every existing feature, route,
+API contract, setting and test still works; the only behaviour that changes is
+what happens to a **profile photo** between the file picker and the database.
+
+## What the member sees
+
+Picking a profile photo in **Edit profile** no longer uploads the raw camera
+file. It opens a crop dialog, and only the cropped, compressed square is sent.
+
+| Requirement | Implementation |
+| --- | --- |
+| Themed dialog, bottom sheet on phones | Reuses the shared `Modal` (`social-modal`), so it inherits the design tokens, radius, fonts, dark/light theme, Escape handling, focus return and the existing `@media (max-width:700px)` bottom-sheet dock. New styles are a single `.avatar-crop-*` block in `app/globals.css` using `var(--muted)`, `var(--border)`, `var(--primary)` and two new theme tokens `--crop-scrim` / `--crop-ring` (light + dark values) |
+| Square crop, circle preview | The canvas paints the square that will be stored; the circle is an overlay ring + scrim, so the surrounding context stays visible |
+| Drag to move | Pointer events with pointer capture (mouse, touch and pen through one path) |
+| Pinch / wheel / slider zoom, fit → 4x | Two-pointer pinch, a non-passive `wheel` listener (React's synthetic handler cannot `preventDefault`, so the page would scroll), and a native `<input type=range>`; `AVATAR_ZOOM_MIN=1` is "fit", `AVATAR_ZOOM_MAX=4` |
+| Arrow keys move, +/- zoom | `onKeyDown` on the focusable crop frame (8px, 32px with Shift, 0.12 zoom steps), announced by a visible hint that is also the frame's `aria-describedby` |
+| Crop never leaves the image | All movement goes through `clampPan` in `lib/avatar.ts`; a 200-step fuzz test over 6 image shapes x 3 viewports asserts the source rectangle stays inside the bitmap |
+| Cancel / Reset / Save, min 44px | `.avatar-crop-actions button{min-height:44px}`; Reset is disabled while the crop is untouched; Save shows the shared `Busy` spinner |
+| Esc cancels, focus returns | Radix dialog behaviour, kept by using the shared `Modal`; Escape is ignored only while an encode is in flight |
+| EXIF rotation | `createImageBitmap(file,{imageOrientation:'from-image'})`, falling back to a plain bitmap and then to an `<img>` element |
+| No heavy library | Canvas 2D + pointer events only; no new dependency |
+
+## Client compression (`lib/avatar.ts` + `components/social/avatar-crop.tsx`)
+
+512x512 output, never upscaled, floor 128 (`outputSize`). The crop is drawn
+through repeated 2:1 reductions (`halvingSteps`, rounded **up** so no step ever
+discards more than half the pixels) with `imageSmoothingEnabled` and
+`imageSmoothingQuality:'high'` on every pass, including the last.
+
+`compressToBudget` walks `sizeLadder` x `qualitySteps`: WebP at 0.9 stepping
+down by 0.05 to 0.5, then 384px, then 256px, and returns the first result at or
+under **190 KB** (the client budget, deliberately below the server's 200 KB).
+If nothing fits, the smallest attempt is used rather than failing. If the
+browser hands back anything other than WebP — older Safari answers PNG — the
+mime switches to JPEG, the render cache is cleared, alpha is flattened onto
+white and the whole ladder restarts. The search is a pure function with an
+injected encoder, so the test suite drives the exact same ladder with sharp.
+
+## Server safety net (`lib/avatar-image.ts`, `lib/uploads.ts`)
+
+The client is never trusted. An upload declares `purpose:'avatar'` in its claim
+payload (dev multipart form field, or the Blob `clientPayload`); the claim is
+checked at reservation time (images only, 12 MB source cap, intent cannot be
+changed on an existing key) and the purpose is persisted, so completion cannot
+be re-pointed at a different pipeline.
+
+On completion `processAvatarUpload` re-detects the real bytes with the existing
+`detectMediaType` (`lib/media-type.ts`), refuses anything that is not an image,
+and then `processAvatarImage`:
+
+- `rotate()` (applies EXIF, strips the orientation tag)
+- cover-resize to 512 (`withoutEnlargement` for small sources, 128 floor)
+- WebP q80, `.withMetadata(false)` — all metadata stripped, animation flattened
+  to the first frame
+- steps quality 80 → 70 → 60 → 50 → 40 → 30 until the result is <= 200 KB
+- bytes that already satisfy the contract (square WebP <= 200 KB, <= 512px) pass
+  through byte-identical, so old avatars and re-saves are never re-encoded
+
+The asset row is written with `mime='image/webp'`, `purpose='avatar'`. Old
+avatar URLs keep working: `avatarAssetReady` accepts either the new `purpose`
+flag or any asset whose bytes already sit inside the contract, and existing
+`profiles.avatar` values are untouched.
+
+**Migration 13** (`avatarUpgradeStatements`) adds `purpose text NOT NULL
+DEFAULT 'media'` to `upload_claims` and `assets` plus a partial index — three
+`IF NOT EXISTS` statements, additive and replay-safe, covered by a test that
+runs them twice against a populated database.
+
+`scripts/recompress-avatars.mts` is the optional one-off for existing avatars
+over 200 KB. **Dry run is the default**; `--apply` writes a *new* asset key and
+only repoints `profiles.avatar`. No original row or stored byte is ever
+deleted, so the old URL keeps resolving and an administrator can review it in
+Admin → Media.
+
+## Display contract
+
+`Avatar` (the single component every surface renders through — feed, comments,
+stories, reels, profile, messages, search, notifications and the admin tables)
+now emits fixed `width`/`height` attributes *and* inline `width`/`height` CSS,
+`decoding="async"`, and `loading="lazy"` except on the four above-the-fold
+sites (`app.tsx` header, floating dock, story ring, profile header), which pass
+`eager` and get `fetchpriority="high"`. The CSS pins
+`aspect-ratio:1/1; border-radius:50%; object-fit:cover; object-position:center;
+background:var(--muted); overflow:hidden` on `.avatar`, `.avatar-photo`, the
+shadcn `[data-slot=avatar]` primitives and `.admin-shell .admin-avatar img`, so
+a 4000px legacy avatar cannot overflow or shift anything.
+
+Avatar bytes are served immutably: `/api/media/[key]` now picks its
+`Cache-Control` from the asset's purpose — `public, max-age=31536000,
+immutable` for avatars, the unchanged `private, no-store` for every other
+asset (still asserted by `scripts/media-check.mts` and the new test).
+
+## Measured quality
+
+Real sharp runs against the suite's fixtures (`npx tsx`, this sandbox):
+
+| Source | Result |
+| --- | --- |
+| 12 MP incompressible grain JPEG, **33.4 MB** | 32.8 KB WebP q80, 512x512, 324 ms |
+| 12 MP synthetic portrait JPEG, 5.7 MB | 11.1 KB q80; mean abs error vs a lossless 512px reference **2.38/255**, edge energy 2.07 of 2.24 retained (no blur, no mush) |
+| 1024px smooth ramp | 150 distinct levels across the centre row, largest neighbour step 4 — no banding |
+| 100x100 PNG | stays 100x100 (never upscaled), 104 B |
+| 900x1400 PNG with alpha | 512x512, alpha preserved |
+| Two-frame animated GIF | single page, first frame kept (red) |
+| 512px WebP q80 already in contract | byte-identical passthrough |
+| EXIF orientation 6 | applied before cropping (a left-red/right-green square becomes top-red) |
+
+## Tests
+
+`tests/avatar.test.ts` — 21 tests covering the crop maths (start/clamp/zoom
+anchor/pan direction, 200-step fuzz), the size and quality ladders,
+`compressToBudget` ordering and fallbacks, the real encoder ladder under the
+client budget, every quality fixture above, migration 13, the PGlite upload
+path end to end, reservation guards, `avatarAssetReady`, the media route's
+cache headers, the server-rendered `Avatar` markup and the CSS contract.
+
+Four existing tests were extended, not weakened, because a thirteenth migration
+now exists: `tests/admin.test.ts` and `tests/moderation.test.ts` list version 13
+(and its statements) alongside 1–12, `tests/admin-system.test.ts` pins its
+Phase 10 assertions to migration 12 by version instead of "the last one", and
+`tests/media.test.ts` includes the new statements in its bootstrap.
+
+### Validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 7 warnings (all pre-existing `@next/next/no-img-element`, unchanged from baseline) |
+| `npm run typecheck` | pass |
+| `npm run test:vercel` | 136 tests, 133 pass, **0 fail**, 3 skipped (baseline: 116 / 113 / 0 / 3) |
+| `npm run build` | pass, compiled successfully, route list unchanged |
+
+Patch: `patches/avatar-crop-compress.patch` (identical copy at
+`patches/avatar-crop-compress.patch.txt`), verified with `git apply --check`
+against a clean worktree of the baseline commit `e8bdd43`; applying it there
+reproduces this tree exactly.

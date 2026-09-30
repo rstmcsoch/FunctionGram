@@ -1,0 +1,1935 @@
+diff --git a/app/api/dev-upload/route.ts b/app/api/dev-upload/route.ts
+index 0a69c55..effcb63 100644
+--- a/app/api/dev-upload/route.ts
++++ b/app/api/dev-upload/route.ts
+@@ -1,7 +1,7 @@
+ import {promises as fs} from 'node:fs';
+ import {AppError,identity,requestHeadersWithHost,sameOrigin,fail,json} from '@/lib/server';
+ import {getPool,localDevDatabase} from '@/lib/postgres';
+-import {reserveUpload,finishUpload,uploadKeyPattern} from '@/lib/uploads';
++import {reserveUpload,finishUpload,uploadKeyPattern,uploadPurpose} from '@/lib/uploads';
+ import {readMediaConfig} from '@/lib/media-policy';
+ import {readBounded} from '@/lib/media-processing';
+ import {MIB} from '@/lib/media-config';
+@@ -17,7 +17,9 @@ export async function POST(request:Request){try{
+  const form=await new Response(new Uint8Array(bytes),{headers:{'content-type':request.headers.get('content-type')||''}}).formData();
+  const key=String(form.get('key')||''),file=form.get('file');
+  if(!uploadKeyPattern.test(key)||!(file instanceof File))throw new AppError('Choose a photo or video.');
+- await reserveUpload(key,owner,JSON.stringify({size:file.size,type:file.type}));
++ // Same declared intent the Blob client payload carries; the bytes are still
++ // verified and re-encoded by the shared pipeline.
++ await reserveUpload(key,owner,JSON.stringify({size:file.size,type:file.type,purpose:uploadPurpose(form.get('purpose'))}));
+  await fs.mkdir('.local/upload-staging',{recursive:true});
+  try{await fs.writeFile('.local/upload-staging/'+key,Buffer.from(await file.arrayBuffer()),{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;throw new AppError('Please start a new upload.',409);}
+  return json(await finishUpload(key,owner));
+diff --git a/app/api/media/[key]/route.ts b/app/api/media/[key]/route.ts
+index 61dd7d9..776e786 100644
+--- a/app/api/media/[key]/route.ts
++++ b/app/api/media/[key]/route.ts
+@@ -3,6 +3,13 @@ export const dynamic='force-dynamic';
+ import { promises as fs } from 'node:fs';
+ import { db, fail, AppError } from '@/lib/server';
+ import { localDevDatabase } from '@/lib/postgres';
++import { AVATAR_CACHE_CONTROL } from '@/lib/avatar';
++
++// An asset key is an immutable UUID: the bytes behind it never change, and the
++// avatar pipeline writes a fresh key for every new photo. Profile photos are
++// therefore safe to cache forever, which is what stops feeds, comment lists and
++// message threads from re-fetching (and visibly re-painting) the same faces.
++const cacheFor = (purpose: unknown) => (purpose === 'avatar' ? AVATAR_CACHE_CONTROL : 'private, no-store');
+ 
+ export async function GET(request: Request, { params }: { params: Promise<{ key: string }> }) {
+   try {
+@@ -11,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
+     // Local preview: serve uploads from disk, including byte ranges so video
+     // seeking works exactly like the Blob CDN does in production.
+     if (localDevDatabase()) {
+-      const asset = await db().prepare("SELECT mime,blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string }>();
++      const asset = await db().prepare("SELECT mime,blob_url,purpose FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string;purpose:string }>();
+       if (!asset) throw new AppError('Media not found.', 404);
+       const path = localAssetPath(key,asset.blob_url);
+       let size = 0;
+@@ -19,7 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
+       const headers: Record<string, string> = {
+         'Content-Type': asset.mime,
+         'Accept-Ranges': 'bytes',
+-        'Cache-Control': 'private, no-store',
++        'Cache-Control': cacheFor(asset.purpose),
+       };
+       const range = request.headers.get('range');
+       const match = range?.match(/bytes=(\d*)-(\d*)/);
+@@ -40,9 +47,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
+       const bytes = await fs.readFile(path);
+       return new Response(new Uint8Array(bytes), { headers: { ...headers, 'Content-Length': String(size) } });
+     }
+-    const asset = await db().prepare("SELECT blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string }>();
++    const asset = await db().prepare("SELECT blob_url,purpose FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string;purpose:string }>();
+     if (!asset?.blob_url) throw new AppError('Media not found.', 404);
+     // Blob's CDN serves the media, including byte ranges for video seeking.
+-    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, no-store' } });
++    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': cacheFor(asset.purpose) } });
+   } catch (error) { return fail(error); }
+ }
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 673f851..41b735f 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -1,5 +1,6 @@
+ import {requireAllowedText,requireCommentPermission} from '@/lib/moderation-policy';
+ import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
++import {avatarAssetReady} from '@/lib/avatar';
+ import {MIB} from '@/lib/media-config';
+ import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
+ import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
+@@ -168,7 +169,10 @@ export async function POST(request:Request){try{
+     const name=clean(input.name,60,true),bio=clean(input.bio,150),avatar=clean(input.avatar,200),website=clean(input.website||'',200);
+     if(website){let url:URL;try{url=new URL(website);}catch{throw new AppError('Enter a complete website URL, starting with https://.');}if(!['https:','http:'].includes(url.protocol)||!url.hostname||url.username||url.password)throw new AppError('Enter a valid http(s) website URL.');}
+     const currentAvatar=(await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>())?.avatar;
+-    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');if(!avatar.startsWith('/api/media/')||!await database.prepare("SELECT key FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first())throw new AppError('Please upload a profile photo.');}
++    // A new photo must be an image this member owns *and* must have come out of
++    // the avatar pipeline (512px WebP inside the 200 KB budget). Unchanged
++    // values are never re-checked, so photos stored before this rule keep working.
++    if(avatar&&avatar!==currentAvatar){const key=avatar.replace('/api/media/','');const asset=avatar.startsWith('/api/media/')?await database.prepare("SELECT key,mime,size,purpose FROM assets WHERE key=? AND owner_id=? AND mime LIKE 'image/%'").bind(key,user).first<{mime:string;size:number;purpose:string}>():null;if(!avatarAssetReady(asset))throw new AppError('Please upload a profile photo.');}
+     const taken=await database.prepare('SELECT id FROM profiles WHERE username=? AND id!=?').bind(username,user).first();if(taken)throw new AppError('That username is taken. Try another.',409);
+     const update=database.prepare('UPDATE profiles SET username=?,name=?,bio=?,avatar=?,website=? WHERE id=?').bind(username,name,bio,avatar,website,user);
+     if(avatar&&avatar!==currentAvatar)await commitMediaUse(await getPool(),[avatar],[user],await readMediaConfig(await getPool()),[update]);else await update.run();return json({ok:true});
+diff --git a/app/globals.css b/app/globals.css
+index a338855..067c1d9 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -101,6 +101,10 @@
+   /* chart colors (unused tokens kept for ui kit) */
+   --chart-1:#eb456e;--chart-2:#3b83f6;--chart-3:#f2b555;--chart-4:#69bca4;--chart-5:#8e72dc;
+   --story-bg:#131316;
++
++  /* avatar crop dialog: scrim outside the circle, and the circle's guide ring */
++  --crop-scrim:rgba(17,14,20,.42);
++  --crop-ring:rgba(255,255,255,.92);
+ }
+ 
+ [data-theme=dark] {
+@@ -148,6 +152,9 @@
+   --shadow-2:0 2px 6px rgba(0,0,0,.45),0 8px 24px -8px rgba(0,0,0,.5);
+   --shadow-3:0 4px 12px rgba(0,0,0,.5),0 24px 64px -16px rgba(0,0,0,.66);
+   --glass-shadow:0 12px 40px -12px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);
++
++  --crop-scrim:rgba(0,0,0,.58);
++  --crop-ring:rgba(255,255,255,.78);
+ }
+ 
+ @theme inline {
+@@ -430,16 +437,24 @@ h1,h2,h3,p{margin:0}
+   .glass-card{background:var(--background)}
+ }
+ 
+-/* avatars */
+-.avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
+-.avatar img{width:100%;height:100%;object-fit:cover}
++/* avatars
++   Every avatar is a fixed square box: the element carries matching width and
++   height attributes AND CSS, plus aspect-ratio 1/1, so the circle is reserved
++   before the bytes land (no layout shift) and an old, huge, non-square photo
++   is cropped by object-fit instead of overflowing. The muted background is the
++   placeholder while a lazy image is still in flight. */
++.avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;flex-shrink:0;aspect-ratio:1/1;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
++.avatar img,.avatar-photo{display:block;width:100%;height:100%;max-width:100%;max-height:100%;aspect-ratio:1/1;object-fit:cover;object-position:center;border-radius:50%;background:var(--muted);font-size:0;color:transparent;-webkit-user-drag:none;user-select:none}
+ .avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
+ [data-theme=dark] .avatar-initial{background:linear-gradient(140deg,#3a2029,#33202c);color:#ff7497}
+ .avatar-ring{padding:3px;background:conic-gradient(from 200deg,#ffbe49,#f74774 45%,#e931a9 75%,#b83dff);border:0}
+ .avatar-ring img,.avatar-ring .avatar-initial{border:3px solid var(--background);border-radius:50%;width:100%;height:100%}
+ .story-seen .avatar-ring{background:var(--input)}
+-.avatar-button{display:flex;flex-shrink:0;border-radius:50%}
++.avatar-button{display:flex;flex:none;flex-shrink:0;aspect-ratio:1/1;border-radius:50%}
+ button:hover>.avatar{transform:scale(1.04)}
++/* Same contract for the shadcn avatar primitive used by the UI kit. */
++[data-slot=avatar]{aspect-ratio:1/1;flex:none;background:var(--muted)}
++[data-slot=avatar-image]{width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;object-position:center;border-radius:50%}
+ 
+ /* ============================================================
+    5. STATES — empty, loading, skeletons
+@@ -1047,6 +1062,28 @@ div[data-slot=dialog-content].post-viewer {
+ .edit-form input,.edit-form textarea{border:1px solid var(--input);border-radius:12px;padding:10px 12px;width:100%;background:var(--background);font-weight:400;font-size:14.5px;color:var(--foreground);resize:vertical}
+ .edit-form input:focus-visible,.edit-form textarea:focus-visible{outline:2px solid var(--ring);outline-offset:0;border-color:transparent}
+ 
++/* avatar crop dialog — same glass sheet, radius and tokens as every other
++   modal, so it docks as a bottom sheet on phones with the shared rule below. */
++.avatar-crop-modal[data-slot=dialog-content]{max-width:440px}
++.avatar-crop-body{padding:18px 24px 22px;display:flex;flex-direction:column;gap:14px}
++.avatar-crop-frame{position:relative;width:100%;max-width:320px;margin:0 auto;aspect-ratio:1/1;border-radius:calc(var(--radius) + 4px);overflow:hidden;background:var(--muted);border:1px solid var(--border);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
++.avatar-crop-frame:active{cursor:grabbing}
++.avatar-crop-frame:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
++.avatar-crop-canvas{display:block;width:100%;height:100%}
++/* The spread shadow paints every pixel outside the circle and is clipped by
++   the frame, so the square crop stays visible while the circle reads clearly. */
++.avatar-crop-circle{position:absolute;inset:0;box-sizing:border-box;border-radius:50%;border:2px solid var(--crop-ring);box-shadow:0 0 0 9999px var(--crop-scrim);pointer-events:none}
++.avatar-crop-busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
++.avatar-crop-help{font-size:12.5px;line-height:1.6;color:var(--muted-foreground);text-align:center;margin:0}
++.avatar-crop-zoom{display:flex;align-items:center;gap:10px}
++.avatar-crop-zoom .icon-button{min-width:44px;min-height:44px}
++.avatar-crop-slider{flex:1 1 auto;min-width:0;min-height:44px;accent-color:var(--primary);background:transparent;cursor:pointer}
++.avatar-crop-slider:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:999px}
++.avatar-crop-slider:disabled{opacity:.45;cursor:default}
++.avatar-crop-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
++.avatar-crop-actions button{min-height:44px}
++.avatar-crop-body .form-error{padding:0;text-align:center}
++
+ /* ============================================================
+    10. DISCOVERY — search, explore, saved
+    ============================================================ */
+@@ -1450,6 +1487,11 @@ div[data-slot=dialog-content].post-viewer {
+     border-radius:24px 24px 0 0;border-bottom:0;
+   }
+   .modal-heading{padding:18px 20px 15px;padding-right:48px;border-radius:24px 24px 0 0}
++  /* Crop sheet: full-width, thumb-reachable actions, still 44px tall. */
++  .avatar-crop-body{padding:14px 16px calc(18px + env(safe-area-inset-bottom));gap:12px}
++  .avatar-crop-frame{max-width:min(320px,74vw)}
++  .avatar-crop-actions{gap:8px}
++  .avatar-crop-actions button{flex:1 1 30%;padding:10px 12px}
+   .create-form{padding:12px 16px 18px}
+   .upload-drop{min-height:210px}
+   .relations-modal .relations-list{max-height:56dvh}
+diff --git a/app/rstmcadmin/admin-components.css b/app/rstmcadmin/admin-components.css
+index 8398b82..2c66b76 100644
+--- a/app/rstmcadmin/admin-components.css
++++ b/app/rstmcadmin/admin-components.css
+@@ -18,6 +18,10 @@
+   flex: none;
+   width: 36px;
+   height: 36px;
++  /* Fixed square box with a hard clip: admin tables keep their row height even
++     if a photo is ever rendered here, and nothing can overflow the circle. */
++  aspect-ratio: 1 / 1;
++  overflow: hidden;
+   border-radius: var(--adm-r-pill);
+   font-size: 13px;
+   font-weight: 600;
+@@ -27,6 +31,16 @@
+   user-select: none;
+ }
+ 
++.admin-shell .admin-avatar img {
++  display: block;
++  width: 100%;
++  height: 100%;
++  aspect-ratio: 1 / 1;
++  object-fit: cover;
++  object-position: center;
++  border-radius: 50%;
++}
++
+ .admin-shell .admin-avatar[data-size="28"] {
+   width: 28px;
+   height: 28px;
+diff --git a/components/social/avatar-crop.tsx b/components/social/avatar-crop.tsx
+new file mode 100644
+index 0000000..b671fe0
+--- /dev/null
++++ b/components/social/avatar-crop.tsx
+@@ -0,0 +1,332 @@
++"use client";
++/**
++ * Profile-photo crop + compress dialog.
++ *
++ * Opens after a file is chosen and before anything is uploaded. Canvas and
++ * pointer events only — no cropping library — so it stays inside the existing
++ * bundle and the existing theme: it reuses the shared `Modal`, which already
++ * docks as a bottom sheet on phones, honours the design tokens and closes on
++ * Escape.
++ *
++ * The saved file is a square WebP (JPEG where WebP is unavailable), at most
++ * 512px and under the client budget. The server still re-checks and re-encodes.
++ */
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
++import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
++import { useLabels } from "./labels";
++import { Busy, Modal } from "./common";
++import {
++  AVATAR_ZOOM_MAX, AVATAR_ZOOM_MIN,
++  centrePan, clampPan, clampZoom, compressToBudget, cropRect, halvingSteps, initialCrop, outputSize, panBy, zoomAround,
++  type CropRect, type CropState,
++} from "@/lib/avatar";
++
++export type CropSource = { image: CanvasImageSource; width: number; height: number; close?: () => void };
++
++/* ------------------------------ decoding ------------------------------ */
++
++/**
++ * Decodes the chosen file with EXIF orientation already applied, so a photo
++ * taken sideways is cropped the way the member sees it. Falls back to a plain
++ * bitmap, then to an <img> element, for browsers missing either option.
++ */
++export async function loadCropSource(file: File): Promise<CropSource> {
++  if (typeof createImageBitmap === "function") {
++    for (const options of [{ imageOrientation: "from-image" as const }, undefined]) {
++      try {
++        const bitmap = await (options ? createImageBitmap(file, options) : createImageBitmap(file));
++        if (bitmap.width > 0 && bitmap.height > 0) return { image: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
++        bitmap.close();
++      } catch { /* try the next decoder */ }
++    }
++  }
++  const url = URL.createObjectURL(file);
++  try {
++    const element = await new Promise<HTMLImageElement>((resolve, reject) => {
++      const image = new Image();
++      image.onload = () => resolve(image);
++      image.onerror = () => reject(new Error("decode"));
++      image.src = url;
++    });
++    return { image: element, width: element.naturalWidth, height: element.naturalHeight, close: () => URL.revokeObjectURL(url) };
++  } catch (error) { URL.revokeObjectURL(url); throw error; }
++}
++
++/* ------------------------------ encoding ------------------------------ */
++
++function canvasOf(size: number) {
++  const canvas = document.createElement("canvas");
++  canvas.width = size; canvas.height = size;
++  const context = canvas.getContext("2d");
++  if (!context) throw new Error("canvas");
++  context.imageSmoothingEnabled = true;
++  context.imageSmoothingQuality = "high";
++  return { canvas, context };
++}
++
++/**
++ * Draws the crop at `edge` pixels through repeated 2:1 reductions. One giant
++ * downscale throws most source pixels away and produces the soft, aliased
++ * faces this replaces; halving keeps them, and every pass — the final one
++ * especially — runs with `imageSmoothingQuality:'high'`.
++ */
++function renderSquare(source: CropSource, crop: CropRect, edge: number, flatten: boolean) {
++  const steps = halvingSteps(Math.round(crop.size), edge);
++  let current = canvasOf(steps[0]);
++  if (flatten) { current.context.fillStyle = "#ffffff"; current.context.fillRect(0, 0, steps[0], steps[0]); }
++  current.context.drawImage(source.image, crop.sx, crop.sy, crop.size, crop.size, 0, 0, steps[0], steps[0]);
++  for (const size of steps.slice(1)) {
++    const next = canvasOf(size);
++    if (flatten) { next.context.fillStyle = "#ffffff"; next.context.fillRect(0, 0, size, size); }
++    next.context.drawImage(current.canvas, 0, 0, current.canvas.width, current.canvas.height, 0, 0, size, size);
++    current = next;
++  }
++  return current.canvas;
++}
++
++const toBlob = (canvas: HTMLCanvasElement, type: string, quality: number) =>
++  new Promise<Blob | null>(resolve => canvas.toBlob(blob => resolve(blob), type, quality));
++
++/**
++ * Encodes the crop under the client budget: WebP first, quality stepping down
++ * from 0.9 to 0.5, then 384 and 256 pixel fallbacks. If the browser hands back
++ * anything other than WebP (older Safari answers PNG), the whole ladder
++ * restarts as JPEG with the alpha flattened onto white.
++ */
++export async function encodeAvatar(source: CropSource, crop: CropRect, name: string): Promise<File> {
++  let mime = "image/webp";
++  let probed = false;
++  // One canvas per edge: the quality ladder re-encodes the same pixels.
++  const rendered = new Map<number, HTMLCanvasElement>();
++  const draw = (edge: number) => {
++    const existing = rendered.get(edge);
++    if (existing) return existing;
++    const canvas = renderSquare(source, crop, edge, mime === "image/jpeg");
++    rendered.set(edge, canvas);
++    return canvas;
++  };
++  const best = await compressToBudget<Blob>(async (edge, quality) => {
++    let blob = await toBlob(draw(edge), mime, quality);
++    if (!probed) {
++      probed = true;
++      if (!blob || blob.type !== "image/webp") {
++        mime = "image/jpeg";
++        rendered.clear();
++        blob = await toBlob(draw(edge), mime, quality);
++      }
++    }
++    return blob ? { result: blob, size: blob.size } : null;
++  }, outputSize(crop.size));
++  return fileOf(best.result, mime, name);
++}
++
++function fileOf(blob: Blob, mime: string, name: string) {
++  const base = (name.replace(/\.[^.]+$/, "") || "avatar").slice(0, 60);
++  return new File([blob], base + (mime === "image/webp" ? ".webp" : ".jpg"), { type: mime });
++}
++
++/* ------------------------------- dialog -------------------------------- */
++
++const VIEWPORT_FALLBACK = 288;
++const KEY_PAN = 8, KEY_PAN_FAST = 32, KEY_ZOOM = 0.12;
++const RESTING: CropState = { zoom: AVATAR_ZOOM_MIN, pan: { x: 0, y: 0 } };
++
++export function AvatarCropDialog({ file, onCancel, onCropped }: { file: File; onCancel: () => void; onCropped: (cropped: File) => void }) {
++  const t = useLabels();
++  // One decode result per file: keeping the file alongside it means a newly
++  // chosen photo reads as "still loading" without clearing state in an effect.
++  const [decoded, setDecoded] = useState<{ file: File; source: CropSource | null } | null>(null);
++  const [saveFailed, setSaveFailed] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [viewport, setViewport] = useState(VIEWPORT_FALLBACK);
++  // null means "untouched": the crop is derived as the centred, fully zoomed-out
++  // view, which also makes Reset a single state clear and keeps the stored value
++  // independent of the (resizable) viewport.
++  const [state, setState] = useState<CropState | null>(null);
++  const frameRef = useRef<HTMLDivElement>(null);
++  const canvasRef = useRef<HTMLCanvasElement>(null);
++  const pointers = useRef(new Map<number, { x: number; y: number }>());
++  const pinch = useRef<{ distance: number; zoom: number } | null>(null);
++
++  const current = decoded && decoded.file === file ? decoded : null;
++  const source = current?.source ?? null;
++  const failed = (!!current && !current.source) || saveFailed;
++
++  useEffect(() => {
++    let active = true;
++    let loaded: CropSource | null = null;
++    void loadCropSource(file).then(result => {
++      loaded = result;
++      if (!active) { result.close?.(); return; }
++      setDecoded({ file, source: result });
++    }).catch(() => { if (active) setDecoded({ file, source: null }); });
++    return () => { active = false; loaded?.close?.(); };
++  }, [file]);
++
++  // The crop window is square and fluid; measure it so the maths, the preview
++  // and the pointer deltas all share one coordinate space.
++  useEffect(() => {
++    const frame = frameRef.current;
++    if (!frame) return;
++    const measure = () => setViewport(Math.max(120, Math.round(frame.clientWidth || VIEWPORT_FALLBACK)));
++    measure();
++    if (typeof ResizeObserver === "undefined") return;
++    const observer = new ResizeObserver(measure);
++    observer.observe(frame);
++    return () => observer.disconnect();
++  }, [source]);
++
++  /** Legal crop for the current viewport, whatever was stored before it. */
++  const settle = useCallback((stored: CropState | null): CropState => {
++    if (!source) return RESTING;
++    if (!stored) return initialCrop(source.width, source.height, viewport);
++    return { zoom: clampZoom(stored.zoom), pan: clampPan(stored.pan, source.width, source.height, viewport, stored.zoom) };
++  }, [source, viewport]);
++
++  const crop = settle(state);
++
++  // Paint the crop square. The circle is an overlay, so the member keeps the
++  // surrounding context while seeing exactly what will be stored.
++  useEffect(() => {
++    const canvas = canvasRef.current;
++    if (!canvas || !source) return;
++    const ratio = Math.min(3, Math.max(1, typeof devicePixelRatio === "number" ? devicePixelRatio : 1));
++    const pixels = Math.round(viewport * ratio);
++    if (canvas.width !== pixels || canvas.height !== pixels) { canvas.width = pixels; canvas.height = pixels; }
++    const context = canvas.getContext("2d");
++    if (!context) return;
++    const rect = cropRect(crop, source.width, source.height, viewport);
++    context.clearRect(0, 0, pixels, pixels);
++    context.imageSmoothingEnabled = true;
++    context.imageSmoothingQuality = "high";
++    context.drawImage(source.image, rect.sx, rect.sy, rect.size, rect.size, 0, 0, pixels, pixels);
++  }, [source, crop, viewport]);
++
++  const applyZoom = useCallback((next: number, focus?: { x: number; y: number }) => {
++    if (!source) return;
++    setState(stored => zoomAround(settle(stored), next, focus || { x: viewport / 2, y: viewport / 2 }, source.width, source.height, viewport));
++  }, [settle, source, viewport]);
++
++  const nudge = useCallback((x: number, y: number) => {
++    if (!source) return;
++    setState(stored => panBy(settle(stored), { x, y }, source.width, source.height, viewport));
++  }, [settle, source, viewport]);
++
++  // Wheel must be a non-passive native listener: React's synthetic wheel
++  // handler cannot call preventDefault, so the page would scroll instead.
++  useEffect(() => {
++    const frame = frameRef.current;
++    if (!frame || !source) return;
++    const onWheel = (event: WheelEvent) => {
++      event.preventDefault();
++      const box = frame.getBoundingClientRect();
++      const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
++      applyZoom(clampZoom(crop.zoom * Math.exp(-step / 320)), { x: event.clientX - box.left, y: event.clientY - box.top });
++    };
++    frame.addEventListener("wheel", onWheel, { passive: false });
++    return () => frame.removeEventListener("wheel", onWheel);
++  }, [applyZoom, crop.zoom, source]);
++
++  const pointerDown = (event: React.PointerEvent) => {
++    if (!source) return;
++    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
++    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
++    if (pointers.current.size === 2) {
++      const [a, b] = [...pointers.current.values()];
++      pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: crop.zoom };
++    }
++  };
++
++  const pointerMove = (event: React.PointerEvent) => {
++    if (!source || !pointers.current.has(event.pointerId)) return;
++    const previous = pointers.current.get(event.pointerId)!;
++    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
++    if (pointers.current.size >= 2 && pinch.current) {
++      const [a, b] = [...pointers.current.values()];
++      const distance = Math.hypot(a.x - b.x, a.y - b.y) || 1;
++      const box = frameRef.current?.getBoundingClientRect();
++      applyZoom(pinch.current.zoom * (distance / pinch.current.distance), box ? { x: (a.x + b.x) / 2 - box.left, y: (a.y + b.y) / 2 - box.top } : undefined);
++      return;
++    }
++    nudge(event.clientX - previous.x, event.clientY - previous.y);
++  };
++
++  const pointerUp = (event: React.PointerEvent) => {
++    pointers.current.delete(event.pointerId);
++    if (pointers.current.size < 2) pinch.current = null;
++  };
++
++  const onKeyDown = (event: React.KeyboardEvent) => {
++    if (!source) return;
++    const distance = event.shiftKey ? KEY_PAN_FAST : KEY_PAN;
++    const move = (x: number, y: number) => { event.preventDefault(); nudge(x, y); };
++    if (event.key === "ArrowLeft") return move(distance, 0);
++    if (event.key === "ArrowRight") return move(-distance, 0);
++    if (event.key === "ArrowUp") return move(0, distance);
++    if (event.key === "ArrowDown") return move(0, -distance);
++    if (event.key === "+" || event.key === "=") { event.preventDefault(); applyZoom(crop.zoom + KEY_ZOOM); return; }
++    if (event.key === "-" || event.key === "_") { event.preventDefault(); applyZoom(crop.zoom - KEY_ZOOM); return; }
++  };
++
++  const save = async () => {
++    if (!source || saving) return;
++    setSaving(true);
++    try {
++      onCropped(await encodeAvatar(source, cropRect(crop, source.width, source.height, viewport), file.name));
++    } catch { setSaveFailed(true); }
++    finally { setSaving(false); }
++  };
++
++  const untouched = useMemo(() => {
++    if (!source) return true;
++    if (!state) return true;
++    const home = centrePan(source.width, source.height, viewport, AVATAR_ZOOM_MIN);
++    return Math.abs(crop.zoom - AVATAR_ZOOM_MIN) < 0.001 && Math.abs(crop.pan.x - home.x) < 0.5 && Math.abs(crop.pan.y - home.y) < 0.5;
++  }, [crop, source, state, viewport]);
++
++  return (
++    <Modal open onClose={() => { if (!saving) onCancel(); }} title={t("create.adjust_your_photo")} description={t("create.drag_to_move_scroll_or_pinch_to_zoom_the_circle_is_what_people_se")} className="avatar-crop-modal">
++      <div className="avatar-crop-body">
++        <div
++          ref={frameRef}
++          className="avatar-crop-frame"
++          role="application"
++          aria-label={t("create.profile_photo_crop_area")}
++          aria-describedby="avatar-crop-help"
++          tabIndex={0}
++          onKeyDown={onKeyDown}
++          onPointerDown={pointerDown}
++          onPointerMove={pointerMove}
++          onPointerUp={pointerUp}
++          onPointerCancel={pointerUp}
++        >
++          <canvas ref={canvasRef} className="avatar-crop-canvas" aria-hidden="true" />
++          <span className="avatar-crop-circle" aria-hidden="true" />
++          {!source && !failed && <span className="avatar-crop-busy"><Busy size={22} /></span>}
++        </div>
++        <p id="avatar-crop-help" className="avatar-crop-help">{t("create.use_the_arrow_keys_to_move_and_plus_or_minus_to_zoom")}</p>
++        <div className="avatar-crop-zoom">
++          <button type="button" className="icon-button" aria-label={t("create.zoom_out")} disabled={!source} onClick={() => applyZoom(crop.zoom - KEY_ZOOM)}><ZoomOut size={18} /></button>
++          <input
++            type="range"
++            className="avatar-crop-slider"
++            min={AVATAR_ZOOM_MIN}
++            max={AVATAR_ZOOM_MAX}
++            step={0.01}
++            value={crop.zoom}
++            disabled={!source}
++            aria-label={t("create.zoom")}
++            onChange={event => applyZoom(Number(event.target.value))}
++          />
++          <button type="button" className="icon-button" aria-label={t("create.zoom_in")} disabled={!source} onClick={() => applyZoom(crop.zoom + KEY_ZOOM)}><ZoomIn size={18} /></button>
++        </div>
++        {failed && <p role="alert" className="form-error">{t("create.this_photo_could_not_be_opened_please_choose_another")}</p>}
++        <div className="avatar-crop-actions">
++          <button type="button" className="secondary-button" onClick={onCancel} disabled={saving}>{t("app.cancel")}</button>
++          <button type="button" className="secondary-button" onClick={() => setState(null)} disabled={!source || saving || untouched}><RotateCcw size={16} />{t("create.reset")}</button>
++          <button type="button" className="primary-button" onClick={() => void save()} disabled={!source || saving}>{saving ? <><Busy size={15} />{t("create.saving")}</> : t("create.use_photo")}</button>
++        </div>
++      </div>
++    </Modal>
++  );
++}
+diff --git a/components/social/common.tsx b/components/social/common.tsx
+index 25beebf..e96be43 100644
+--- a/components/social/common.tsx
++++ b/components/social/common.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ import {useLabels} from "./labels";
+ import {MIB,type MediaConfig} from "@/lib/media-config";
++import type {AvatarPurpose} from "@/lib/avatar";
+ import {defaultTranslator,type Translator} from "@/lib/admin/labels";
+ 
+ import { useState, useEffect, type ReactNode } from "react";
+@@ -83,7 +84,7 @@ async function videoSize(file: File): Promise<number | null> {
+     video.src = url;
+   });
+ }
+-export async function upload(file: File, t: Translator = defaultTranslator): Promise<UploadResult> {
++export async function upload(file: File, t: Translator = defaultTranslator, purpose: AvatarPurpose = "media"): Promise<UploadResult> {
+   const config=await request<MediaConfig>("/api/social?upload-policy=1",undefined,t);
+   if(!config.enabled)throw new Error(t('media.disabled'));
+   if(!config.allowedTypes.includes(file.type))throw new Error(t('media.typeDisabled'));
+@@ -93,30 +94,44 @@ export async function upload(file: File, t: Translator = defaultTranslator): Pro
+   if (devMode) {
+     const form = new FormData();
+     form.append("key", crypto.randomUUID());
++    form.append("purpose", purpose);
+     form.append("file", output);
+     const result = await request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t);
+     return { ...result, aspect:result.aspect??aspect };
+   }
+   const key = crypto.randomUUID();
+-  await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
++  await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type, purpose }) });
+   const completed = await request<{ url: string; type: string; aspect?:number|null }>("/api/upload/complete", { key }, t);
+   return { ...completed, aspect:completed.aspect??aspect };
+ }
+ 
+ /* --------------------------------- avatars --------------------------------- */
+ 
+-export function Avatar({ person, size = 42, ring = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; onClick?: () => void; className?: string }) {
++/**
++ * The single avatar renderer for every public surface: feed, comments,
++ * stories, profile, messages, search, notifications and the dock.
++ *
++ * Layout is fixed before the bytes arrive — matching `width`/`height`
++ * attributes and CSS, `aspect-ratio:1/1`, `object-fit:cover` and a muted
++ * placeholder — so an old, huge, non-square photo can neither shift the page
++ * nor spill out of its circle. `eager` opts the few above-the-fold avatars out
++ * of lazy loading; everything else stays lazy.
++ */
++export function Avatar({ person, size = 42, ring = false, eager = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; eager?: boolean; onClick?: () => void; className?: string }) {
+   const t=useLabels();
+-  const [broken, setBroken] = useState(false);
++  // Remember which URL failed instead of a bare boolean, so choosing a new
++  // photo re-tries immediately without an effect that re-renders on every swap.
++  const [brokenSrc, setBrokenSrc] = useState("");
++  const src = person?.avatar || "";
+   const content = (
+-    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size }}>
+-      {person?.avatar && !broken
+-        ? <img src={person.avatar} alt="" width={size} height={size} loading="lazy" onError={() => setBroken(true)} />
++    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size, minWidth: size, minHeight: size }}>
++      {src && brokenSrc !== src
++        ? <img className="avatar-photo" src={src} alt="" width={size} height={size} loading={eager ? "eager" : "lazy"} decoding="async" fetchPriority={eager ? "high" : "auto"} draggable={false} onError={() => setBrokenSrc(src)} />
+         : <span className="avatar-initial">{(person?.name || t("common.avatarFallback")).slice(0, 1).toUpperCase()}</span>}
+     </span>
+   );
+   return onClick ? (
+-    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button">{content}</button>
++    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button" style={{ width: size, height: size }}>{content}</button>
+   ) : content;
+ }
+ 
+diff --git a/components/social/create.tsx b/components/social/create.tsx
+index d471fee..09d671b 100644
+--- a/components/social/create.tsx
++++ b/components/social/create.tsx
+@@ -8,6 +8,7 @@ import { ImagePlus, Plus, X, Film, Camera, MapPin, ChevronLeft, ChevronRight, Up
+ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+ import { toast } from "sonner";
+ import { Modal, Avatar, IconButton, Busy, upload, request } from "./common";
++import { AvatarCropDialog } from "./avatar-crop";
+ import type { MediaOption, Person, Post } from "@/lib/types";
+ 
+ type Draft = { url: string; type: string; aspect: number | null };
+@@ -342,17 +343,26 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: ()
+   const [avatar, setAvatar] = useState(me.avatar);
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState("");
++  const [pending, setPending] = useState<File | null>(null);
+   const input = useRef<HTMLInputElement>(null);
++  const changeButton = useRef<HTMLButtonElement>(null);
+ 
+-  const photo = async (file?: File) => {
+-    if (!file) return;
++  // Cancelling or finishing the crop dialog hands focus back to the control
++  // that opened it, so keyboard and screen-reader users never lose their place.
++  const returnFocus = () => { requestAnimationFrame(() => changeButton.current?.focus()); };
++
++  // Nothing is uploaded until the crop is confirmed.
++  const choose = (file?: File) => { setError(""); if (file) setPending(file); };
++
++  const photo = async (file: File) => {
++    setPending(null);
+     setBusy(true);
+     try {
+-      const result = await upload(file, t);
++      const result = await upload(file, t, "avatar");
+       if (!result.type.startsWith("image/")) throw new Error(t("create.please_choose_a_photo"));
+       setAvatar(result.url);
+     } catch (e) { setError((e as Error).message); }
+-    finally { setBusy(false); }
++    finally { setBusy(false); returnFocus(); }
+   };
+ 
+   const submit = async (event: FormEvent) => {
+@@ -370,11 +380,12 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: ()
+     <Modal open onClose={() => !busy && onClose()} title={t("create.edit_profile")}>
+       <form onSubmit={submit} className="edit-form">
+         <div className="edit-avatar">
+-          <Avatar person={{ ...me, avatar }} size={76} />
+-          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label={t("create.choose_profile_photo")} onChange={e => void photo(e.target.files?.[0])} />
+-          <button type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>{t("create.change_photo")}</button>
++          <Avatar person={{ ...me, avatar }} size={76} eager />
++          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" aria-label={t("create.choose_profile_photo")} onChange={e => { choose(e.target.files?.[0]); e.target.value = ""; }} />
++          <button ref={changeButton} type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>{busy ? <Busy size={15} /> : t("create.change_photo")}</button>
+ </Feature>
+         </div>
++        {pending && <AvatarCropDialog file={pending} onCancel={() => { setPending(null); returnFocus(); }} onCropped={file => void photo(file)} />}
+         <label>{t("auth_form.name")}<input required maxLength={60} value={name} onChange={e => setName(e.target.value)} /></label>
+         <label>{t("create.username")}<input required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_][a-zA-Z0-9_.]{2,29}" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" spellCheck={false} /></label>
+         <label>{t("create.bio")}<textarea maxLength={150} rows={3} value={bio} onChange={e => setBio(e.target.value)} /><span className="form-hint">{bio.length}{t("create.150")}</span></label>
+diff --git a/components/social/floating-dock.tsx b/components/social/floating-dock.tsx
+index bb0d292..83719d1 100644
+--- a/components/social/floating-dock.tsx
++++ b/components/social/floating-dock.tsx
+@@ -98,7 +98,7 @@ export const FloatingDock = memo(function FloatingDock({ items, active, me, onSe
+                 title={item.label}
+               >
+                 <span className="dock-glyph">
+-                  {item.target === 'profile' && item.icon === 'user' && me ? <Avatar person={me} size={28}/> : <Icon strokeWidth={isActive?2.15:1.85}/>} {item.badge&&<small className="appearance-badge">{item.badge}</small>}
++                  {item.target === 'profile' && item.icon === 'user' && me ? <Avatar person={me} size={28} eager/> : <Icon strokeWidth={isActive?2.15:1.85}/>} {item.badge&&<small className="appearance-badge">{item.badge}</small>}
+                 </span>
+               </button>
+             );
+diff --git a/components/social/stories.tsx b/components/social/stories.tsx
+index 13c3b3d..c9739c1 100644
+--- a/components/social/stories.tsx
++++ b/components/social/stories.tsx
+@@ -18,7 +18,7 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
+       <div className="stories" ref={rail}>
+         <Feature name="uploads"><button className="story story-yours" onClick={onCreate}>
+           <span className="your-story">
+-            <Avatar person={me} size={66} />
++            <Avatar person={me} size={66} eager />
+             <span className="story-plus"><Plus size={15} /></span>
+           </span>
+           <span>{t("stories.your_story")}</span>
+diff --git a/components/social/views.tsx b/components/social/views.tsx
+index 56ccc89..4bde737 100644
+--- a/components/social/views.tsx
++++ b/components/social/views.tsx
+@@ -127,7 +127,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
+ 
+       <aside className="suggestions-rail">
+         <div className="account-row glass-card">
+-          <Avatar person={data.me} size={52} onClick={() => navigate("profile")} />
++          <Avatar person={data.me} size={52} eager onClick={() => navigate("profile")} />
+           <div>
+             <button className="username" onClick={() => navigate("profile")}>{data.me?.username || t("views.your_world_shared")}</button>
+             <span>{data.me?.name || t("views.a_little_more_you")}</span>
+@@ -546,7 +546,7 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
+   return (
+     <section className="profile-view">
+       <div className="profile-top">
+-        <Avatar person={profile} size={128} className="profile-avatar" />
++        <Avatar person={profile} size={128} eager className="profile-avatar" />
+         <div className="profile-info">
+           <div className="profile-title">
+             <h1>{profile.username}</h1>
+diff --git a/lib/admin/label-defaults.ts b/lib/admin/label-defaults.ts
+index b2b6467..4c1e49e 100644
+--- a/lib/admin/label-defaults.ts
++++ b/lib/admin/label-defaults.ts
+@@ -221,6 +221,16 @@ export const LABEL_DEFAULTS = {
+   "create.edit_profile": "Edit profile",
+   "create.choose_profile_photo": "Choose profile photo",
+   "create.change_photo": "Change photo",
++  "create.adjust_your_photo": "Adjust your photo",
++  "create.drag_to_move_scroll_or_pinch_to_zoom_the_circle_is_what_people_se": "Drag to move, scroll or pinch to zoom. The circle is what people see.",
++  "create.profile_photo_crop_area": "Profile photo crop area",
++  "create.use_the_arrow_keys_to_move_and_plus_or_minus_to_zoom": "Use the arrow keys to move, and + or − to zoom.",
++  "create.zoom": "Zoom",
++  "create.zoom_in": "Zoom in",
++  "create.zoom_out": "Zoom out",
++  "create.reset": "Reset",
++  "create.use_photo": "Use photo",
++  "create.this_photo_could_not_be_opened_please_choose_another": "This photo could not be opened. Please choose another.",
+   "create.username": "Username",
+   "create.bio": "Bio",
+   "create.150": "/150",
+diff --git a/lib/avatar-image.ts b/lib/avatar-image.ts
+new file mode 100644
+index 0000000..0366ac4
+--- /dev/null
++++ b/lib/avatar-image.ts
+@@ -0,0 +1,106 @@
++/**
++ * Server safety net for profile photos.
++ *
++ * The browser crops and compresses before uploading, but nothing it sends is
++ * trusted: every avatar byte stream is sniffed here with the same signature
++ * table the rest of the media pipeline uses, rejected unless it is a real
++ * image, and re-encoded with sharp whenever it is not already a small WebP.
++ * Output is always a square, metadata-free WebP inside the 200 KB budget.
++ */
++import sharp from 'sharp';
++import { detectMediaType } from './media-type';
++import { AdminError } from './admin/validation';
++import { checkUploadInput } from './media-policy';
++import type { MediaConfig } from './media-config';
++import type { ProcessedMedia } from './media-processing';
++import {
++  AVATAR_INPUT_TYPES, AVATAR_MAX_BYTES, AVATAR_SERVER_QUALITIES, AVATAR_SIZE_LADDER, AVATAR_TARGET,
++} from './avatar';
++
++export type AvatarImage = {
++  bytes: Buffer;
++  mime: 'image/webp';
++  width: number;
++  height: number;
++  /** Encoder quality actually used, or null when the source passed through. */
++  quality: number | null;
++  reencoded: boolean;
++};
++
++const DECODE = { limitInputPixels: 40_000_000, failOn: 'error' as const, pages: 1 };
++
++/** Sniffed type of the real bytes; throws unless it is an image we can decode. */
++export function avatarSourceType(bytes: Buffer | Uint8Array) {
++  const detected = detectMediaType(bytes.subarray(0, 16));
++  if (!detected.startsWith('image/')) throw new AdminError('Choose a photo for your profile.');
++  if (!(AVATAR_INPUT_TYPES as readonly string[]).includes(detected)) throw new AdminError('Choose a JPEG, PNG, WebP or GIF photo.');
++  return detected;
++}
++
++/**
++ * Normalises any supported image into a stored avatar.
++ *
++ * Already-small WebPs that are square and no larger than 512px are kept
++ * byte-for-byte (the browser already did the work). Everything else is
++ * re-encoded: EXIF rotation applied, cropped to a centred square, resized to
++ * 512 without ever enlarging, metadata dropped, WebP from q80 downwards, then
++ * 384 and 256 if the quality ladder alone cannot reach the budget.
++ */
++export async function processAvatarImage(bytes: Buffer): Promise<AvatarImage> {
++  const detected = avatarSourceType(bytes);
++  let probe: sharp.Metadata;
++  try {
++    probe = await sharp(bytes, DECODE).timeout({ seconds: 20 }).metadata();
++  } catch { throw new AdminError('This photo could not be safely decoded.'); }
++  const sourceWidth = probe.width || 0, sourceHeight = probe.height || 0;
++  if (!sourceWidth || !sourceHeight) throw new AdminError('This photo could not be safely decoded.');
++  // `rotate()` swaps the axes for 90/270 degree EXIF orientations.
++  const upright = (probe.orientation || 0) >= 5 ? { width: sourceHeight, height: sourceWidth } : { width: sourceWidth, height: sourceHeight };
++  const shortest = Math.min(upright.width, upright.height);
++
++  if (detected === 'image/webp' && bytes.length <= AVATAR_MAX_BYTES && (probe.pages || 1) === 1
++    && upright.width === upright.height && upright.width <= AVATAR_TARGET) {
++    return { bytes, mime: 'image/webp', width: upright.width, height: upright.height, quality: null, reencoded: false };
++  }
++
++  try {
++    let best: { bytes: Buffer; width: number; height: number; quality: number } | null = null;
++    for (const edge of [AVATAR_TARGET, ...AVATAR_SIZE_LADDER.filter(size => size < AVATAR_TARGET)]) {
++      // One decode per edge; the quality ladder then re-encodes raw pixels.
++      const square = Math.min(edge, shortest) || edge;
++      const { data, info } = await sharp(bytes, DECODE).timeout({ seconds: 20 })
++        .rotate()
++        .resize(square, square, { fit: 'cover', position: 'centre', withoutEnlargement: true })
++        .raw()
++        .toBuffer({ resolveWithObject: true });
++      for (const quality of AVATAR_SERVER_QUALITIES) {
++        const encoded = await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
++          .webp({ quality, effort: 4 })
++          .toBuffer();
++        if (!best || encoded.length < best.bytes.length) best = { bytes: encoded, width: info.width, height: info.height, quality };
++        if (encoded.length <= AVATAR_MAX_BYTES) {
++          return { bytes: encoded, mime: 'image/webp', width: info.width, height: info.height, quality, reencoded: true };
++        }
++      }
++    }
++    if (!best) throw new AdminError('This photo could not be safely decoded.');
++    if (best.bytes.length > AVATAR_MAX_BYTES) throw new AdminError('That profile photo could not be compressed. Please choose another photo.');
++    return { bytes: best.bytes, mime: 'image/webp', width: best.width, height: best.height, quality: best.quality, reencoded: true };
++  } catch (error) {
++    if (error instanceof AdminError) throw error;
++    throw new AdminError('This photo could not be safely decoded.');
++  }
++}
++
++/**
++ * Avatar branch of the upload pipeline. Applies the shared upload gate (media
++ * enabled, allowed source type, size limit) and then the avatar contract; the
++ * declared browser type must match the real bytes, exactly as for post media.
++ */
++export async function processAvatarUpload(bytes: Buffer, mime: string, config: MediaConfig): Promise<ProcessedMedia> {
++  checkUploadInput(config, bytes.length, mime);
++  const detected = avatarSourceType(bytes);
++  if (detected !== mime) throw new AdminError('The file contents do not match its photo type.');
++  const avatar = await processAvatarImage(bytes);
++  return { bytes: avatar.bytes, mime: avatar.mime, width: avatar.width, height: avatar.height, duration: null };
++}
+diff --git a/lib/avatar.ts b/lib/avatar.ts
+new file mode 100644
+index 0000000..ac370fe
+--- /dev/null
++++ b/lib/avatar.ts
+@@ -0,0 +1,224 @@
++/**
++ * Avatar geometry, size and quality ladders.
++ *
++ * Pure arithmetic only: no DOM, no Node and no `sharp`, so the browser crop
++ * dialog, the server safety net and the unit tests all agree on one set of
++ * rules. Every helper is total (it never throws) and clamps its own inputs,
++ * because the browser feeds it live pointer/wheel values.
++ */
++
++/** Stored avatar edge, in pixels. Larger crops are downscaled to this. */
++export const AVATAR_TARGET = 512;
++/** Smallest stored avatar edge. A tiny source is scaled up to this, never below. */
++export const AVATAR_MIN = 128;
++/** Client budget: the browser keeps shrinking until the file fits. */
++export const AVATAR_CLIENT_MAX_BYTES = 190 * 1024;
++/** Server budget. The safety net re-encodes anything above it. */
++export const AVATAR_MAX_BYTES = 200 * 1024;
++/** Largest source the avatar upload path will even reserve (pre-crop bytes). */
++export const AVATAR_SOURCE_MAX_BYTES = 12 * 1024 * 1024;
++/** Zoom is expressed as a multiple of the cover ("fit") scale. */
++export const AVATAR_ZOOM_MIN = 1;
++export const AVATAR_ZOOM_MAX = 4;
++/** Browser encoder ladder: 0.9 down to 0.5 in 0.05 steps. */
++export const AVATAR_QUALITY_START = 0.9;
++export const AVATAR_QUALITY_STEP = 0.05;
++export const AVATAR_QUALITY_FLOOR = 0.5;
++/** Fallback edges when the quality ladder alone cannot reach the budget. */
++export const AVATAR_SIZE_LADDER = [AVATAR_TARGET, 384, 256] as const;
++/** Server (sharp) quality ladder. Starts at the required q80. */
++export const AVATAR_SERVER_QUALITIES = [80, 70, 60, 50, 40, 30] as const;
++/** Avatar bytes are immutable for a given key, so they may be cached forever. */
++export const AVATAR_CACHE_CONTROL = 'public, max-age=31536000, immutable';
++
++export type AvatarPurpose = 'media' | 'avatar';
++/** Only these can be cropped; they match the decoders `detectMediaType` knows. */
++export const AVATAR_INPUT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
++
++export type Point = { x: number; y: number };
++/** Square crop expressed in *source* pixels. */
++export type CropRect = { sx: number; sy: number; size: number };
++export type CropState = { zoom: number; pan: Point };
++
++const finite = (value: number, fallback = 0) => (Number.isFinite(value) ? value : fallback);
++export const clamp = (value: number, min: number, max: number) =>
++  max <= min ? min : Math.min(max, Math.max(min, finite(value, min)));
++
++/** Smallest scale at which the image still covers the square viewport. */
++export function coverScale(imageWidth: number, imageHeight: number, viewport: number) {
++  const width = Math.max(1, finite(imageWidth, 1));
++  const height = Math.max(1, finite(imageHeight, 1));
++  const box = Math.max(1, finite(viewport, 1));
++  return Math.max(box / width, box / height);
++}
++
++export const clampZoom = (zoom: number) => clamp(zoom, AVATAR_ZOOM_MIN, AVATAR_ZOOM_MAX);
++
++/** Absolute scale (source pixel -> viewport pixel) for a zoom multiple. */
++export function scaleFor(imageWidth: number, imageHeight: number, viewport: number, zoom: number) {
++  return coverScale(imageWidth, imageHeight, viewport) * clampZoom(zoom);
++}
++
++/**
++ * Keeps the crop window inside the picture. `pan` is the offset of the image's
++ * top-left corner from the viewport's top-left corner, so the legal range is
++ * `[viewport - displayed, 0]` on both axes; at exactly cover scale that range
++ * collapses to a single centred value.
++ */
++export function clampPan(pan: Point, imageWidth: number, imageHeight: number, viewport: number, zoom: number): Point {
++  const box = Math.max(1, finite(viewport, 1));
++  const scale = scaleFor(imageWidth, imageHeight, box, zoom);
++  const displayedWidth = Math.max(1, finite(imageWidth, 1)) * scale;
++  const displayedHeight = Math.max(1, finite(imageHeight, 1)) * scale;
++  return {
++    x: clamp(finite(pan?.x, 0), Math.min(0, box - displayedWidth), 0),
++    y: clamp(finite(pan?.y, 0), Math.min(0, box - displayedHeight), 0),
++  };
++}
++
++/** Centres the image in the viewport at the given zoom. */
++export function centrePan(imageWidth: number, imageHeight: number, viewport: number, zoom: number): Point {
++  const box = Math.max(1, finite(viewport, 1));
++  const scale = scaleFor(imageWidth, imageHeight, box, zoom);
++  return clampPan(
++    { x: (box - Math.max(1, finite(imageWidth, 1)) * scale) / 2, y: (box - Math.max(1, finite(imageHeight, 1)) * scale) / 2 },
++    imageWidth, imageHeight, box, zoom,
++  );
++}
++
++/** Initial (and Reset) state: whole picture visible, centred. */
++export function initialCrop(imageWidth: number, imageHeight: number, viewport: number): CropState {
++  return { zoom: AVATAR_ZOOM_MIN, pan: centrePan(imageWidth, imageHeight, viewport, AVATAR_ZOOM_MIN) };
++}
++
++/**
++ * Zoom around a fixed viewport point (wheel cursor or pinch midpoint) so the
++ * pixel under the pointer stays put, then re-clamp so the crop stays inside.
++ */
++export function zoomAround(state: CropState, nextZoom: number, focus: Point, imageWidth: number, imageHeight: number, viewport: number): CropState {
++  const box = Math.max(1, finite(viewport, 1));
++  const from = clampZoom(state.zoom);
++  const to = clampZoom(nextZoom);
++  const ratio = scaleFor(imageWidth, imageHeight, box, to) / scaleFor(imageWidth, imageHeight, box, from);
++  const anchorX = clamp(finite(focus?.x, box / 2), 0, box);
++  const anchorY = clamp(finite(focus?.y, box / 2), 0, box);
++  const pan = {
++    x: anchorX - (anchorX - finite(state.pan?.x, 0)) * ratio,
++    y: anchorY - (anchorY - finite(state.pan?.y, 0)) * ratio,
++  };
++  return { zoom: to, pan: clampPan(pan, imageWidth, imageHeight, box, to) };
++}
++
++/** Moves the picture by a viewport-space delta, clamped to the image. */
++export function panBy(state: CropState, delta: Point, imageWidth: number, imageHeight: number, viewport: number): CropState {
++  const zoom = clampZoom(state.zoom);
++  return {
++    zoom,
++    pan: clampPan({ x: finite(state.pan?.x, 0) + finite(delta?.x, 0), y: finite(state.pan?.y, 0) + finite(delta?.y, 0) }, imageWidth, imageHeight, viewport, zoom),
++  };
++}
++
++/**
++ * The visible square, in source pixels. Clamped defensively so rounding can
++ * never ask a canvas for pixels outside the bitmap (Safari throws on that).
++ */
++export function cropRect(state: CropState, imageWidth: number, imageHeight: number, viewport: number): CropRect {
++  const box = Math.max(1, finite(viewport, 1));
++  const width = Math.max(1, finite(imageWidth, 1));
++  const height = Math.max(1, finite(imageHeight, 1));
++  const zoom = clampZoom(state.zoom);
++  const scale = scaleFor(width, height, box, zoom);
++  const pan = clampPan(state.pan, width, height, box, zoom);
++  const size = Math.min(box / scale, width, height);
++  return {
++    sx: clamp(-pan.x / scale, 0, Math.max(0, width - size)),
++    sy: clamp(-pan.y / scale, 0, Math.max(0, height - size)),
++    size,
++  };
++}
++
++/**
++ * Stored edge for a crop of `cropPixels` source pixels: never larger than the
++ * crop (no upscaling) and never larger than 512, but never below 128 either,
++ * so a postage-stamp source still produces a usable avatar.
++ */
++export function outputSize(cropPixels: number, cap = AVATAR_TARGET) {
++  const ceiling = Math.max(AVATAR_MIN, Math.round(clamp(cap, AVATAR_MIN, AVATAR_TARGET)));
++  return clamp(Math.round(finite(cropPixels, AVATAR_MIN)), AVATAR_MIN, ceiling);
++}
++
++/**
++ * Halving ladder from a source edge down to the target edge. Repeated 2:1
++ * reductions keep detail that a single huge-to-small draw would alias away;
++ * the last entry is always the exact target.
++ */
++export function halvingSteps(from: number, to: number): number[] {
++  const target = Math.max(1, Math.round(finite(to, 1)));
++  let current = Math.max(1, Math.round(finite(from, target)));
++  const steps: number[] = [];
++  // Rounding up keeps every step at *most* a 2:1 reduction, which is the whole
++  // point of the ladder. 64 is far beyond any real image; it guards NaN loops.
++  while (Math.ceil(current / 2) > target && steps.length < 64) {
++    current = Math.ceil(current / 2);
++    steps.push(current);
++  }
++  steps.push(target);
++  return steps;
++}
++
++/** 0.9, 0.85 … 0.5. */
++export function qualitySteps(): number[] {
++  const steps: number[] = [];
++  for (let quality = AVATAR_QUALITY_START; quality >= AVATAR_QUALITY_FLOOR - 1e-9; quality -= AVATAR_QUALITY_STEP) {
++    steps.push(Math.round(quality * 100) / 100);
++  }
++  return steps;
++}
++
++/** Edges to try, largest first: the target, then the 384/256 fallbacks. */
++export function sizeLadder(target: number): number[] {
++  const first = outputSize(target);
++  return [first, ...AVATAR_SIZE_LADDER.filter(size => size < first)];
++}
++
++export type EncodeAttempt<T> = { result: T; size: number };
++
++/**
++ * The compression search itself, independent of any encoder.
++ *
++ * At each edge on the size ladder it walks the quality ladder and returns the
++ * first attempt inside `budget`; if even 256px at the floor quality is too
++ * big, the smallest attempt seen wins rather than failing the upload. Keeping
++ * this separate from the canvas keeps it unit-testable.
++ */
++export async function compressToBudget<T>(
++  attempt: (edge: number, quality: number) => Promise<EncodeAttempt<T> | null>,
++  target: number,
++  budget = AVATAR_CLIENT_MAX_BYTES,
++): Promise<EncodeAttempt<T>> {
++  let smallest: EncodeAttempt<T> | null = null;
++  for (const edge of sizeLadder(target)) {
++    for (const quality of qualitySteps()) {
++      const made = await attempt(edge, quality);
++      if (!made) continue;
++      if (!smallest || made.size < smallest.size) smallest = made;
++      if (made.size <= budget) return made;
++    }
++  }
++  if (!smallest) throw new Error('This photo could not be prepared.');
++  return smallest;
++}
++
++/** True when stored bytes already satisfy the avatar contract. */
++export function avatarBytesReady(mime: string, size: number) {
++  return mime === 'image/webp' && Number.isFinite(size) && size > 0 && size <= AVATAR_MAX_BYTES;
++}
++
++/** True when an asset row may be attached to a profile as its photo. */
++export function avatarAssetReady(asset: { mime?: unknown; size?: unknown; purpose?: unknown } | null | undefined) {
++  if (!asset) return false;
++  const mime = String(asset.mime || '');
++  const size = Number(asset.size || 0);
++  if (!mime.startsWith('image/') || !(size > 0) || size > AVATAR_MAX_BYTES) return false;
++  return asset.purpose === 'avatar' || avatarBytesReady(mime, size);
++}
+diff --git a/lib/media-policy.ts b/lib/media-policy.ts
+index 1ab37f0..c7c7390 100644
+--- a/lib/media-policy.ts
++++ b/lib/media-policy.ts
+@@ -16,7 +16,10 @@ export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[]
+  for(const url of urls){if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('Use registered media.');
+   const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1 AND owner_id=ANY($2::text[])',[url.slice(11),owners]);
+   if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('One of your uploads is unavailable. Please upload it again.');
+-  checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);
++  // Profile photos are re-encoded to WebP by the server, never by the browser,
++  // so the media-type gate applies to the type the member actually chose.
++  const gatedMime=asset.purpose==='avatar'?String(asset.source_mime||asset.mime):asset.mime;
++  checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),gatedMime);
+   if(asset.source_mime&&!config.allowedTypes.includes(asset.source_mime))throw new AdminError('This media type is currently disabled.');
+   if(asset.mime.startsWith('video/')&&config.videoMaxSeconds&&asset.duration!=null&&Number(asset.duration)>config.videoMaxSeconds)throw new AdminError('The video exceeds the current duration limit.');
+   assets.push(asset);
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index 2c2897b..a619156 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -201,3 +201,12 @@ export const adminSystemUpgradeStatements=[
+  'CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC,id)',
+  'CREATE INDEX IF NOT EXISTS idx_session_updated ON session("updatedAt" DESC,"userId")',
+ ];
++
++// Version 13: profile-photo pipeline. Records which uploads are avatars so the
++// server can enforce the 512px WebP contract and serve avatar bytes with
++// immutable cache headers. Purely additive; existing rows default to 'media'.
++export const avatarUpgradeStatements=[
++ "ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'media'",
++ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'media'",
++ "CREATE INDEX IF NOT EXISTS idx_assets_avatar ON assets(key) WHERE purpose='avatar'",
++];
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index e4a8de3..627f81a 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -2,7 +2,7 @@ import path from 'node:path';
+ import { Pool, types, type QueryResultRow } from 'pg';
+ import { serializedPool } from './serialized-pool';
+ import { postgresQuery } from './sql';
+-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements, adminSystemUpgradeStatements } from './postgres-schema';
++import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements, adminSystemUpgradeStatements, avatarUpgradeStatements } from './postgres-schema';
+ 
+ types.setTypeParser(20, value => Number(value));
+ types.setTypeParser(1700, value => Number(value));
+@@ -29,6 +29,7 @@ export const DATABASE_MIGRATIONS = [
+   { version: 10, statements: adminHardeningUpgradeStatements },
+   { version: 11, statements: adminCommsUpgradeStatements },
+   { version: 12, statements: adminSystemUpgradeStatements },
++  { version: 13, statements: avatarUpgradeStatements },
+ ];
+ 
+ let pool: Pool | undefined;
+diff --git a/lib/uploads.ts b/lib/uploads.ts
+index e3bdf0e..47acf66 100644
+--- a/lib/uploads.ts
++++ b/lib/uploads.ts
+@@ -7,12 +7,23 @@ import {AdminError} from './admin/validation';
+ import {checkUploadInput,readMediaConfig,MEDIA_LOCK} from './media-policy';
+ import {MIB} from './media-config';
+ import {processMedia,readBounded,type ProcessedMedia} from './media-processing';
++import {processAvatarUpload} from './avatar-image';
++import {AVATAR_INPUT_TYPES,AVATAR_SOURCE_MAX_BYTES,type AvatarPurpose} from './avatar';
+ import {promises as fs} from 'node:fs';
+ export const uploadKeyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+ const HOUR=3600000,LEASE=5*60000;
++/** Only the browser's declared intent; every avatar rule is re-checked on the bytes. */
++export function uploadPurpose(value:unknown):AvatarPurpose{return value==='avatar'?'avatar':'media';}
+ export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload:string|null){
+  if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload name.');
+- let input:{size:number;type:string};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
++ let input:{size:number;type:string;purpose?:unknown};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
++ const purpose=uploadPurpose(input.purpose);
++ // Avatars keep the shared media gate and add their own: images only, and a
++ // hard ceiling on the pre-crop bytes the safety net has to re-encode.
++ if(purpose==='avatar'){
++  if(!(AVATAR_INPUT_TYPES as readonly string[]).includes(input.type))throw new AdminError('Choose a JPEG, PNG, WebP or GIF photo.');
++  if(!Number.isSafeInteger(input.size)||input.size<1||input.size>AVATAR_SOURCE_MAX_BYTES)throw new AdminError('That profile photo is too large. Choose a smaller photo.');
++ }
+  return transaction(pool,async db=>{
+   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
+   // Serialize quota reservations with settings changes and media attach/quarantine.
+@@ -20,13 +31,13 @@ export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload
+   const config=await readMediaConfig(db);checkUploadInput(config,input.size,input.type);
+   const now=Date.now();
+   const {rows:[existing]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);
+-  if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
++  if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||(existing.purpose||'media')!==purpose||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
+   // Active reservations prevent parallel requests from oversubscribing quota.
+   // Completed transfers are charged at completion, including quarantined bytes.
+   const {rows:[usage]}=await db.query(`SELECT COALESCE(SUM(expected_size),0) total FROM upload_claims WHERE owner_id=$1 AND key<>$2 AND ((completed=true AND COALESCE(completed_at,created_at)>$3) OR (completed=false AND (created_at>$4 OR processing_at>$5)))`,[owner,key,now-86400000,now-HOUR,now-LEASE]);
+   if(Number(usage.total)+input.size>config.dailyQuotaMb*MIB)throw new AdminError('You have reached today’s upload limit. Try again tomorrow.',429);
+-  if(!existing)await db.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,$2,$3,$4,$5)',[key,owner,input.size,input.type,now]);
+-  return input;
++  if(!existing)await db.query('INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at,purpose) VALUES($1,$2,$3,$4,$5,$6)',[key,owner,input.size,input.type,now,purpose]);
++  return {size:input.size,type:input.type,purpose};
+  });
+ }
+ export async function reserveUpload(key:string,owner:string,payload:string|null){await requireUpload(owner);return reserveClaim(await getPool(),key,owner,payload);}
+@@ -75,7 +86,10 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
+   if(source.size!==Number(start.claim.expected_size))throw new AdminError('The upload size did not match. Try again.');
+   const bytes=await store.read(source.url,start.config.maxFileMb*MIB);
+   if(bytes.length!==source.size)throw new AdminError('The upload size did not match. Try again.');
+-  const media=await processMedia(bytes,start.claim.mime,start.config);
++  const purpose=uploadPurpose(start.claim.purpose);
++  // Profile photos never reach the generic image path: they are squared,
++  // resized and re-encoded to WebP inside the 200 KB avatar budget.
++  const media=purpose==='avatar'?await processAvatarUpload(bytes,start.claim.mime,start.config):await processMedia(bytes,start.claim.mime,start.config);
+   const output=store===blobUploadStore&&(media.mime.startsWith('video/'))?source.url:await store.write(key,media,lease);
+   if(output!==source.url)produced={url:output,size:media.bytes.length};
+   await access();
+@@ -84,7 +98,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
+    await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
+    const current=await readMediaConfig(db);if(JSON.stringify(current)!==JSON.stringify(start.config))throw new AdminError('Upload rules changed. Please start a new upload.',409);
+    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)throw new AdminError('Upload processing expired. Please retry.',409);
+-   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0]);
++   await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes,purpose) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0,purpose]);
+    await db.query('UPDATE upload_claims SET completed=true,completed_at=$1,processing_at=NULL WHERE key=$2',[Date.now(),key]);
+   });
+   if(source.url!==output){try{await store.remove(source.url);await pool.query('UPDATE assets SET source_blob_url=NULL,source_retained_bytes=0 WHERE key=$1',[key]);}catch{/* Retained source bytes remain in the inventory until cleanup. */}}
+@@ -99,7 +113,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
+   await transaction(pool,async db=>{
+    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)return;
+    const invalidTransfer=error instanceof AdminError&&error.status!==503;
+-   if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
++   if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes,purpose) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9,$10) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0,uploadPurpose(start.claim.purpose)]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
+    await db.query('UPDATE upload_claims SET processing_at=NULL WHERE key=$1',[key]);
+   });throw error;
+  }
+diff --git a/scripts/recompress-avatars.mts b/scripts/recompress-avatars.mts
+new file mode 100644
+index 0000000..8a02780
+--- /dev/null
++++ b/scripts/recompress-avatars.mts
+@@ -0,0 +1,117 @@
++/**
++ * Optional one-off: recompress stored profile photos that are over the 200 KB
++ * avatar budget (or were never squared), without touching a single existing
++ * byte.
++ *
++ * Dry run is the default. Nothing is ever deleted: each oversized avatar gets
++ * a *new* asset key holding the 512px WebP, and only `profiles.avatar` is
++ * repointed at it. The original asset row and its stored bytes stay exactly
++ * where they are, so the old URL keeps working and an administrator can review
++ * or trash it later from Admin -> Media.
++ *
++ *   npx tsx scripts/recompress-avatars.mts              # dry run, changes nothing
++ *   npx tsx scripts/recompress-avatars.mts --apply      # write the new avatars
++ *   npx tsx scripts/recompress-avatars.mts --apply --limit 50
++ *
++ * Requires DATABASE_URL/POSTGRES_URL (and BLOB_READ_WRITE_TOKEN unless the
++ * local preview database is in use).
++ */
++import { put } from '@vercel/blob';
++import { promises as fs } from 'node:fs';
++import { getPool, localDevDatabase, ensureSchema } from '../lib/postgres';
++import { localAssetPath } from '../lib/media-storage';
++import { processAvatarImage } from '../lib/avatar-image';
++import { AVATAR_MAX_BYTES } from '../lib/avatar';
++
++const apply = process.argv.includes('--apply');
++const limitFlag = process.argv.indexOf('--limit');
++const limit = limitFlag > -1 ? Math.max(1, Math.min(5000, Number(process.argv[limitFlag + 1]) || 0)) || 500 : 500;
++
++type Row = {
++  key: string; owner_id: string | null; mime: string; size: number;
++  blob_url: string; width: number | null; height: number | null; purpose: string;
++  profile_id: string; username: string;
++};
++
++const kb = (bytes: number) => (bytes / 1024).toFixed(1) + ' KB';
++
++async function readBytes(row: Row): Promise<Buffer> {
++  if (localDevDatabase()) return fs.readFile(localAssetPath(row.key, row.blob_url));
++  const url = new URL(row.blob_url);
++  if (url.protocol !== 'https:' || !url.hostname.endsWith('.blob.vercel-storage.com')) throw new Error('Untrusted media host: ' + url.hostname);
++  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
++  if (!response.ok) throw new Error('Could not download ' + row.key + ' (HTTP ' + response.status + ')');
++  return Buffer.from(await response.arrayBuffer());
++}
++
++async function writeBytes(key: string, bytes: Buffer): Promise<string> {
++  if (localDevDatabase()) {
++    const url = 'local-processed:' + key + '-' + Date.now();
++    await fs.mkdir('.local/uploads', { recursive: true });
++    await fs.writeFile(localAssetPath(key, url), bytes, { flag: 'wx' });
++    return url;
++  }
++  return (await put('processed/' + key, bytes, { access: 'public', contentType: 'image/webp', addRandomSuffix: false, allowOverwrite: false })).url;
++}
++
++await ensureSchema();
++const pool = await getPool();
++
++// Only photos that are actually attached to a profile, and only the ones that
++// miss the contract: too large, not WebP, or never run through the pipeline.
++const { rows } = await pool.query(
++  `SELECT a.key,a.owner_id,a.mime,a.size,a.blob_url,a.width,a.height,a.purpose,p.id profile_id,p.username
++     FROM profiles p
++     JOIN assets a ON '/api/media/'||a.key = p.avatar
++    WHERE p.deleted_at IS NULL AND a.status='ready' AND a.verified=true
++      AND a.mime LIKE 'image/%'
++      AND (a.size > $1 OR a.mime <> 'image/webp' OR a.purpose <> 'avatar')
++    ORDER BY a.size DESC
++    LIMIT $2`,
++  [AVATAR_MAX_BYTES, limit],
++);
++
++const candidates = rows as unknown as Row[];
++console.log((apply ? 'APPLY' : 'DRY RUN') + ': ' + candidates.length + ' profile photo(s) over the ' + kb(AVATAR_MAX_BYTES) + ' budget or not stored as WebP.');
++if (!candidates.length) process.exit(0);
++
++let converted = 0, savedBytes = 0, failures = 0;
++for (const row of candidates) {
++  const label = '@' + row.username + '  ' + row.key + '  ' + row.mime + '  ' + kb(Number(row.size));
++  try {
++    const bytes = await readBytes(row);
++    const avatar = await processAvatarImage(bytes);
++    savedBytes += Math.max(0, bytes.length - avatar.bytes.length);
++    if (!apply) {
++      console.log('  would rewrite  ' + label + '  ->  image/webp ' + kb(avatar.bytes.length) + ' (' + avatar.width + 'x' + avatar.height + ', q' + (avatar.quality ?? 'source') + ')');
++      converted += 1;
++      continue;
++    }
++    // A brand-new key: the bytes behind an avatar URL must never change,
++    // because avatar URLs are served with immutable cache headers.
++    const key = crypto.randomUUID();
++    const url = await writeBytes(key, avatar.bytes);
++    const client = await pool.connect();
++    try {
++      await client.query('BEGIN');
++      await client.query(
++        `INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,source_size,source_mime,purpose)
++         VALUES($1,$2,$2,'image/webp',$3,$4,$5,$6,$7,$8,$9,'avatar')`,
++        [key, row.owner_id, avatar.bytes.length, Date.now(), url, avatar.width, avatar.height, Number(row.size), row.mime],
++      );
++      // Guarded update: if the member changed their photo while this ran, leave it alone.
++      const updated = await client.query('UPDATE profiles SET avatar=$1 WHERE id=$2 AND avatar=$3', ['/api/media/' + key, row.profile_id, '/api/media/' + row.key]);
++      if (!updated.rowCount) throw new Error('profile photo changed during the run');
++      await client.query('COMMIT');
++    } catch (error) { await client.query('ROLLBACK'); throw error; }
++    finally { client.release(); }
++    converted += 1;
++    console.log('  rewrote        ' + label + '  ->  ' + key + '  image/webp ' + kb(avatar.bytes.length) + ' (' + avatar.width + 'x' + avatar.height + ')');
++  } catch (error) {
++    failures += 1;
++    console.warn('  skipped        ' + label + '  ' + (error instanceof Error ? error.message : String(error)));
++  }
++}
++
++console.log((apply ? 'Rewrote ' : 'Would rewrite ') + converted + ' avatar(s), about ' + kb(savedBytes) + ' smaller in total. ' + failures + ' skipped. No original bytes were deleted.');
++if (!apply) console.log('Re-run with --apply to write the new avatars.');
+diff --git a/tests/admin-system.test.ts b/tests/admin-system.test.ts
+index 6fcbf29..8cb8131 100644
+--- a/tests/admin-system.test.ts
++++ b/tests/admin-system.test.ts
+@@ -32,13 +32,13 @@ const DAY=86_400_000;
+ test('migration 12 is additive, idempotent, registered after Phase 10 and preserves the explicit demo-seed switch', async () => {
+   const { pg, pool } = await fixture();
+   try {
+-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,12);
+-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
++    const phase10=DATABASE_MIGRATIONS.find(item=>item.version===12);assert.ok(phase10);
++    assert.equal(phase10.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
+     await pool.query('UPDATE admin_demo_seed_control SET enabled=false WHERE id=1');
+-    for (const sql of DATABASE_MIGRATIONS.at(-1)!.statements) await pool.query(sql);
++    for (const sql of phase10.statements) await pool.query(sql);
+     assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
+     const overview=await systemOverview(pool);
+-    assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,12);
++    assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,DATABASE_MIGRATIONS.at(-1)?.version);
+   } finally { await pg.close(); }
+ });
+ 
+diff --git a/tests/admin.test.ts b/tests/admin.test.ts
+index 60f5480..0d1b7ae 100644
+--- a/tests/admin.test.ts
++++ b/tests/admin.test.ts
+@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
+ const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
+ async function fixture() {
+   const db = new PGlite();
+-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
++  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements,...schema.avatarUpgradeStatements]) await db.exec(sql);
+   const pool = serializedPool({ async query(sql, values) {
+     const result = await db.query(sql, values);
+     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
+@@ -26,12 +26,12 @@ async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = tru
+   await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
+ }
+ 
+-test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
++test('migrations 5–13 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
+   const db = new PGlite();
+   try {
+     for (const sql of old) await db.exec(sql);
+     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
+-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements,...schema.avatarUpgradeStatements]) await db.exec(sql);
+     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
+     assert.deepEqual(existing, { role: 'user', banned: false });
+     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
+@@ -40,8 +40,8 @@ test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; p
+       const columns = new Set(rows.map(row => row.column_name));
+       for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
+     }
+-    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
+-    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
++    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12,13]);
++    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements],[13,schema.avatarUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+   } finally { await db.close(); }
+ });
+ 
+diff --git a/tests/avatar.test.ts b/tests/avatar.test.ts
+new file mode 100644
+index 0000000..37e3c95
+--- /dev/null
++++ b/tests/avatar.test.ts
+@@ -0,0 +1,486 @@
++/**
++ * Avatar crop + compression suite.
++ *
++ * Covers the three layers the feature is built from: the pure crop/ladder
++ * maths shared by the browser and the server, the sharp safety net that
++ * re-encodes whatever the browser sends, and the display contract that keeps
++ * every rendered avatar a stable circle.
++ */
++import assert from 'node:assert/strict';
++import { test, before, after } from 'node:test';
++import { mkdtempSync, rmSync, readFileSync, promises as fs } from 'node:fs';
++import { tmpdir } from 'node:os';
++import path from 'node:path';
++import React from 'react';
++import { renderToStaticMarkup } from 'react-dom/server';
++import sharp from 'sharp';
++
++// Isolated embedded database for the pipeline and route checks in this file.
++delete process.env.DATABASE_URL;
++delete process.env.POSTGRES_URL;
++const dataDir = mkdtempSync(path.join(tmpdir(), 'functiongram-avatar-'));
++process.env.FUNCTIONGRAM_PGLITE_DIR = dataDir;
++
++import {
++  AVATAR_CACHE_CONTROL, AVATAR_CLIENT_MAX_BYTES, AVATAR_MAX_BYTES, AVATAR_MIN, AVATAR_SOURCE_MAX_BYTES, AVATAR_TARGET,
++  AVATAR_ZOOM_MAX, AVATAR_ZOOM_MIN, avatarAssetReady, centrePan, clampPan, clampZoom, compressToBudget, coverScale,
++  cropRect, halvingSteps, initialCrop, outputSize, panBy, qualitySteps, sizeLadder, zoomAround, type CropState,
++} from '../lib/avatar';
++import { avatarSourceType, processAvatarImage, processAvatarUpload } from '../lib/avatar-image';
++import { DEFAULT_MEDIA } from '../lib/media-config';
++import { avatarUpgradeStatements } from '../lib/postgres-schema';
++import { DATABASE_MIGRATIONS, ensureSchema, getPool } from '../lib/postgres';
++import { reserveClaim, finishWithStore, type UploadStore } from '../lib/uploads';
++import { checkAssets } from '../lib/media-policy';
++import { Avatar } from '../components/social/common';
++import { GET as mediaRoute } from '../app/api/media/[key]/route';
++
++/* --------------------------------- fixtures -------------------------------- */
++
++/** Deterministic pseudo-random noise, so file sizes are stable across runs. */
++function grain(seed: number) {
++  let value = seed >>> 0;
++  return () => { value = (value * 1103515245 + 12345) >>> 0; return value >>> 24; };
++}
++
++/** A synthetic portrait: skin-toned oval, eyes, mouth, fine texture and grain. */
++function facePixels(width: number, height: number) {
++  const data = Buffer.alloc(width * height * 3);
++  const next = grain(7);
++  const cx = width / 2, cy = height / 2, rx = width * 0.28, ry = height * 0.36;
++  const eye = (x: number, y: number, ex: number) => ((x - ex) / (rx * 0.16)) ** 2 + ((y - (cy - ry * 0.22)) / (ry * 0.09)) ** 2 <= 1;
++  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
++    const n = next() / 255 - 0.5;
++    const i = (y * width + x) * 3;
++    let r = 210, g = 170, b = 150;
++    if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 > 1) { r = 60 + 40 * Math.sin(x / 50); g = 80; b = 110; }
++    else if (eye(x, y, cx - rx * 0.38) || eye(x, y, cx + rx * 0.38)) { r = 40; g = 40; b = 45; }
++    else if (((x - cx) / (rx * 0.42)) ** 2 + ((y - (cy + ry * 0.42)) / (ry * 0.08)) ** 2 <= 1) { r = 150; g = 70; b = 80; }
++    else { r += 14 * Math.sin(y / 7); g += 12 * Math.cos(x / 9); b += 10 * Math.sin((x + y) / 11); }
++    data[i] = Math.max(0, Math.min(255, Math.round(r + 10 * n)));
++    data[i + 1] = Math.max(0, Math.min(255, Math.round(g + 10 * n)));
++    data[i + 2] = Math.max(0, Math.min(255, Math.round(b + 10 * n)));
++  }
++  return data;
++}
++
++const raw = (data: Buffer, width: number, height: number, channels: 3 | 4 = 3) => sharp(data, { raw: { width, height, channels } });
++
++let face12mp: Buffer;        // 12 MP JPEG portrait
++let huge: Buffer;            // 8 MB+ JPEG (incompressible grain)
++let alphaPng: Buffer;        // PNG with a real alpha channel
++let tiny: Buffer;            // 100 x 100 source
++let animated: Buffer;        // two-frame animated GIF
++let gradient: Buffer;        // smooth ramp, for banding
++let smallWebp: Buffer;       // already inside the contract
++
++before(async () => {
++  face12mp = await raw(facePixels(4000, 3000), 4000, 3000).jpeg({ quality: 98, chromaSubsampling: '4:4:4' }).toBuffer();
++  const noise = Buffer.alloc(4000 * 3000 * 3);
++  const next = grain(4242);
++  for (let i = 0; i < noise.length; i += 1) noise[i] = next();
++  huge = await raw(noise, 4000, 3000).jpeg({ quality: 100, chromaSubsampling: '4:4:4' }).toBuffer();
++  alphaPng = await sharp({ create: { width: 900, height: 1400, channels: 4, background: { r: 240, g: 90, b: 120, alpha: 0.4 } } }).png().toBuffer();
++  tiny = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#3366aa' } }).png().toBuffer();
++  animated = await sharp([
++    await sharp({ create: { width: 200, height: 200, channels: 3, background: '#ff0000' } }).png().toBuffer(),
++    await sharp({ create: { width: 200, height: 200, channels: 3, background: '#0000ff' } }).png().toBuffer(),
++  ], { join: { animated: true } }).gif().toBuffer();
++  const ramp = Buffer.alloc(1024 * 1024 * 3);
++  for (let y = 0; y < 1024; y += 1) for (let x = 0; x < 1024; x += 1) {
++    const i = (y * 1024 + x) * 3, value = Math.round((x / 1023) * 255);
++    ramp[i] = value; ramp[i + 1] = value; ramp[i + 2] = value;
++  }
++  gradient = await raw(ramp, 1024, 1024).png().toBuffer();
++  smallWebp = await sharp({ create: { width: AVATAR_TARGET, height: AVATAR_TARGET, channels: 3, background: '#123456' } }).webp({ quality: 80 }).toBuffer();
++});
++
++after(() => { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ } });
++
++/* -------------------------------- crop maths ------------------------------- */
++
++test('the crop starts fitted and centred, and zoom is limited to fit..4x', () => {
++  const start = initialCrop(4000, 3000, 300);
++  assert.equal(start.zoom, AVATAR_ZOOM_MIN);
++  // Cover scale on a landscape photo is driven by the short edge.
++  assert.equal(coverScale(4000, 3000, 300), 0.1);
++  // Centred: equal slack on the left and the right of the 300px window.
++  assert.equal(Math.round(start.pan.x), -50);
++  assert.equal(Math.round(start.pan.y), 0);
++  // At fit, the crop is the largest centred square of the source.
++  const fitted = cropRect(start, 4000, 3000, 300);
++  assert.equal(Math.round(fitted.size), 3000);
++  assert.equal(Math.round(fitted.sx), 500);
++  assert.equal(Math.round(fitted.sy), 0);
++  assert.equal(clampZoom(0.2), AVATAR_ZOOM_MIN);
++  assert.equal(clampZoom(99), AVATAR_ZOOM_MAX);
++  assert.equal(clampZoom(Number.NaN), AVATAR_ZOOM_MIN);
++  assert.equal(AVATAR_ZOOM_MAX, 4);
++});
++
++test('the crop can never leave the image, for any zoom, pan, drag or image shape', () => {
++  const shapes: [number, number][] = [[4000, 3000], [3000, 4000], [512, 512], [100, 640], [1, 900], [4096, 17]];
++  let seed = 991;
++  const random = () => { seed = (seed * 1103515245 + 12345) >>> 0; return (seed >>> 8) / 0xffffff; };
++  for (const [width, height] of shapes) for (const viewport of [120, 288, 421]) {
++    let state: CropState = initialCrop(width, height, viewport);
++    for (let step = 0; step < 200; step += 1) {
++      // Alternate violent drags and wheel/pinch zooms, including illegal values.
++      state = panBy(state, { x: (random() - 0.5) * 6000, y: (random() - 0.5) * 6000 }, width, height, viewport);
++      state = zoomAround(state, random() * 8 - 2, { x: random() * viewport, y: random() * viewport }, width, height, viewport);
++      assert.ok(state.zoom >= AVATAR_ZOOM_MIN && state.zoom <= AVATAR_ZOOM_MAX, 'zoom stays inside fit..4x');
++      const rect = cropRect(state, width, height, viewport);
++      assert.ok(rect.sx >= -1e-6 && rect.sy >= -1e-6, 'crop never starts outside the image');
++      assert.ok(rect.sx + rect.size <= width + 1e-6, 'crop never runs past the right edge');
++      assert.ok(rect.sy + rect.size <= height + 1e-6, 'crop never runs past the bottom edge');
++      assert.ok(rect.size > 0 && rect.size <= Math.min(width, height) + 1e-6, 'crop is a square inside the image');
++    }
++  }
++});
++
++test('zooming keeps the point under the cursor, and dragging moves the picture with it', () => {
++  const [width, height, viewport] = [1600, 1200, 300];
++  const start = initialCrop(width, height, viewport);
++  const focus = { x: 220, y: 90 };
++  const before = cropRect(start, width, height, viewport);
++  const sourceUnderCursorX = before.sx + (focus.x / viewport) * before.size;
++  const zoomed = zoomAround(start, 2.5, focus, width, height, viewport);
++  const after = cropRect(zoomed, width, height, viewport);
++  assert.ok(Math.abs((after.sx + (focus.x / viewport) * after.size) - sourceUnderCursorX) < 1, 'anchor pixel stays under the cursor');
++  assert.ok(Math.abs(after.size * 2.5 - before.size) < 1, 'zoom 2.5x shows 2.5x fewer source pixels');
++  // Arrow keys: moving the picture right shows a region further left.
++  const nudged = panBy(zoomed, { x: 24, y: 0 }, width, height, viewport);
++  assert.ok(cropRect(nudged, width, height, viewport).sx < after.sx);
++  // Fully zoomed out there is nothing to pan on the short axis.
++  const home = centrePan(width, height, viewport, AVATAR_ZOOM_MIN);
++  assert.equal(clampPan({ x: 9999, y: 9999 }, width, height, viewport, AVATAR_ZOOM_MIN).y, home.y);
++});
++
++test('output size is capped at 512, floored at 128 and never upscales in between', () => {
++  assert.equal(outputSize(4000), AVATAR_TARGET);
++  assert.equal(outputSize(512), AVATAR_TARGET);
++  assert.equal(outputSize(300), 300, 'a 300px crop is stored at 300px, not blown up to 512');
++  assert.equal(outputSize(128), AVATAR_MIN);
++  assert.equal(outputSize(100), AVATAR_MIN, 'a postage-stamp source still reaches the 128px floor');
++  assert.equal(outputSize(0), AVATAR_MIN);
++  assert.equal(outputSize(Number.NaN), AVATAR_MIN);
++  assert.deepEqual(sizeLadder(4000), [512, 384, 256]);
++  assert.deepEqual(sizeLadder(300), [300, 256]);
++  assert.deepEqual(sizeLadder(100), [128]);
++});
++
++test('downscaling halves repeatedly and the quality ladder steps 0.9 to 0.5 by 0.05', () => {
++  assert.deepEqual(halvingSteps(4000, 512), [2000, 1000, 512]);
++  assert.deepEqual(halvingSteps(3000, 512), [1500, 750, 512]);
++  assert.deepEqual(halvingSteps(512, 512), [512]);
++  assert.deepEqual(halvingSteps(700, 512), [512]);
++  assert.deepEqual(halvingSteps(100, 128), [128]);
++  for (const steps of [halvingSteps(4000, 512), halvingSteps(9000, 256)]) {
++    for (let i = 1; i < steps.length; i += 1) assert.ok(steps[i - 1] / steps[i] <= 2.0001, 'no step reduces by more than half');
++  }
++  assert.deepEqual(qualitySteps(), [0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5]);
++});
++
++test('the compression search drops quality first, then 384 and 256, and always answers', async () => {
++  const tried: [number, number][] = [];
++  // Only 256px at 0.5 fits: the search must exhaust the ladder in order.
++  const found = await compressToBudget(async (edge, quality) => {
++    tried.push([edge, quality]);
++    return { result: edge + ':' + quality, size: edge === 256 && quality <= 0.5 ? 1000 : 900000 };
++  }, 4000, AVATAR_CLIENT_MAX_BYTES);
++  assert.equal(found.result, '256:0.5');
++  assert.deepEqual(tried[0], [512, 0.9]);
++  assert.deepEqual(tried[9], [384, 0.9], 'the 512 ladder is exhausted before dropping to 384');
++  assert.equal(tried.length, 27);
++  // First fit wins with no further attempts.
++  const calls: number[] = [];
++  const quick = await compressToBudget(async (edge, quality) => { calls.push(quality); return { result: 'ok', size: 1024 }; }, 512);
++  assert.equal(quick.result, 'ok');
++  assert.deepEqual(calls, [0.9]);
++  // Nothing fits: the smallest attempt is returned rather than failing.
++  const fallback = await compressToBudget(async (edge, quality) => ({ result: edge + ':' + quality, size: 400000 + edge * 100 + Math.round(quality * 1000) }), 512);
++  assert.equal(fallback.result, '256:0.5', 'the smallest attempt seen is handed back');
++  assert.ok(fallback.size > AVATAR_CLIENT_MAX_BYTES);
++  // An encoder that never produces bytes is an error, not a silent empty file.
++  await assert.rejects(() => compressToBudget(async () => null, 512), /could not be prepared/);
++});
++
++test('the real encoder ladder lands under the client budget for a 12 MP photo', async () => {
++  // Stands in for canvas.toBlob: same ladder, same budget, real encoded bytes.
++  const attempts: number[] = [];
++  const crop = cropRect(initialCrop(4000, 3000, 300), 4000, 3000, 300);
++  const chosen = await compressToBudget(async (edge, quality) => {
++    const bytes = await sharp(face12mp)
++      .extract({ left: Math.round(crop.sx), top: Math.round(crop.sy), width: Math.round(crop.size), height: Math.round(crop.size) })
++      .resize(edge, edge).webp({ quality: Math.round(quality * 100) }).toBuffer();
++    attempts.push(bytes.length);
++    return { result: bytes, size: bytes.length };
++  }, outputSize(crop.size));
++  assert.ok(chosen.size <= AVATAR_CLIENT_MAX_BYTES, 'final size fits the 190 KB client budget');
++  const meta = await sharp(chosen.result).metadata();
++  assert.equal(meta.format, 'webp');
++  assert.equal(meta.width, AVATAR_TARGET);
++  assert.equal(meta.height, AVATAR_TARGET);
++  assert.ok(attempts.length >= 1);
++});
++
++/* ------------------------------ server safety net --------------------------- */
++
++test('an 8 MB+ 12 MP photo is stored as a 512px WebP well under 200 KB', async () => {
++  assert.ok(huge.length > 8 * 1024 * 1024, 'fixture really is over 8 MB: ' + huge.length);
++  const out = await processAvatarImage(huge);
++  assert.equal(out.mime, 'image/webp');
++  assert.equal(out.width, AVATAR_TARGET);
++  assert.equal(out.height, AVATAR_TARGET);
++  assert.ok(out.reencoded);
++  assert.ok(out.bytes.length <= AVATAR_MAX_BYTES, 'stored ' + out.bytes.length + ' bytes');
++  assert.equal((await sharp(out.bytes).metadata()).format, 'webp');
++});
++
++test('a 12 MP portrait keeps clean facial detail and drops no metadata bomb', async () => {
++  assert.ok(face12mp.length > 4 * 1024 * 1024);
++  const out = await processAvatarImage(face12mp);
++  assert.ok(out.bytes.length <= AVATAR_MAX_BYTES);
++  assert.equal(out.quality, 80, 'q80 is enough; the ladder never has to degrade a normal photo');
++  // Compare against a lossless 512px reference of the same centre crop: a
++  // blurred or over-compressed face would blow this error up.
++  const reference = await sharp(face12mp).rotate().resize(AVATAR_TARGET, AVATAR_TARGET, { fit: 'cover', position: 'centre' }).removeAlpha().raw().toBuffer();
++  const produced = await sharp(out.bytes).removeAlpha().raw().toBuffer();
++  assert.equal(produced.length, reference.length);
++  let total = 0;
++  for (let i = 0; i < reference.length; i += 1) total += Math.abs(reference[i] - produced[i]);
++  assert.ok(total / reference.length < 6, 'mean absolute error per channel stays low: ' + (total / reference.length).toFixed(2));
++  // Detail survives: the encoded image keeps most of the reference's edge energy.
++  const edges = async (bytes: Buffer) => {
++    const { data } = await sharp(bytes).greyscale().raw().toBuffer({ resolveWithObject: true });
++    let sum = 0;
++    for (let i = 1; i < data.length; i += 1) sum += Math.abs(data[i] - data[i - 1]);
++    return sum / data.length;
++  };
++  const [want, got] = [await edges(await sharp(reference, { raw: { width: AVATAR_TARGET, height: AVATAR_TARGET, channels: 3 } }).png().toBuffer()), await edges(out.bytes)];
++  assert.ok(got > want * 0.6, 'edge energy retained: ' + got.toFixed(2) + ' of ' + want.toFixed(2));
++});
++
++test('a smooth gradient survives without visible banding', async () => {
++  const out = await processAvatarImage(gradient);
++  const { data, info } = await sharp(out.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
++  const levels = new Set<number>();
++  const row = Math.floor(info.height / 2);
++  for (let x = 0; x < info.width; x += 1) levels.add(data[(row * info.width + x) * info.channels]);
++  assert.ok(levels.size > 100, 'a banded ramp would collapse to a handful of levels, saw ' + levels.size);
++  // No step in the ramp jumps far enough to read as a contour line.
++  let worst = 0;
++  for (let x = 1; x < info.width; x += 1) worst = Math.max(worst, Math.abs(data[(row * info.width + x) * info.channels] - data[(row * info.width + x - 1) * info.channels]));
++  assert.ok(worst <= 6, 'largest neighbouring step ' + worst);
++});
++
++test('PNG alpha, 100px sources and animated GIFs are all handled', async () => {
++  const alpha = await processAvatarImage(alphaPng);
++  assert.equal(alpha.width, AVATAR_TARGET);
++  assert.equal(alpha.height, AVATAR_TARGET);
++  assert.ok(alpha.bytes.length <= AVATAR_MAX_BYTES);
++  assert.equal((await sharp(alpha.bytes).metadata()).hasAlpha, true, 'transparency is preserved, not blackened');
++
++  const small = await processAvatarImage(tiny);
++  assert.equal(small.mime, 'image/webp');
++  assert.equal(small.width, 100, 'a 100px source is never enlarged by the server');
++  assert.equal(small.height, 100);
++
++  const frame = await processAvatarImage(animated);
++  const meta = await sharp(frame.bytes).metadata();
++  assert.ok(!meta.pages || meta.pages === 1, 'only the first frame is kept');
++  const pixels = await sharp(frame.bytes).removeAlpha().raw().toBuffer();
++  assert.ok(pixels[0] > 200 && pixels[1] < 40 && pixels[2] < 40, 'the stored frame is the red first frame, not the blue second one');
++});
++
++test('EXIF rotation is applied before cropping', async () => {
++  const flat = await sharp({ create: { width: 300, height: 300, channels: 3, background: '#00ff00' } })
++    .composite([{ input: await sharp({ create: { width: 150, height: 300, channels: 3, background: '#ff0000' } }).png().toBuffer(), left: 0, top: 0 }])
++    .jpeg({ quality: 95 }).toBuffer();
++  const rotated = await sharp(flat).withMetadata({ orientation: 6 }).jpeg({ quality: 95 }).toBuffer();
++  const sample = async (bytes: Buffer) => {
++    const { data, info } = await sharp((await processAvatarImage(bytes)).bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
++    const at = (x: number, y: number) => data[(y * info.width + x) * info.channels];
++    return { top: at(info.width >> 1, 6), bottom: at(info.width >> 1, info.height - 7), left: at(6, info.height >> 1) };
++  };
++  const upright = await sample(flat);
++  assert.ok(upright.left > 200, 'unrotated: red is on the left');
++  const turned = await sample(rotated);
++  assert.ok(turned.top > 200 && turned.bottom < 60, 'orientation 6 moves red to the top before the crop');
++});
++
++test('a small square WebP is stored untouched, and non-images are refused', async () => {
++  const passthrough = await processAvatarImage(smallWebp);
++  assert.equal(passthrough.reencoded, false);
++  assert.equal(passthrough.bytes.length, smallWebp.length, 'already-compliant bytes are not re-compressed');
++  assert.equal(passthrough.quality, null);
++  assert.equal(avatarSourceType(smallWebp), 'image/webp');
++  for (const bogus of [readFileSync('public/media/flowers.mp4'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), Buffer.alloc(64)]) {
++    await assert.rejects(processAvatarImage(bogus), /photo/i);
++  }
++  // A JPEG renamed as a PNG by the browser is rejected: bytes decide, not labels.
++  await assert.rejects(processAvatarUpload(face12mp, 'image/png', DEFAULT_MEDIA), /do not match/i);
++});
++
++test('the safety net keeps stepping quality down until an awkward photo fits', async () => {
++  // A 512px field of pure grain cannot reach 200 KB at q80; the ladder must work.
++  const next = grain(31337);
++  const speckle = Buffer.alloc(AVATAR_TARGET * AVATAR_TARGET * 3);
++  for (let i = 0; i < speckle.length; i += 1) speckle[i] = next();
++  const source = await raw(speckle, AVATAR_TARGET, AVATAR_TARGET).png().toBuffer();
++  const out = await processAvatarImage(source);
++  assert.ok(out.bytes.length <= AVATAR_MAX_BYTES, 'stored ' + out.bytes.length + ' bytes');
++  assert.ok((out.quality ?? 0) <= 80 && (out.quality ?? 0) >= 30);
++  assert.equal(out.mime, 'image/webp');
++});
++
++/* ------------------------------ upload pipeline ---------------------------- */
++
++test('migration 13 is additive, repeatable and registered after Phase 10', async () => {
++  await ensureSchema();
++  const pool = await getPool();
++  const migration = DATABASE_MIGRATIONS.at(-1);
++  assert.ok(migration);
++  assert.equal(migration.version, 13);
++  assert.equal(migration.statements, avatarUpgradeStatements);
++  // Rows that predate the column keep working and default to plain media.
++  await member('legacy');
++  const key = crypto.randomUUID();
++  await pool.query("INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status) VALUES($1,'legacy','legacy','image/jpeg',100,1,'local','ready')", [key]);
++  // The runner replays a version's statements whenever it is behind.
++  for (let pass = 0; pass < 2; pass += 1) for (const sql of migration.statements) await pool.query(sql);
++  const row = (await pool.query('SELECT mime,size,purpose FROM assets WHERE key=$1', [key])).rows[0];
++  assert.deepEqual(row, { mime: 'image/jpeg', size: 100, purpose: 'media' });
++  const claims = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='upload_claims' AND column_name='purpose'");
++  assert.equal(claims.rows.length, 1);
++});
++
++async function member(id: string) {
++  const pool = await getPool();
++  await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified") VALUES($1,$1,$2,\'user\',true) ON CONFLICT (id) DO NOTHING', [id, id + '@avatar.test']);
++  await pool.query("INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,'','',0,1) ON CONFLICT (id) DO NOTHING", [id]);
++}
++
++test('the avatar upload path re-encodes whatever the browser sends and records it', async () => {
++  await ensureSchema();
++  const pool = await getPool();
++  await member('cropper');
++  const key = crypto.randomUUID();
++  let stored: Buffer | undefined;
++  const store: UploadStore = {
++    async inspect() { return { url: 'source', size: face12mp.length }; },
++    async read() { return face12mp; },
++    async write(_key, media) { stored = media.bytes; return 'stored'; },
++    async remove() { },
++  };
++  // The browser claims a plain photo upload; the purpose flag is the only hint.
++  await reserveClaim(pool, key, 'cropper', JSON.stringify({ size: face12mp.length, type: 'image/jpeg', purpose: 'avatar' }));
++  const done = await finishWithStore(pool, key, 'cropper', store);
++  assert.equal(done.type, 'image/webp', 'avatars are always stored as WebP');
++  assert.equal(done.aspect, 1);
++  assert.ok(stored && stored.length <= AVATAR_MAX_BYTES, 'stored ' + stored?.length + ' bytes');
++  const asset = (await pool.query('SELECT * FROM assets WHERE key=$1', [key])).rows[0];
++  assert.equal(asset.purpose, 'avatar');
++  assert.equal(asset.mime, 'image/webp');
++  assert.equal(asset.width, AVATAR_TARGET);
++  assert.equal(asset.height, AVATAR_TARGET);
++  assert.equal(asset.source_mime, 'image/jpeg');
++  assert.ok(Number(asset.size) <= AVATAR_MAX_BYTES);
++  // The same key can still be attached even if WebP output were disallowed:
++  // the media-type gate looks at the type the member actually chose.
++  const restricted = { ...DEFAULT_MEDIA, allowedTypes: ['image/jpeg'], imageFormat: 'jpeg' as const };
++  const [checked] = await checkAssets(pool, ['/api/media/' + key], ['cropper'], restricted);
++  assert.equal(checked.key, key);
++});
++
++test('the avatar reservation refuses videos, oversize sources and changed intent', async () => {
++  await ensureSchema();
++  const pool = await getPool();
++  await member('guard');
++  await assert.rejects(reserveClaim(pool, crypto.randomUUID(), 'guard', JSON.stringify({ size: 1000, type: 'video/mp4', purpose: 'avatar' })), /photo/i);
++  await assert.rejects(reserveClaim(pool, crypto.randomUUID(), 'guard', JSON.stringify({ size: AVATAR_SOURCE_MAX_BYTES + 1, type: 'image/jpeg', purpose: 'avatar' })), /too large/i);
++  const key = crypto.randomUUID();
++  await reserveClaim(pool, key, 'guard', JSON.stringify({ size: 1000, type: 'image/jpeg', purpose: 'avatar' }));
++  await assert.rejects(reserveClaim(pool, key, 'guard', JSON.stringify({ size: 1000, type: 'image/jpeg' })), /start a new upload/i);
++  assert.equal((await pool.query('SELECT purpose FROM upload_claims WHERE key=$1', [key])).rows[0].purpose, 'avatar');
++  // A regular post upload is untouched by any of this.
++  const plain = crypto.randomUUID();
++  await reserveClaim(pool, plain, 'guard', JSON.stringify({ size: 1000, type: 'video/mp4' }));
++  assert.equal((await pool.query('SELECT purpose FROM upload_claims WHERE key=$1', [plain])).rows[0].purpose, 'media');
++});
++
++test('only avatar-shaped assets may become a profile photo', () => {
++  assert.equal(avatarAssetReady({ mime: 'image/webp', size: 40_000, purpose: 'avatar' }), true);
++  assert.equal(avatarAssetReady({ mime: 'image/webp', size: 40_000, purpose: 'media' }), true, 'bytes already inside the contract are enough');
++  assert.equal(avatarAssetReady({ mime: 'image/jpeg', size: 40_000, purpose: 'media' }), false, 'an arbitrary post photo is not an avatar');
++  assert.equal(avatarAssetReady({ mime: 'image/webp', size: AVATAR_MAX_BYTES + 1, purpose: 'avatar' }), false);
++  assert.equal(avatarAssetReady({ mime: 'video/mp4', size: 10, purpose: 'avatar' }), false);
++  assert.equal(avatarAssetReady(null), false);
++});
++
++test('avatar bytes are served with immutable cache headers; other media is not', async () => {
++  await ensureSchema();
++  const pool = await getPool();
++  await member('served');
++  const write = async (key: string, bytes: Buffer, mime: string, purpose: string) => {
++    await fs.mkdir('.local/uploads', { recursive: true });
++    await fs.writeFile('.local/uploads/' + key, bytes);
++    await pool.query("INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,purpose) VALUES($1,'served','served',$2,$3,$4,'local',$5)", [key, mime, bytes.length, Date.now(), purpose]);
++  };
++  const avatarKey = crypto.randomUUID(), photoKey = crypto.randomUUID();
++  const avatarBytes = (await processAvatarImage(tiny)).bytes;
++  await write(avatarKey, avatarBytes, 'image/webp', 'avatar');
++  await write(photoKey, avatarBytes, 'image/webp', 'media');
++  try {
++    const call = (key: string) => mediaRoute(new Request('http://localhost/api/media/' + key), { params: Promise.resolve({ key }) });
++    const served = await call(avatarKey);
++    assert.equal(served.status, 200);
++    assert.equal(served.headers.get('cache-control'), AVATAR_CACHE_CONTROL);
++    assert.equal(served.headers.get('content-type'), 'image/webp');
++    assert.equal((await served.arrayBuffer()).byteLength, avatarBytes.length);
++    assert.equal((await call(photoKey)).headers.get('cache-control'), 'private, no-store', 'post media keeps its private headers');
++  } finally {
++    await fs.rm('.local/uploads/' + avatarKey, { force: true });
++    await fs.rm('.local/uploads/' + photoKey, { force: true });
++  }
++});
++
++/* -------------------------------- display ---------------------------------- */
++
++test('every avatar renders a fixed, lazy, cover-fitted circle with no layout shift', () => {
++  const person = { id: 'a', username: 'ada', name: 'Ada', avatar: '/api/media/' + crypto.randomUUID() };
++  const html = renderToStaticMarkup(React.createElement(Avatar, { person, size: 40 }));
++  assert.match(html, /width="40"/, 'intrinsic width attribute is present');
++  assert.match(html, /height="40"/, 'intrinsic height attribute is present');
++  assert.match(html, /loading="lazy"/);
++  assert.match(html, /decoding="async"/);
++  assert.match(html, /class="avatar-photo"/);
++  assert.match(html, /width:40px/, 'the box is sized in CSS as well as in attributes');
++  assert.match(html, /height:40px/);
++
++  const eager = renderToStaticMarkup(React.createElement(Avatar, { person, size: 128, eager: true }));
++  assert.match(eager, /loading="eager"/, 'above-the-fold avatars opt out of lazy loading');
++  assert.match(eager, /fetchpriority="high"/i);
++
++  // No photo: the muted placeholder keeps the same reserved box.
++  const initials = renderToStaticMarkup(React.createElement(Avatar, { person: { ...person, avatar: '' }, size: 40 }));
++  assert.ok(!initials.includes('<img'));
++  assert.match(initials, /avatar-initial/);
++  assert.match(initials, /width:40px/);
++});
++
++test('avatar CSS pins the circle so huge legacy images cannot overflow or shift', () => {
++  const css = readFileSync(path.join(process.cwd(), 'app/globals.css'), 'utf8');
++  const rule = css.slice(css.indexOf('.avatar{'), css.indexOf('.avatar-initial{'));
++  for (const declaration of ['aspect-ratio:1/1', 'border-radius:50%', 'object-fit:cover', 'object-position:center', 'background:var(--muted)', 'overflow:hidden']) {
++    assert.ok(rule.includes(declaration), 'avatar rule declares ' + declaration);
++  }
++  assert.ok(css.includes('[data-slot=avatar-image]'), 'the shadcn avatar primitive gets the same contract');
++  // Crop dialog: themed with the shared tokens, 44px targets, mobile sheet.
++  assert.ok(css.includes('.avatar-crop-frame'), 'crop surface is styled');
++  assert.ok(/\.avatar-crop-actions button\{min-height:44px\}/.test(css), 'crop buttons meet the 44px touch target');
++  assert.ok(css.includes('var(--crop-scrim)') && css.includes('var(--crop-ring)'), 'the circle overlay uses theme tokens');
++  assert.ok(css.includes('--crop-scrim:rgba(0,0,0,.58)'), 'the scrim has a dark-theme value');
++  const admin = readFileSync(path.join(process.cwd(), 'app/rstmcadmin/admin-components.css'), 'utf8');
++  assert.ok(admin.includes('.admin-shell .admin-avatar img'), 'admin table avatars are clipped to their circle too');
++});
+diff --git a/tests/media.test.ts b/tests/media.test.ts
+index 805f6d0..0cdccb6 100644
+--- a/tests/media.test.ts
++++ b/tests/media.test.ts
+@@ -21,7 +21,7 @@ async function asset(owner='member',extra:{size?:number;source?:number;status?:s
+ const operation=(key:string,action:string)=>({key,action,confirmation:key,reason:'Test quarantine'});
+ let photo:Buffer;
+ before(async()=>{
+- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements])await db.exec(sql);
++ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.avatarUpgradeStatements])await db.exec(sql);
+  await user('admin','admin');await user('owner','owner');await user('member');
+  await db.query("INSERT INTO assets(key,owner_id,mime,size,created_at,blob_url) VALUES($1,'member','image/jpeg',100,1,'local')",[legacyKey]);
+  await db.query("INSERT INTO upload_claims(key,owner_id,expected_size,mime,created_at) VALUES($1,'member',100,'image/jpeg',1)",[legacyKey]);
+diff --git a/tests/moderation.test.ts b/tests/moderation.test.ts
+index 11485d2..b4cf021 100644
+--- a/tests/moderation.test.ts
++++ b/tests/moderation.test.ts
+@@ -23,7 +23,7 @@ const report=async(id:string,targetType:string,targetId:string,reason='spam')=>p
+ 
+  test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
+   await seed();
+-  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
++  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12,13]);
+   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
+   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
+   // Repeat only the additive version statements as the migration runner does.

@@ -23,7 +23,7 @@ const report=async(id:string,targetType:string,targetId:string,reason='spam')=>p
 
  test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
   await seed();
-  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
+  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12,13]);
   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
   // Repeat only the additive version statements as the migration runner does.

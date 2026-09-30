@@ -8,6 +8,7 @@ import { ImagePlus, Plus, X, Film, Camera, MapPin, ChevronLeft, ChevronRight, Up
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Modal, Avatar, IconButton, Busy, upload, request } from "./common";
+import { AvatarCropDialog } from "./avatar-crop";
 import type { MediaOption, Person, Post } from "@/lib/types";
 
 type Draft = { url: string; type: string; aspect: number | null };
@@ -342,17 +343,26 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
   const [avatar, setAvatar] = useState(me.avatar);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState<File | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const changeButton = useRef<HTMLButtonElement>(null);
 
-  const photo = async (file?: File) => {
-    if (!file) return;
+  // Cancelling or finishing the crop dialog hands focus back to the control
+  // that opened it, so keyboard and screen-reader users never lose their place.
+  const returnFocus = () => { requestAnimationFrame(() => changeButton.current?.focus()); };
+
+  // Nothing is uploaded until the crop is confirmed.
+  const choose = (file?: File) => { setError(""); if (file) setPending(file); };
+
+  const photo = async (file: File) => {
+    setPending(null);
     setBusy(true);
     try {
-      const result = await upload(file, t);
+      const result = await upload(file, t, "avatar");
       if (!result.type.startsWith("image/")) throw new Error(t("create.please_choose_a_photo"));
       setAvatar(result.url);
     } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); returnFocus(); }
   };
 
   const submit = async (event: FormEvent) => {
@@ -370,11 +380,12 @@ export function EditProfile({ me, onClose, onSaved }: { me: Person; onClose: () 
     <Modal open onClose={() => !busy && onClose()} title={t("create.edit_profile")}>
       <form onSubmit={submit} className="edit-form">
         <div className="edit-avatar">
-          <Avatar person={{ ...me, avatar }} size={76} />
-          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label={t("create.choose_profile_photo")} onChange={e => void photo(e.target.files?.[0])} />
-          <button type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>{t("create.change_photo")}</button>
+          <Avatar person={{ ...me, avatar }} size={76} eager />
+          <Feature name="uploads">          <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" aria-label={t("create.choose_profile_photo")} onChange={e => { choose(e.target.files?.[0]); e.target.value = ""; }} />
+          <button ref={changeButton} type="button" className="text-action" onClick={() => input.current?.click()} disabled={busy}>{busy ? <Busy size={15} /> : t("create.change_photo")}</button>
 </Feature>
         </div>
+        {pending && <AvatarCropDialog file={pending} onCancel={() => { setPending(null); returnFocus(); }} onCropped={file => void photo(file)} />}
         <label>{t("auth_form.name")}<input required maxLength={60} value={name} onChange={e => setName(e.target.value)} /></label>
         <label>{t("create.username")}<input required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_][a-zA-Z0-9_.]{2,29}" value={username} onChange={e => setUsername(e.target.value)} autoCapitalize="none" spellCheck={false} /></label>
         <label>{t("create.bio")}<textarea maxLength={150} rows={3} value={bio} onChange={e => setBio(e.target.value)} /><span className="form-hint">{bio.length}{t("create.150")}</span></label>

@@ -3,6 +3,13 @@ export const dynamic='force-dynamic';
 import { promises as fs } from 'node:fs';
 import { db, fail, AppError } from '@/lib/server';
 import { localDevDatabase } from '@/lib/postgres';
+import { AVATAR_CACHE_CONTROL } from '@/lib/avatar';
+
+// An asset key is an immutable UUID: the bytes behind it never change, and the
+// avatar pipeline writes a fresh key for every new photo. Profile photos are
+// therefore safe to cache forever, which is what stops feeds, comment lists and
+// message threads from re-fetching (and visibly re-painting) the same faces.
+const cacheFor = (purpose: unknown) => (purpose === 'avatar' ? AVATAR_CACHE_CONTROL : 'private, no-store');
 
 export async function GET(request: Request, { params }: { params: Promise<{ key: string }> }) {
   try {
@@ -11,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
     // Local preview: serve uploads from disk, including byte ranges so video
     // seeking works exactly like the Blob CDN does in production.
     if (localDevDatabase()) {
-      const asset = await db().prepare("SELECT mime,blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string }>();
+      const asset = await db().prepare("SELECT mime,blob_url,purpose FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ mime: string;blob_url:string;purpose:string }>();
       if (!asset) throw new AppError('Media not found.', 404);
       const path = localAssetPath(key,asset.blob_url);
       let size = 0;
@@ -19,7 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
       const headers: Record<string, string> = {
         'Content-Type': asset.mime,
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': cacheFor(asset.purpose),
       };
       const range = request.headers.get('range');
       const match = range?.match(/bytes=(\d*)-(\d*)/);
@@ -40,9 +47,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
       const bytes = await fs.readFile(path);
       return new Response(new Uint8Array(bytes), { headers: { ...headers, 'Content-Length': String(size) } });
     }
-    const asset = await db().prepare("SELECT blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string }>();
+    const asset = await db().prepare("SELECT blob_url,purpose FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string;purpose:string }>();
     if (!asset?.blob_url) throw new AppError('Media not found.', 404);
     // Blob's CDN serves the media, including byte ranges for video seeking.
-    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, no-store' } });
+    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': cacheFor(asset.purpose) } });
   } catch (error) { return fail(error); }
 }

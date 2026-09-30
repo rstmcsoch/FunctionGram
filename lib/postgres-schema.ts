@@ -201,3 +201,12 @@ export const adminSystemUpgradeStatements=[
  'CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC,id)',
  'CREATE INDEX IF NOT EXISTS idx_session_updated ON session("updatedAt" DESC,"userId")',
 ];
+
+// Version 13: profile-photo pipeline. Records which uploads are avatars so the
+// server can enforce the 512px WebP contract and serve avatar bytes with
+// immutable cache headers. Purely additive; existing rows default to 'media'.
+export const avatarUpgradeStatements=[
+ "ALTER TABLE upload_claims ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'media'",
+ "ALTER TABLE assets ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'media'",
+ "CREATE INDEX IF NOT EXISTS idx_assets_avatar ON assets(key) WHERE purpose='avatar'",
+];

@@ -127,7 +127,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
 
       <aside className="suggestions-rail">
         <div className="account-row glass-card">
-          <Avatar person={data.me} size={52} onClick={() => navigate("profile")} />
+          <Avatar person={data.me} size={52} eager onClick={() => navigate("profile")} />
           <div>
             <button className="username" onClick={() => navigate("profile")}>{data.me?.username || t("views.your_world_shared")}</button>
             <span>{data.me?.name || t("views.a_little_more_you")}</span>
@@ -546,7 +546,7 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
   return (
     <section className="profile-view">
       <div className="profile-top">
-        <Avatar person={profile} size={128} className="profile-avatar" />
+        <Avatar person={profile} size={128} eager className="profile-avatar" />
         <div className="profile-info">
           <div className="profile-title">
             <h1>{profile.username}</h1>

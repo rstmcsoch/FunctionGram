@@ -1,6 +1,7 @@
 "use client";
 import {useLabels} from "./labels";
 import {MIB,type MediaConfig} from "@/lib/media-config";
+import type {AvatarPurpose} from "@/lib/avatar";
 import {defaultTranslator,type Translator} from "@/lib/admin/labels";
 
 import { useState, useEffect, type ReactNode } from "react";
@@ -83,7 +84,7 @@ async function videoSize(file: File): Promise<number | null> {
     video.src = url;
   });
 }
-export async function upload(file: File, t: Translator = defaultTranslator): Promise<UploadResult> {
+export async function upload(file: File, t: Translator = defaultTranslator, purpose: AvatarPurpose = "media"): Promise<UploadResult> {
   const config=await request<MediaConfig>("/api/social?upload-policy=1",undefined,t);
   if(!config.enabled)throw new Error(t('media.disabled'));
   if(!config.allowedTypes.includes(file.type))throw new Error(t('media.typeDisabled'));
@@ -93,30 +94,44 @@ export async function upload(file: File, t: Translator = defaultTranslator): Pro
   if (devMode) {
     const form = new FormData();
     form.append("key", crypto.randomUUID());
+    form.append("purpose", purpose);
     form.append("file", output);
     const result = await request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t);
     return { ...result, aspect:result.aspect??aspect };
   }
   const key = crypto.randomUUID();
-  await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
+  await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type, purpose }) });
   const completed = await request<{ url: string; type: string; aspect?:number|null }>("/api/upload/complete", { key }, t);
   return { ...completed, aspect:completed.aspect??aspect };
 }
 
 /* --------------------------------- avatars --------------------------------- */
 
-export function Avatar({ person, size = 42, ring = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; onClick?: () => void; className?: string }) {
+/**
+ * The single avatar renderer for every public surface: feed, comments,
+ * stories, profile, messages, search, notifications and the dock.
+ *
+ * Layout is fixed before the bytes arrive — matching `width`/`height`
+ * attributes and CSS, `aspect-ratio:1/1`, `object-fit:cover` and a muted
+ * placeholder — so an old, huge, non-square photo can neither shift the page
+ * nor spill out of its circle. `eager` opts the few above-the-fold avatars out
+ * of lazy loading; everything else stays lazy.
+ */
+export function Avatar({ person, size = 42, ring = false, eager = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; eager?: boolean; onClick?: () => void; className?: string }) {
   const t=useLabels();
-  const [broken, setBroken] = useState(false);
+  // Remember which URL failed instead of a bare boolean, so choosing a new
+  // photo re-tries immediately without an effect that re-renders on every swap.
+  const [brokenSrc, setBrokenSrc] = useState("");
+  const src = person?.avatar || "";
   const content = (
-    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size }}>
-      {person?.avatar && !broken
-        ? <img src={person.avatar} alt="" width={size} height={size} loading="lazy" onError={() => setBroken(true)} />
+    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size, minWidth: size, minHeight: size }}>
+      {src && brokenSrc !== src
+        ? <img className="avatar-photo" src={src} alt="" width={size} height={size} loading={eager ? "eager" : "lazy"} decoding="async" fetchPriority={eager ? "high" : "auto"} draggable={false} onError={() => setBrokenSrc(src)} />
         : <span className="avatar-initial">{(person?.name || t("common.avatarFallback")).slice(0, 1).toUpperCase()}</span>}
     </span>
   );
   return onClick ? (
-    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button">{content}</button>
+    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button" style={{ width: size, height: size }}>{content}</button>
   ) : content;
 }
 

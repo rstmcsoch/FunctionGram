@@ -32,13 +32,13 @@ const DAY=86_400_000;
 test('migration 12 is additive, idempotent, registered after Phase 10 and preserves the explicit demo-seed switch', async () => {
   const { pg, pool } = await fixture();
   try {
-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,12);
-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
+    const phase10=DATABASE_MIGRATIONS.find(item=>item.version===12);assert.ok(phase10);
+    assert.equal(phase10.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
     await pool.query('UPDATE admin_demo_seed_control SET enabled=false WHERE id=1');
-    for (const sql of DATABASE_MIGRATIONS.at(-1)!.statements) await pool.query(sql);
+    for (const sql of phase10.statements) await pool.query(sql);
     assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
     const overview=await systemOverview(pool);
-    assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,12);
+    assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,DATABASE_MIGRATIONS.at(-1)?.version);
   } finally { await pg.close(); }
 });
 
