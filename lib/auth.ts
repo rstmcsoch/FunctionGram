@@ -8,7 +8,7 @@ import { ensureSchema, getPool } from './postgres';
 import { getTursoDb } from './turso';
 import { bootstrapAdmin } from './admin/core';
 import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
-import { accountCanSignIn, accountSessionHooks, recordNewAdminDevice } from './account-policy';
+import { accountCanSignIn, accountSessionHooks, flagIsTrue, recordNewAdminDevice } from './account-policy';
 import { authConfiguration } from './auth-config';
 import {
   claimTransactionalEmail, claimVerificationEmail, createVerificationEmailSender,
@@ -138,7 +138,7 @@ export async function getSessionSecurityContext(requestHeaders?: Headers): Promi
   return {
     userId:session.user.id,email:session.user.email,fullName:session.user.name,
     sessionId:session.session.id,sessionCreatedAt:new Date(session.session.createdAt).getTime(),
-    twoFactorEnabled:account?.twoFactorEnabled===true,
+    twoFactorEnabled:flagIsTrue(account?.twoFactorEnabled),
   };
 }
 

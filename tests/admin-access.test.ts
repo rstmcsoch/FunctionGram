@@ -7,6 +7,9 @@ import { PGlite } from '@electric-sql/pglite';
 import * as schema from '../lib/postgres-schema';
 import { serializedPool } from '../lib/serialized-pool';
 import { accountHasAdminPanelAuthority, holdsAdminPanelAuthority } from '../lib/admin/authority';
+import { authorizeAdmin } from '../lib/admin/core';
+import { flagIsTrue } from '../lib/account-policy';
+import type { QueryExecutor } from '../lib/postgres';
 import { ROLE_PERMISSIONS } from '../lib/admin/permissions';
 import { ADMIN_BASE_PATH } from '../lib/admin/config';
 import type { AdminRole } from '../lib/admin/config';
@@ -175,4 +178,42 @@ test('the chooser adds no authorization of its own and leaves admin gating untou
   assert.match(app, /target === "profile" && adminAccess && data\.me/, 'own-profile taps are gated on authority');
   assert.match(app, /authorityChooserSeen\(\)/, 'the post-login prompt cannot repeat or stack');
   assert.match(app, /<AuthorityChooser username=\{data\.me\.username\}/);
+});
+
+test('boolean flags gate identically on PostgreSQL (true/false) and libsql (1/0)', async () => {
+  // libsql/SQLite returns booleans as 1/0, so a strict `=== true` gate rejects
+  // every administrator on the runtime this branch deploys to.
+  assert.equal(flagIsTrue(true), true);
+  assert.equal(flagIsTrue(1), true);
+  for (const value of [false, 0, null, undefined, 'true', '1', 2]) assert.equal(flagIsTrue(value), false, String(value));
+
+  const executor = (row: Record<string, unknown>) => ({
+    query: async () => ({ rows: [row], rowCount: 1 }),
+  }) as unknown as QueryExecutor;
+  const admin = { id: 'a', email: 'a@example.test', role: 'admin', banExpires: null, deleted_at: null };
+
+  for (const shape of [
+    { ...admin, emailVerified: true, banned: false },  // PostgreSQL
+    { ...admin, emailVerified: 1, banned: 0 },         // libsql/SQLite
+  ]) {
+    assert.equal(await accountHasAdminPanelAuthority(executor(shape), 'a'), true, JSON.stringify(shape));
+    assert.equal((await authorizeAdmin(executor(shape), 'a')).role, 'admin', JSON.stringify(shape));
+  }
+  for (const shape of [
+    { ...admin, emailVerified: false, banned: false },
+    { ...admin, emailVerified: 0, banned: 0 },
+    { ...admin, emailVerified: 1, banned: 1 },
+    { ...admin, emailVerified: 1, banned: 0, deleted_at: 1 },
+    { ...admin, emailVerified: 1, banned: 0, role: 'user' },
+  ]) {
+    assert.equal(await accountHasAdminPanelAuthority(executor(shape), 'a'), false, JSON.stringify(shape));
+  }
+
+  // The session-level second-factor flag and the maintenance bypass read the
+  // same stored columns, so they use the same helper.
+  const auth = readFileSync('lib/auth.ts', 'utf8');
+  assert.match(auth, /twoFactorEnabled:flagIsTrue\(account\?\.twoFactorEnabled\)/);
+  assert.ok(!auth.includes('twoFactorEnabled===true'), 'no strict boolean comparison left');
+  const policy = readFileSync('lib/feature-policy.ts', 'utf8');
+  assert.match(policy, /flagIsTrue\(row\.emailVerified\)/);
 });
