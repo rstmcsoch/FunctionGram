@@ -9,6 +9,7 @@ import { requirePermission, type AdminPermission } from './permissions';
 import type { AdminActor } from './config';
 import { assertAdminSessionFresh, assertAdminTwoFactor, ADMIN_SESSION_TTL_MS } from './session-policy';
 import { AdminError } from './validation';
+import { cache } from 'react';
 
 export {ADMIN_SESSION_TTL_MS};
 type GuardContext = Awaited<ReturnType<typeof getSessionSecurityContext>>;
@@ -51,7 +52,7 @@ export async function isAdmin(request?: Request) {
   try { await requireAdmin(request); return true; }
   catch (error) { if (error instanceof AdminError) return false; throw error; }
 }
-export async function requireAdminPage() {
+export const requireAdminPage = cache(async function requireAdminPage() {
   try { return await requireAdmin(); }
   catch (error) {
     if (error instanceof AdminError && error.status === 401) unauthorized();
@@ -59,7 +60,7 @@ export async function requireAdminPage() {
     if (error instanceof AdminError && error.status === 403) forbidden();
     throw error;
   }
-}
+});
 export function assertAdminPagePermission(actor: AdminActor, permission: AdminPermission) {
   try { requirePermission(actor, permission); }
   catch (error) { if (error instanceof AdminError && error.status === 403) forbidden(); throw error; }
