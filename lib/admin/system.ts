@@ -3,6 +3,7 @@ import type { PoolLike, QueryExecutor } from '../postgres';
 import { DATABASE_MIGRATIONS } from '../postgres';
 import { seed } from '../seed';
 import { MEDIA_LOCK } from '../media-policy';
+import { flagIsTrue } from '../account-policy';
 import { referencedAsset } from './media';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
@@ -22,7 +23,7 @@ function exact(value: unknown, expected: string) {
 }
 
 const envFlags = () => ({
-  databaseConfigured: Boolean(process.env.POSTGRES_URL || process.env.DATABASE_URL),
+  databaseConfigured: Boolean(process.env.TURSO_DATABASE_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL),
   authSecretConfigured: Boolean(process.env.BETTER_AUTH_SECRET),
   blobStorageConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
   emailProviderConfigured: Boolean(process.env.BREVO_API_KEY),
@@ -39,9 +40,9 @@ async function counts(db: QueryExecutor) {
   const storyCutoff = Date.now() - EXPIRED_STORY_GRACE_DAYS * DAY_MS;
   const orphanCutoff = Date.now() - ORPHAN_ASSET_GRACE_DAYS * DAY_MS;
   const { rows: [stories] } = await db.query("SELECT COUNT(*) AS count FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1", [storyCutoff]);
-  const { rows: [orphans] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [orphanCutoff]);
+  const { rows: [orphans] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)}`, [orphanCutoff]);
   return {
-    demoProfiles: Number(demo.profiles), demoPosts: Number(demo.posts), demoSeedEnabled: seedState?.enabled === true,
+    demoProfiles: Number(demo.profiles), demoPosts: Number(demo.posts), demoSeedEnabled: flagIsTrue(seedState?.enabled),
     expiredStories: Number(stories.count), orphanAssets: Number(orphans.count),
     expiredStoryCutoff: storyCutoff, orphanAssetCutoff: orphanCutoff,
   };
@@ -195,8 +196,8 @@ async function previewStoryIds(db: QueryExecutor, now: number) {
 }
 async function previewOrphanKeys(db: QueryExecutor, now: number) {
   const cutoff = now - ORPHAN_ASSET_GRACE_DAYS * DAY_MS;
-  const { rows } = await db.query(`SELECT a.key FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')} ORDER BY a.created_at,a.key LIMIT $2`, [cutoff, SYSTEM_PRUNE_BATCH_LIMIT]);
-  const { rows: [total] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [cutoff]);
+  const { rows } = await db.query(`SELECT a.key FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)} ORDER BY a.created_at,a.key LIMIT $2`, [cutoff, SYSTEM_PRUNE_BATCH_LIMIT]);
+  const { rows: [total] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)}`, [cutoff]);
   return { keys: rows.map(row => String(row.key)), total: Number(total.count), cutoff };
 }
 export async function prunePreview(pool: PoolLike, now = Date.now()) {
@@ -236,7 +237,7 @@ export async function pruneOrphanAssets(pool: PoolLike, actorId: string, input: 
       await db.query("UPDATE assets SET status='trash',deleted_at=$2,trash_origin=$3,reason=$4 WHERE key=$1", [key, nowStamp, asset.status, `System orphan prune: ${reason}`]);
       await insertAudit(db, actor, { action: 'media.trash', targetType: 'asset', targetId: key, before: { status: asset.status }, after: { status: 'trash', origin: asset.status }, reason });
     }
-    const { rows: [remaining] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [preview.cutoff]);
+    const { rows: [remaining] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)}`, [preview.cutoff]);
     await insertAudit(db, actor, { action: 'system.prune.orphanAssets', targetType: 'assets', targetId: 'orphan-prune', before: { candidates: preview.total }, after: { movedToTrash: preview.keys.length, remaining: Number(remaining.count) }, reason });
     return { ok: true, movedToTrash: preview.keys.length, remaining: Number(remaining.count) };
   });
