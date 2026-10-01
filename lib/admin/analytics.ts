@@ -75,7 +75,7 @@ export async function dashboardAnalytics(db: QueryExecutor, inputDays: unknown =
   ]);
 
   const liveValues = [start, now];
-  const [{ rows: topPosts }, { rows: topCreators }, { rows: categories }, { rows: hashtags }, { rows: hashtagRows }] = await Promise.all([
+  const [{ rows: topPosts }, { rows: topCreators }, { rows: categories }, { rows: hashtagRows }, { rows: [funnel] }] = await Promise.all([
     db.query(`SELECT p.id,p.caption,p.category,p.kind,a.username,a.name,p.created_at,
       (SELECT COUNT(*) FROM reactions r WHERE r.post_id=p.id AND r.kind='like') AS likes,
       (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND c.hidden_at IS NULL AND c.deleted_at IS NULL) AS comments,
