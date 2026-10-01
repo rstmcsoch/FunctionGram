@@ -127,6 +127,7 @@ export function AdminNav({ groups, wordmark, account }: {
             return <Link
               key={item.href + item.label}
               href={item.href}
+              prefetch={false}
               className="admin-nav-link"
               title={item.label}
               aria-label={item.label}
