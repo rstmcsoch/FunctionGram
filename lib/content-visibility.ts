@@ -8,7 +8,7 @@ export function visiblePost(p = 'p') {
     AND (${p}.kind!='reel' OR COALESCE((SELECT value FROM app_settings WHERE key='content.reelsEnabled'),'true')='true')`;
 }
 export function livePost(p = 'p') {
-  return `(${visiblePost(p)}) AND (${p}.expires_at IS NULL OR ${p}.expires_at > extract(epoch FROM now())*1000)`;
+  return `(${visiblePost(p)}) AND (${p}.expires_at IS NULL OR ${p}.expires_at > unixepoch()*1000)`;
 }
 // Caller binds the viewer four times, in this order: privacy, follow, block, shadow-ban self-visibility.
 export function readablePost(p = 'p', a = 'a') {
