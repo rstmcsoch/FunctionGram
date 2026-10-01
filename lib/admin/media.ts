@@ -22,12 +22,23 @@ export async function mediaReport(db:QueryExecutor,input:Record<string,unknown>=
  if(filter.owner){values.push(filter.owner);where.push(`COALESCE(a.storage_owner,a.owner_id)=$${values.length}`);}
  if(filter.status==='orphans')where.push(`NOT ${referencedAsset('a',db)}`);else if(filter.status!=='all'){values.push(filter.status);where.push(`a.status=$${values.length}`);}
  const from='FROM assets a WHERE '+where.join(' AND ');
- const {rows:[summary]}=await db.query(`SELECT COUNT(*) assets,COALESCE(SUM(size+source_retained_bytes),0) bytes,COALESCE(SUM(source_retained_bytes),0) retained_source_bytes,COUNT(*) FILTER(WHERE status='quarantined') quarantined,COUNT(*) FILTER(WHERE status='trash') trashed FROM assets`);
- const {rows:[total]}=await db.query('SELECT COUNT(*) total '+from,values);
- const {rows:items}=await db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset('a',db)} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET $${values.length+1}`,[...values,(filter.page-1)*50]);
- const {rows:owners}=await db.query(`SELECT COALESCE(storage_owner,owner_id) owner_id,COUNT(*) assets,SUM(size+source_retained_bytes) bytes FROM assets GROUP BY COALESCE(storage_owner,owner_id) ORDER BY bytes DESC,owner_id LIMIT 25 OFFSET $1`,[(filter.page-1)*25]);
- const {rows:expired}=await db.query(`SELECT key,owner_id,expected_size,mime,created_at FROM upload_claims WHERE completed=false AND created_at<$1 AND (processing_at IS NULL OR processing_at<$2) ORDER BY created_at,key LIMIT 25 OFFSET $3`,[Date.now()-3600000,Date.now()-300000,(filter.page-1)*25]);
- const {rows:[pending]}=await db.query(`SELECT COUNT(*) reservations,COALESCE(SUM(expected_size),0) reserved_bytes FROM upload_claims WHERE completed=false AND (created_at>$1 OR processing_at>$2)`,[Date.now()-3600000,Date.now()-300000]);
+ const itemValues=[...values,(filter.page-1)*50];
+ const ownerValues=[(filter.page-1)*25];
+ const now=Date.now();
+ const [summaryResult,totalResult,itemsResult,ownersResult,expiredResult,pendingResult]=await Promise.all([
+  db.query(`SELECT COUNT(*) assets,COALESCE(SUM(size+source_retained_bytes),0) bytes,COALESCE(SUM(source_retained_bytes),0) retained_source_bytes,COUNT(*) FILTER(WHERE status='quarantined') quarantined,COUNT(*) FILTER(WHERE status='trash') trashed FROM assets`),
+  db.query('SELECT COUNT(*) total '+from,values),
+  db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset('a',db)} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET ${values.length+1}`,itemValues),
+  db.query(`SELECT COALESCE(storage_owner,owner_id) owner_id,COUNT(*) assets,SUM(size+source_retained_bytes) bytes FROM assets GROUP BY COALESCE(storage_owner,owner_id) ORDER BY bytes DESC,owner_id LIMIT 25 OFFSET $1`,ownerValues),
+  db.query(`SELECT key,owner_id,expected_size,mime,created_at FROM upload_claims WHERE completed=false AND created_at<$1 AND (processing_at IS NULL OR processing_at<$2) ORDER BY created_at,key LIMIT 25 OFFSET $3`,[now-3600000,now-300000,(filter.page-1)*25]),
+  db.query(`SELECT COUNT(*) reservations,COALESCE(SUM(expected_size),0) reserved_bytes FROM upload_claims WHERE completed=false AND (created_at>$1 OR processing_at>$2)`,[now-3600000,now-300000])
+ ]);
+ const {rows:[summary]}=summaryResult;
+ const {rows:[total]}=totalResult;
+ const {rows:items}=itemsResult;
+ const {rows:owners}=ownersResult;
+ const {rows:expired}=expiredResult;
+ const {rows:[pending]}=pendingResult;
  return {filter,summary,total:Number(total.total),items,owners,expired,pending};
 }
 export async function changeMedia(pool:PoolLike,actorId:string,body:Record<string,unknown>){
