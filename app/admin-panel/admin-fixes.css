@@ -487,3 +487,75 @@ html[data-theme="dark"] .admin-confirm-dialog,
   outline: 2px solid var(--adm-accent);
   outline-offset: 2px;
 }
+
+
+/* ==========================================================================
+   Admin navigation loading state
+   ========================================================================== */
+
+.admin-shell .admin-loading {
+  display: grid;
+  gap: var(--adm-s4);
+  width: 100%;
+}
+
+.admin-shell .admin-loading-head {
+  display: grid;
+  gap: var(--adm-s2);
+  padding-bottom: var(--adm-s4);
+  border-bottom: 1px solid var(--adm-border-subtle);
+}
+
+.admin-shell .admin-skeleton {
+  display: block;
+  border-radius: var(--adm-r-control);
+  background: linear-gradient(90deg, var(--adm-muted-surface), var(--adm-border-subtle), var(--adm-muted-surface));
+  background-size: 200% 100%;
+  animation: admin-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.admin-shell .admin-skeleton-eyebrow {
+  width: min(180px, 35%);
+  height: 12px;
+}
+
+.admin-shell .admin-skeleton-title {
+  width: min(420px, 75%);
+  height: 30px;
+}
+
+.admin-shell .admin-skeleton-intro {
+  width: min(620px, 90%);
+  height: 18px;
+}
+
+.admin-shell .admin-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--adm-s4);
+}
+
+.admin-shell .admin-skeleton-card {
+  min-height: 116px;
+}
+
+.admin-shell .admin-skeleton-wide {
+  min-height: 160px;
+}
+
+@keyframes admin-skeleton-pulse {
+  0%, 100% { opacity: .72; background-position: 0% 50%; }
+  50% { opacity: 1; background-position: 100% 50%; }
+}
+
+@media (max-width: 767px) {
+  .admin-shell .admin-loading-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell .admin-skeleton {
+    animation: none;
+  }
+}
