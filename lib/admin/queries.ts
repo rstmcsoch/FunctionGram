@@ -53,13 +53,20 @@ export async function userDetail(db: QueryExecutor, id: string) {
   return { user, counts, sessions };
 }
 export async function dashboard(db: QueryExecutor) {
+  // Cutoffs are computed here and bound as ISO-8601 UTC strings instead of using
+  // PostgreSQL-only `now()-interval '7 days'`, which libSQL/Turso cannot parse.
+  // Better Auth stores "createdAt"/"updatedAt"/"expiresAt" as ISO text on
+  // Turso and as timestamptz on PostgreSQL; both compare correctly against it.
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const weekAgoIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
   const { rows: [stats] } = await db.query(`SELECT
     (SELECT COUNT(*) FROM "user") AS users,
-    (SELECT COUNT(*) FROM "user" WHERE "createdAt">now()-interval '7 days') AS new_users,
-    (SELECT COUNT(DISTINCT "userId") FROM session WHERE "updatedAt">now()-interval '7 days' AND "expiresAt">now()) AS active_users,
+    (SELECT COUNT(*) FROM "user" WHERE "createdAt">$1) AS new_users,
+    (SELECT COUNT(DISTINCT "userId") FROM session WHERE "updatedAt">$1 AND "expiresAt">$2) AS active_users,
     (SELECT COUNT(*) FROM posts WHERE deleted_at IS NULL) AS posts,
     (SELECT COUNT(*) FROM reports WHERE status IN ('new','triage')) AS reports,
-    (SELECT COALESCE(SUM(size),0) FROM assets) AS storage_bytes`);
+    (SELECT COALESCE(SUM(size),0) FROM assets) AS storage_bytes`, [weekAgoIso, nowIso]);
   return stats;
 }
 export function usersCsv(users: UserRow[]) {
