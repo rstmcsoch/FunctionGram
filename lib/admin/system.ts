@@ -33,14 +33,20 @@ const envFlags = () => ({
 });
 
 async function counts(db: QueryExecutor) {
-  const { rows: [demo] } = await db.query(`SELECT COUNT(*) AS profiles,
-    (SELECT COUNT(*) FROM posts p JOIN profiles a ON a.id=p.author_id WHERE a.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=a.id)) AS posts
-    FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)`);
-  const { rows: [seedState] } = await db.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1');
   const storyCutoff = Date.now() - EXPIRED_STORY_GRACE_DAYS * DAY_MS;
   const orphanCutoff = Date.now() - ORPHAN_ASSET_GRACE_DAYS * DAY_MS;
-  const { rows: [stories] } = await db.query("SELECT COUNT(*) AS count FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1", [storyCutoff]);
-  const { rows: [orphans] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)}`, [orphanCutoff]);
+  const [demoResult,seedResult,storiesResult,orphansResult]=await Promise.all([
+    db.query(`SELECT COUNT(*) AS profiles,
+      (SELECT COUNT(*) FROM posts p JOIN profiles a ON a.id=p.author_id WHERE a.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=a.id)) AS posts
+      FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)`),
+    db.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1'),
+    db.query("SELECT COUNT(*) AS count FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1", [storyCutoff]),
+    db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a', db)}`, [orphanCutoff])
+  ]);
+  const {rows:[demo]}=demoResult;
+  const {rows:[seedState]}=seedResult;
+  const {rows:[stories]}=storiesResult;
+  const {rows:[orphans]}=orphansResult;
   return {
     demoProfiles: Number(demo.profiles), demoPosts: Number(demo.posts), demoSeedEnabled: flagIsTrue(seedState?.enabled),
     expiredStories: Number(stories.count), orphanAssets: Number(orphans.count),
