@@ -16,7 +16,9 @@ import { authorizeAdmin } from '../lib/admin/core';
 async function fixture() {
   const db = new PGlite();
   for (const statement of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements]) await db.exec(statement);
-  const pool = serializedPool({ async query(sql, values) {
+  // PGlite is the local PostgreSQL runtime: timestamps are timestamptz, not the
+  // Unix milliseconds the deployed libSQL/Turso runtime stores.
+  const pool = serializedPool({ storageDialect: 'postgres', async query(sql, values) {
     const result = await db.query(sql, values);
     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
   } });
