@@ -1,0 +1,149 @@
+.admin-shell .admin-universal-search {
+  position: relative;
+  width: min(390px, 42vw);
+  min-width: 280px;
+  max-width: 100%;
+  z-index: 20;
+}
+
+.admin-shell .admin-search-control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  gap: 8px;
+  border: 1px solid var(--adm-border);
+  border-radius: 999px;
+  background: var(--adm-muted-surface);
+  color: var(--adm-text-3);
+  box-shadow: var(--adm-shadow-sm);
+  transition: border-color var(--adm-dur) ease-out, box-shadow var(--adm-dur) ease-out, background-color var(--adm-dur) ease-out;
+}
+
+.admin-shell .admin-search-control:focus-within {
+  border-color: var(--adm-accent);
+  background: var(--adm-panel);
+  box-shadow: 0 0 0 3px var(--adm-accent-soft);
+}
+
+.admin-shell .admin-search-control input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--adm-text);
+  font: inherit;
+}
+
+.admin-shell .admin-search-control input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.admin-shell .admin-search-control input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.admin-shell .admin-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--adm-text-3);
+  cursor: pointer;
+}
+
+.admin-shell .admin-search-clear:hover,
+.admin-shell .admin-search-clear:focus-visible {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+}
+
+.admin-shell .admin-search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(64dvh, 560px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--adm-border);
+  border-radius: 18px;
+  background: var(--adm-panel);
+  box-shadow: var(--adm-shadow-lg);
+}
+
+.admin-shell .admin-search-result {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--adm-text);
+  text-decoration: none;
+}
+
+.admin-shell .admin-search-result:hover,
+.admin-shell .admin-search-result:focus-visible {
+  background: var(--adm-hover);
+  text-decoration: none;
+}
+
+.admin-shell .admin-search-tree {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.admin-shell .admin-search-tree-line {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-search-tree-line:first-child {
+  font-weight: 650;
+}
+
+.admin-shell .admin-search-tree-line:not(:first-child) {
+  color: var(--adm-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.admin-shell .admin-search-empty {
+  margin: 0;
+  padding: 14px 12px;
+  font-size: 13px;
+  color: var(--adm-text-2);
+}
+
+@media (max-width: 1023px) {
+  .admin-shell .admin-universal-search {
+    width: min(360px, 56vw);
+    min-width: 240px;
+  }
+}
+
+@media (max-width: 767px) {
+  .admin-shell .admin-universal-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-shell .admin-search-results {
+    left: 0;
+    right: auto;
+    width: min(460px, calc(100vw - 32px));
+  }
+}
