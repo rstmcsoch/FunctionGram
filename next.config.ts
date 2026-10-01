@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
       ],
     }));
   },
-  serverExternalPackages: ["@electric-sql/pglite"],
+  serverExternalPackages: ["@electric-sql/pglite", "@libsql/kysely-libsql", "@libsql/client", "libsql"],
 };
 
 export default nextConfig;

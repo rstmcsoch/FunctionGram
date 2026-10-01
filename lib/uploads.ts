@@ -14,9 +14,7 @@ export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload
  if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload name.');
  let input:{size:number;type:string};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
  return transaction(pool,async db=>{
-  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
   // Serialize quota reservations with settings changes and media attach/quarantine.
-  await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
   const config=await readMediaConfig(db);checkUploadInput(config,input.size,input.type);
   const now=Date.now();
   const {rows:[existing]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);
@@ -59,8 +57,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
  if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload.');await access();
  const lease=Date.now();
  const start=await transaction(pool,async db=>{
-  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
-  const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 AND owner_id=$2 FOR UPDATE',[key,owner]);if(!claim)throw new AdminError('Upload not found.',404);
+    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 AND owner_id=$2',[key,owner]);if(!claim)throw new AdminError('Upload not found.',404);
   const config=await readMediaConfig(db);checkUploadInput(config,Number(claim.expected_size),claim.mime);
   if(claim.completed){const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1',[key]);if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('This upload is quarantined or unavailable.',409);checkUploadInput(config,Number(asset.size),asset.mime);return {claim,config,asset};}
   if(Number(claim.created_at)<lease-HOUR)throw new AdminError('This upload has expired. Start again.');
@@ -80,10 +77,8 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
   if(output!==source.url)produced={url:output,size:media.bytes.length};
   await access();
   await transaction(pool,async db=>{
-   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',[owner]);
-   await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
    const current=await readMediaConfig(db);if(JSON.stringify(current)!==JSON.stringify(start.config))throw new AdminError('Upload rules changed. Please start a new upload.',409);
-   const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)throw new AdminError('Upload processing expired. Please retry.',409);
+    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)throw new AdminError('Upload processing expired. Please retry.',409);
    await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,width,height,duration,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[key,owner,media.mime,media.bytes.length,Date.now(),output,media.width,media.height,media.duration,source!.size,start.claim.mime,source!.url!==output?source!.url:null,source!.url!==output?source!.size:0]);
    await db.query('UPDATE upload_claims SET completed=true,completed_at=$1,processing_at=NULL WHERE key=$2',[Date.now(),key]);
   });
@@ -97,7 +92,7 @@ export async function finishWithStore(pool:PoolLike,key:string,owner:string,stor
   let derivativeRetained=false;
   if(produced){try{await store.remove(produced.url);produced=undefined;}catch{derivativeRetained=true;}}
   await transaction(pool,async db=>{
-   const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1 FOR UPDATE',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)return;
+    const {rows:[claim]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);if(!claim||claim.completed||Number(claim.processing_at)!==lease)return;
    const invalidTransfer=error instanceof AdminError&&error.status!==503;
    if(source&&source.size<=100*MIB&&(invalidTransfer||derivativeRetained)){const recorded=produced||null;await db.query(`INSERT INTO assets(key,owner_id,storage_owner,mime,size,created_at,blob_url,status,reason,verified,source_size,source_mime,source_blob_url,source_retained_bytes) VALUES($1,$2,$2,$3,$4,$5,$6,'quarantined',$7,false,$4,$3,$8,$9) ON CONFLICT(key) DO NOTHING`,[key,owner,start.claim.mime,source.size,Date.now(),source.url,error instanceof Error?error.message:'Processing failed; retained derivative requires cleanup.',recorded?.url||null,recorded?.size||0]);await db.query('UPDATE upload_claims SET completed=true,completed_at=$1 WHERE key=$2',[Date.now(),key]);}
    await db.query('UPDATE upload_claims SET processing_at=NULL WHERE key=$1',[key]);
