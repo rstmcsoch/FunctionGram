@@ -2,8 +2,6 @@ import path from 'node:path';
 import {
   createClient,
   type Client,
-  type Transaction,
-  type ResultSet,
 } from '@libsql/client';
 import type { QueryResultRow as PgQueryResultRow } from 'pg';
 
@@ -14,18 +12,27 @@ import { tursoSchemaStatements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
+export interface QueryResult {
+  rows: QueryResultRow[];
+  rowCount: number | null;
+}
+
 export interface QueryExecutor {
   query(
     text: string,
     values?: unknown[],
-  ): Promise<{
-    rows: QueryResultRow[];
-    rowCount: number | null;
-  }>;
+  ): Promise<QueryResult>;
+}
+
+export interface BatchItem {
+  text: string;
+  values?: unknown[];
 }
 
 export interface PoolLike extends QueryExecutor {
   connect(): Promise<QueryExecutor & { release(): void }>;
+  // Turso only: run many statements atomically in ONE request.
+  batch?(statements: BatchItem[]): Promise<QueryResult[]>;
 }
 
 export const DATABASE_MIGRATIONS = [
@@ -55,6 +62,10 @@ function sanitizeArgs(values: unknown[] = []) {
     if (typeof value === 'boolean') return value ? 1 : 0;
     return value;
   });
+}
+
+function isReadSql(text: string) {
+  return /^\s*(SELECT|WITH|VALUES|TABLE|PRAGMA|EXPLAIN)\b/i.test(text);
 }
 
 // Log the failing SQL (never the values) so Turso errors can be traced.
@@ -169,85 +180,41 @@ async function getLocalPool(): Promise<PoolLike> {
   return creation;
 }
 
+// Turso over HTTP rejects interactive transactions (HTTP 400 on the first
+// statement after BEGIN). So BEGIN / COMMIT / ROLLBACK are no-ops here and
+// each statement runs on its own. Use pool.batch() when you need atomic writes.
 class TursoConnection implements QueryExecutor {
-  private transaction: Transaction | undefined;
-
   constructor(private readonly client: Client) {}
-
-  private async begin() {
-    if (!this.transaction) {
-      this.transaction = await runTurso('BEGIN (client.transaction)', () =>
-        this.client.transaction('write'),
-      );
-    }
-  }
 
   async query(
     text: string,
     values: unknown[] = [],
-  ): Promise<{
-    rows: QueryResultRow[];
-    rowCount: number | null;
-  }> {
-    const trimmed = text.trim();
+  ): Promise<QueryResult> {
+    const trimmed = text.trim().replace(/;$/, '').trim();
 
-    // Preserve the interface expected by existing FunctionGram code.
-    if (/^BEGIN\b/i.test(trimmed)) {
-      await this.begin();
-      return { rows: [], rowCount: 0 };
-    }
-
-    if (/^COMMIT\b/i.test(trimmed)) {
-      if (this.transaction) {
-        const tx = this.transaction;
-        await runTurso('COMMIT', () => tx.commit());
-        this.transaction = undefined;
-      }
-      return { rows: [], rowCount: 0 };
-    }
-
-    if (/^ROLLBACK\b/i.test(trimmed)) {
-      if (this.transaction) {
-        const tx = this.transaction;
-        try {
-          await tx.rollback();
-        } catch (error) {
-          console.error(
-            '[turso] rollback failed:',
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-        this.transaction = undefined;
-      }
+    if (
+      /^(BEGIN|COMMIT|ROLLBACK|END)(\s+TRANSACTION)?$/i.test(trimmed)
+    ) {
       return { rows: [], rowCount: 0 };
     }
 
     const sql = postgresQuery(text);
     const args = sanitizeArgs(values) as never;
-    const tx = this.transaction;
 
-    const result: ResultSet = await runTurso(sql, () =>
-      tx
-        ? tx.execute({ sql, args })
-        : this.client.execute({ sql, args }),
+    const result = await runTurso(sql, () =>
+      this.client.execute({ sql, args }),
     );
-
-    const isRead =
-      /^\s*(SELECT|WITH|VALUES|TABLE|PRAGMA|EXPLAIN)\b/i.test(text);
 
     return {
       rows: result.rows as unknown as QueryResultRow[],
-      rowCount: isRead
+      rowCount: isReadSql(text)
         ? result.rows.length
         : result.rowsAffected ?? result.rows.length,
     };
   }
 
   release() {
-    if (this.transaction) {
-      this.transaction.close();
-      this.transaction = undefined;
-    }
+    // Nothing to release: no transaction is held open.
   }
 }
 
@@ -257,7 +224,7 @@ class TursoPool implements PoolLike {
   async query(
     text: string,
     values: unknown[] = [],
-  ) {
+  ): Promise<QueryResult> {
     const sql = postgresQuery(text);
     const args = sanitizeArgs(values) as never;
 
@@ -265,15 +232,34 @@ class TursoPool implements PoolLike {
       this.client.execute({ sql, args }),
     );
 
-    const isRead =
-      /^\s*(SELECT|WITH|VALUES|TABLE|PRAGMA|EXPLAIN)\b/i.test(text);
-
     return {
       rows: result.rows as unknown as QueryResultRow[],
-      rowCount: isRead
+      rowCount: isReadSql(text)
         ? result.rows.length
         : result.rowsAffected ?? result.rows.length,
     };
+  }
+
+  async batch(statements: BatchItem[]): Promise<QueryResult[]> {
+    if (!statements.length) return [];
+
+    const prepared = statements.map(item => ({
+      sql: postgresQuery(item.text),
+      args: sanitizeArgs(item.values) as never,
+    }));
+
+    const label = `BATCH(${prepared.length}) first: ${prepared[0].sql}`;
+
+    const results = await runTurso(label, () =>
+      this.client.batch(prepared, 'write'),
+    );
+
+    return results.map((result, index) => ({
+      rows: result.rows as unknown as QueryResultRow[],
+      rowCount: isReadSql(statements[index].text)
+        ? result.rows.length
+        : result.rowsAffected ?? result.rows.length,
+    }));
   }
 
   async connect() {
@@ -330,6 +316,36 @@ export async function ensureSchema() {
   if (!ready) {
     ready = (async () => {
       const database = await getPool();
+
+      // Turso: plain statements + one atomic batch for the schema.
+      if (database.batch) {
+        await database.query(`
+          CREATE TABLE IF NOT EXISTS functiongram_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at INTEGER NOT NULL DEFAULT (unixepoch())
+          )
+        `);
+
+        for (const migration of DATABASE_MIGRATIONS) {
+          const applied = await database.query(
+            'SELECT version FROM functiongram_migrations WHERE version = ?',
+            [migration.version],
+          );
+
+          if (!applied.rowCount) {
+            await database.batch([
+              ...migration.statements.map(text => ({ text })),
+              {
+                text: 'INSERT INTO functiongram_migrations(version) VALUES(?)',
+                values: [migration.version],
+              },
+            ]);
+          }
+        }
+
+        return;
+      }
+
       const client = await database.connect();
 
       try {
@@ -431,7 +447,19 @@ export function database() {
     async batch(statements: Statement[]) {
       await ensureSchema();
 
-      const client = await (await getPool()).connect();
+      const pool = await getPool();
+
+      // Turso: one request, all-or-nothing.
+      if (pool.batch) {
+        return pool.batch(
+          statements.map(statement => ({
+            text: statement.query,
+            values: statement.values,
+          })),
+        );
+      }
+
+      const client = await pool.connect();
 
       try {
         await client.query('BEGIN');
