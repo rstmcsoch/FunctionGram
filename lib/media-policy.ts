@@ -14,7 +14,13 @@ export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[]
  if(!urls.length||urls.length>config.maxMedia||new Set(urls).size!==urls.length)throw new AdminError('Check the current media-per-post limit.');
  const assets=[];
  for(const url of urls){if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('Use registered media.');
-  const {rows:[asset]}=await db.query('SELECT * FROM assets WHERE key=$1 AND owner_id=ANY($2::text[])',[url.slice(11),owners]);
+    const ownerPlaceholders = owners.map(() => '?').join(',');
+    const { rows: [asset] } = await db.query(
+     `SELECT * FROM assets
+            WHERE key=?
+             AND owner_id IN (${ownerPlaceholders})`,
+     [url.slice(11), ...owners],
+    );
   if(!asset||asset.status!=='ready'||!asset.verified)throw new AdminError('One of your uploads is unavailable. Please upload it again.');
   checkUploadInput(config,Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);
   if(asset.source_mime&&!config.allowedTypes.includes(asset.source_mime))throw new AdminError('This media type is currently disabled.');
@@ -26,7 +32,6 @@ export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[]
 /** Short attach transaction, shared with cleanup and branding writes. No network work here. */
 export async function commitMediaUse(pool:PoolLike,urls:string[],owners:string[],config:MediaConfig,statements:{query:string;values:unknown[]}[]){
  return transaction(pool,async db=>{
-  await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
   const latest=await readMediaConfig(db);if(JSON.stringify(latest)!==JSON.stringify(config))throw new AdminError('Upload rules changed. Please try again.',409);
   await checkAssets(db,urls,owners,latest);
   for(const statement of statements)await db.query(postgresQuery(statement.query),statement.values);

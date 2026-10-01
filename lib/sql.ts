@@ -1,16 +1,26 @@
-// Translate only SQL authored by the application; values remain bound parameters.
+function replacePostgresParameters(input: string): string {
+  return input.replace(/\$(\d+)/g, '?');
+}
+
 export function postgresQuery(input: string) {
   const ignore = /^INSERT OR IGNORE INTO /i.test(input);
-  const sql = input.replace(/^INSERT OR IGNORE INTO /i, 'INSERT INTO ');
-  let result = '', quoted = false, index = 0;
-  for (let i = 0; i < sql.length; i++) {
-    const char = sql[i];
-    if (char === "'") {
-      result += char;
-      if (quoted && sql[i+1] === "'") { result += sql[++i]; continue; }
-      quoted = !quoted;
-    } else result += char === '?' && !quoted ? '$' + (++index) : char;
+
+  let result = input;
+
+  // FunctionGram historically used both ? and PostgreSQL $1-style placeholders.
+  // Turso/libSQL accepts ? placeholders.
+  result = replacePostgresParameters(result);
+
+  // SQLite/libSQL uses INSERT ... ON CONFLICT instead of PostgreSQL's
+  // INSERT OR IGNORE translation path.
+  if (ignore) {
+    result = result.replace(/^INSERT OR IGNORE INTO /i, 'INSERT INTO ');
+    result = result.replace(/;\s*$/, '');
+    result += ' ON CONFLICT DO NOTHING';
   }
-  if (ignore) result = result.replace(/;\s*$/, '') + ' ON CONFLICT DO NOTHING';
+
+  // PostgreSQL row-lock syntax has no SQLite equivalent.
+  result = result.replace(/\s+FOR\s+UPDATE\b/gi, '');
+
   return result;
 }

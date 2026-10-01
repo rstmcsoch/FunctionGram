@@ -5,6 +5,7 @@ import { twoFactor } from 'better-auth/plugins';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { ensureSchema, getPool } from './postgres';
+import { getTursoDb } from './turso';
 import { bootstrapAdmin } from './admin/core';
 import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
 import { accountCanSignIn, accountSessionHooks, recordNewAdminDevice } from './account-policy';
@@ -43,9 +44,16 @@ async function createAuth() {
   const sendChangeEmailConfirmation=createChangeEmailEmailSender();
   const sendDeleteAccountEmail=createDeleteAccountEmailSender();
   sendAdminDeviceNotice=createAdminNewDeviceEmailSender();
-  const pool=await getPool();
+  const pool = await getPool();
+  const authDb = getTursoDb();
   return betterAuth({
-    ...config, appName:'FunctionGram', secret, database: pool,
+    ...config,
+    appName: 'FunctionGram',
+    secret,
+    database: {
+      db: authDb,
+      type: 'sqlite',
+    },
     plugins:[twoFactor({issuer:'RSTMC',twoFactorCookieMaxAge:300,trustDeviceMaxAge:0,accountLockout:{enabled:true,maxFailedAttempts:8,durationSeconds:900}})],
     databaseHooks: accountSessionHooks(pool),
     // Run before Better Auth opens a transaction. A pool read inside a user-create

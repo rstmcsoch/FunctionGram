@@ -1,9 +1,12 @@
-import { createClient, type Client } from "@libsql/client";
+import { Kysely } from "kysely";
+import { LibsqlDialect } from "@libsql/kysely-libsql";
 
-let client: Client | undefined;
+type FunctionGramDatabase = Record<string, Record<string, unknown>>;
 
-export function getTursoClient(): Client {
-  if (client) return client;
+let db: Kysely<FunctionGramDatabase> | undefined;
+
+export function getTursoDb(): Kysely<FunctionGramDatabase> {
+  if (db) return db;
 
     const url = process.env.TURSO_DATABASE_URL;
       const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -12,10 +15,12 @@ export function getTursoClient(): Client {
             throw new Error("Missing TURSO_DATABASE_URL");
               }
 
-                client = createClient({
-                    url,
-                        authToken,
-                          });
+                db = new Kysely<FunctionGramDatabase>({
+                    dialect: new LibsqlDialect({
+                          url,
+                                authToken,
+                                    }),
+                                      });
 
-                            return client;
-                            }
+                                        return db;
+                                        }
