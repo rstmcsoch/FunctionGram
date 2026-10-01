@@ -50,6 +50,12 @@ export function authConfiguration(env: AuthEnvironment = process.env) {
         '/delete-user': { window: 60, max: 3 },
       },
     },
-    session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
+    session: {
+      // Public sessions are intentionally finite: sign-in remains persistent
+      // across browser restarts, but the session expires three days after it
+      // is created. Logging in again starts a fresh three-day window.
+      expiresIn: 60 * 60 * 24 * 3,
+      updateAge: 60 * 60 * 24 * 3,
+    },
   };
 }
