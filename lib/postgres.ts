@@ -41,6 +41,37 @@ function isTursoDatabase() {
   return Boolean(process.env.TURSO_DATABASE_URL);
 }
 
+// Remove stray spaces, new lines or quotes that are easy to paste by mistake.
+function cleanEnv(value: string | undefined) {
+  if (!value) return undefined;
+  const cleaned = value.trim().replace(/^["']+|["']+$/g, '').trim();
+  return cleaned || undefined;
+}
+
+// libSQL cannot take undefined or boolean args.
+function sanitizeArgs(values: unknown[] = []) {
+  return values.map(value => {
+    if (value === undefined) return null;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    return value;
+  });
+}
+
+// Log the failing SQL (never the values) so Turso errors can be traced.
+async function runTurso<T>(sql: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(
+      '[turso] failed:',
+      sql.replace(/\s+/g, ' ').trim().slice(0, 500),
+      '|',
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  }
+}
+
 // Local development without a configured remote database continues to use
 // the existing PGlite implementation.
 // Turso is selected whenever TURSO_DATABASE_URL is present.
@@ -145,7 +176,9 @@ class TursoConnection implements QueryExecutor {
 
   private async begin() {
     if (!this.transaction) {
-      this.transaction = await this.client.transaction('write');
+      this.transaction = await runTurso('BEGIN (client.transaction)', () =>
+        this.client.transaction('write'),
+      );
     }
   }
 
@@ -166,7 +199,8 @@ class TursoConnection implements QueryExecutor {
 
     if (/^COMMIT\b/i.test(trimmed)) {
       if (this.transaction) {
-        await this.transaction.commit();
+        const tx = this.transaction;
+        await runTurso('COMMIT', () => tx.commit());
         this.transaction = undefined;
       }
       return { rows: [], rowCount: 0 };
@@ -174,25 +208,29 @@ class TursoConnection implements QueryExecutor {
 
     if (/^ROLLBACK\b/i.test(trimmed)) {
       if (this.transaction) {
-        await this.transaction.rollback();
+        const tx = this.transaction;
+        try {
+          await tx.rollback();
+        } catch (error) {
+          console.error(
+            '[turso] rollback failed:',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
         this.transaction = undefined;
       }
       return { rows: [], rowCount: 0 };
     }
 
-    let result: ResultSet;
+    const sql = postgresQuery(text);
+    const args = sanitizeArgs(values) as never;
+    const tx = this.transaction;
 
-    if (this.transaction) {
-      result = await this.transaction.execute({
-        sql: postgresQuery(text),
-        args: values as never,
-      });
-    } else {
-      result = await this.client.execute({
-        sql: text,
-        args: values as never,
-      });
-    }
+    const result: ResultSet = await runTurso(sql, () =>
+      tx
+        ? tx.execute({ sql, args })
+        : this.client.execute({ sql, args }),
+    );
 
     const isRead =
       /^\s*(SELECT|WITH|VALUES|TABLE|PRAGMA|EXPLAIN)\b/i.test(text);
@@ -220,10 +258,12 @@ class TursoPool implements PoolLike {
     text: string,
     values: unknown[] = [],
   ) {
-    const result = await this.client.execute({
-      sql: postgresQuery(text),
-      args: values as never,
-    });
+    const sql = postgresQuery(text);
+    const args = sanitizeArgs(values) as never;
+
+    const result = await runTurso(sql, () =>
+      this.client.execute({ sql, args }),
+    );
 
     const isRead =
       /^\s*(SELECT|WITH|VALUES|TABLE|PRAGMA|EXPLAIN)\b/i.test(text);
@@ -251,8 +291,8 @@ async function getTursoPool(): Promise<PoolLike> {
 
   if (existing) return existing;
 
-  const url = process.env.TURSO_DATABASE_URL;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
+  const url = cleanEnv(process.env.TURSO_DATABASE_URL);
+  const authToken = cleanEnv(process.env.TURSO_AUTH_TOKEN);
 
   if (!url) {
     throw new Error('FunctionGram requires TURSO_DATABASE_URL.');

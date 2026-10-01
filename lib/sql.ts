@@ -1,5 +1,7 @@
 function replacePostgresParameters(input: string): string {
-  return input.replace(/\$(\d+)/g, '?');
+  // Keep the parameter number: $2 -> ?2. SQLite binds ?N by position in the
+  // args array, so reused or out-of-order $N values stay correct.
+  return input.replace(/\$(\d+)/g, '?$1');
 }
 
 export function postgresQuery(input: string) {
