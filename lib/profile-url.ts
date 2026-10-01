@@ -1,18 +1,21 @@
+import { ADMIN_BASE_PATH } from "./admin/config";
+
 export const APP_VIEWS = ["create", "home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"] as const;
 export type AppView = (typeof APP_VIEWS)[number];
 
 // Top-level app routes, public prefixes, and the `/admin` alias from the
 // profile-URL spec. Existing folders under app/ keep priority over /<username>.
-export const RESERVED_PROFILE_PATHS = new Set([
+export const RESERVED_PROFILE_PATHS = new Set<string>([
   "admin",
+  "admin-panel",
   "admin-two-factor",
   "api",
   "media",
   "p",
   "reset-password",
-  "rstmcadmin",
   "two-factor",
   "verify-email",
+  ADMIN_BASE_PATH.replace(/^\//, ""),
   "_next",
   "favicon.ico",
   "favicon.svg",

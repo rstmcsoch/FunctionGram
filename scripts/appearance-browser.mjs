@@ -19,14 +19,14 @@ try{
   assert.ok(await page.locator('.public-footer').isVisible());await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.activeElement!==document.body));
   if(width===390)await page.screenshot({path:`.local/phase4-public-${theme}.png`,fullPage:true});
   assert.deepEqual(errors,[]);await context.close();
-  const adminPage=await admin.newPage();await adminPage.setViewportSize({width,height:900});await adminPage.goto(origin+'/rstmcadmin/appearance');await adminPage.waitForLoadState('networkidle');await adminPage.evaluate(t=>document.documentElement.dataset.theme=t,theme);
+  const adminPage=await admin.newPage();await adminPage.setViewportSize({width,height:900});await adminPage.goto(origin+'/admin-panel/appearance');await adminPage.waitForLoadState('networkidle');await adminPage.evaluate(t=>document.documentElement.dataset.theme=t,theme);
   assert.ok(await adminPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`editor overflow ${width}`);
   for(const el of await adminPage.locator('.appearance-editor button,.appearance-editor input:not([type=checkbox]),.appearance-editor select,.appearance-toggle').all()){const box=await el.boundingBox();assert.ok(box&&box.height>=44,'44px control');}
   await adminPage.close();console.log(`Appearance browser passed: ${width}px ${theme}`);
  }
  const direct=await browser.newPage();await direct.goto(origin+'/#/reels');await direct.getByRole('heading',{name:'This section is not available'}).waitFor();await direct.close();
  // Actual form save and local verified image upload (production upload needs a real Blob store).
- const page=await admin.newPage();await page.goto(origin+'/rstmcadmin/appearance');await page.getByLabel('Site name',{exact:true}).fill('Browser appearance');
+ const page=await admin.newPage();await page.goto(origin+'/admin-panel/appearance');await page.getByLabel('Site name',{exact:true}).fill('Browser appearance');
  await page.getByRole('button',{name:'Publish appearance',exact:true}).click();await page.getByText('Appearance published and audited.',{exact:false}).waitFor();
  if(process.env.ADMIN_TEST_SECURE_COOKIES!=='1'){
   await page.getByLabel('Upload logoLight',{exact:true}).setInputFiles('public/media/avatar-1.jpg');await page.getByText('Upload verified.',{exact:false}).waitFor();

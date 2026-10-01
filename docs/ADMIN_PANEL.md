@@ -1,6 +1,6 @@
 # FunctionGram Admin Panel — Operator Guide
 
-This guide covers the guarded administrator console at `/rstmcadmin`, its security model, recovery options, and routine operating procedures. The console is not a public CMS and is not indexed. Use a deployment preview for acceptance checks; do not test destructive actions on production data.
+This guide covers the guarded administrator console at `/admin-panel`, its security model, recovery options, and routine operating procedures. The console is not a public CMS and is not indexed. Use a deployment preview for acceptance checks; do not test destructive actions on production data.
 
 ## 1. Access and authority
 
@@ -21,14 +21,14 @@ Permissions are compiled into server-side policy. The browser UI is not an autho
 
 ### Choosing between your profile and the panel
 
-Public profiles live at `/<username>` (for example `/alice`), and the panel lives at its own static route `/rstmcadmin`. Because a username occupies the same root path segment as an application route, the reserved route names are derived from the routing table (`RESERVED_PROFILE_PATHS`) and enforced on write: `validateProfileUsername()` rejects a profile username that equals a reserved route, so no account can ever own `/rstmcadmin`, `/api`, or another application path. Next.js static segments already outrank `/[username]`, so `/rstmcadmin` always resolves to the panel and never to a profile.
+Public profiles live at `/<username>` (for example `/alice`), and the panel lives at its own static route `/admin-panel`. Because a username occupies the same root path segment as an application route, the reserved route names are derived from the routing table (`RESERVED_PROFILE_PATHS`) and enforced on write: `validateProfileUsername()` rejects a profile username that equals a reserved route, so no new account can take `admin-panel`, `admin`, `api`, or another application path. The panel path is a single constant (`ADMIN_BASE_PATH` in `lib/admin/config.ts`) that must match the `app/admin-panel` directory. Admin access is decided by the database role, never by username or path, so an account keeps its role and credentials when the path changes. Next.js static segments already outrank `/[username]`, so `/admin-panel` always resolves to the panel and never to a profile.
 
 Accounts with panel authority get a dismissible **Choose destination** popup:
 
 - once per browser session after sign-in, and
 - whenever they tap their own profile picture/avatar (dock, sidebar, header, or the home account card).
 
-It offers **My Profile** (`/<username>`) and **Admin Panel** (`/rstmcadmin`). It is a navigation convenience only:
+It offers **My Profile** (`/<username>`) and **Admin Panel** (`/admin-panel`). It is a navigation convenience only:
 
 - Authority comes from the live server-side check (`lib/admin/authority.ts` reuses `authorizeAdmin()` plus the `admin.access` permission). Exactly one boolean reaches the browser; no role, permission list, session data, or verification state does.
 - Accounts without `admin.access` never see the popup or the panel link, and editing client state cannot grant it.
@@ -49,7 +49,7 @@ All panel screens share the same protected shell and no-index policy. Navigation
 
 | Screen | Routine use | Restore / caution |
 | --- | --- | --- |
-| **Overview** (`/rstmcadmin`) | Community/account, recent-session, content, report, and storage summaries; migration/settings status. | Session refresh is not DAU. Use Analytics for its explicit definitions. |
+| **Overview** (`/admin-panel`) | Community/account, recent-session, content, report, and storage summaries; migration/settings status. | Session refresh is not DAU. Use Analytics for its explicit definitions. |
 | **Users** | Search accounts, inspect profile/access state, verify accounts, ban/unban, sign out, request password reset, trash/restore accounts, and owner-only role changes. | Restore an account from the **deleted** filter and its detail page. Restore does not clear an independent ban. Account trash is reversible; permanent user deletion is not offered here. |
 | **Content** | Search and review posts, reels, stories, and comments; edit, reorder, hide, trash, restore, pin/highlight, and handle bounded bulk operations according to role. | Restore content from its trash state. Hiding, trashing, and permanent purge are different actions; purge safeguards remain owner-only and require prior trash. |
 | **Appearance** | Publish site identity, themes, navigation, banners, and footer configuration. | Uploading an asset alone does not publish it. Save/publish the validated configuration, then reload the public site to check it. |
@@ -91,7 +91,7 @@ Use only if no owner can sign in and the ordinary owner recovery path is unavail
 2. Identify a known account you control. It must be an active, unbanned, non-deleted account with a verified email. If none exists, create and verify one through the normal signup flow first. Do not use another person's account.
 3. Confirm the target row and current state with a read-only query. Replace both placeholders below with the exact account ID and verified email; do not use a broad email/domain match.
 4. Run the transaction once. It serializes with application role changes, promotes only the exact eligible row, revokes that account's existing sessions, and appends an audit entry. If it returns no audit row, stop and investigate rather than weakening the conditions.
-5. Sign in through the normal application flow, complete the required TOTP enrollment if prompted, check `/rstmcadmin/security`, and confirm owner-only controls are available. Test from the approved network if an IP allowlist is configured. Remove or demote any temporary recovery owner only after another owner has verified access.
+5. Sign in through the normal application flow, complete the required TOTP enrollment if prompted, check `/admin-panel/security`, and confirm owner-only controls are available. Test from the approved network if an IP allowlist is configured. Remove or demote any temporary recovery owner only after another owner has verified access.
 
 Read-only preflight:
 

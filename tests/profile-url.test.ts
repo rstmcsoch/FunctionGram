@@ -93,7 +93,8 @@ test('J. reserved paths are not treated as profiles', () => {
   assert.ok(RESERVED_PROFILE_PATHS.has('admin'));
   assert.equal(parseLocation('/api', '').view, 'home');
   assert.equal(parseLocation('/admin', '').view, 'home');
-  assert.equal(parseLocation('/rstmcadmin', '').view, 'home');
+  assert.equal(parseLocation('/admin-panel', '').view, 'home');
+  assert.equal(parseLocation('/rstmcadmin', '').view, 'profile');
 });
 
 test('username matching is case-insensitive and prefers username over id', () => {
@@ -154,7 +155,7 @@ test('existing top-level app routes stay reserved and are not shadowed', () => {
   const dirs = readdirSync('app', { withFileTypes: true })
     .filter(entry => entry.isDirectory() && entry.name !== '[username]')
     .map(entry => entry.name);
-  assert.deepEqual(dirs.sort(), ['admin-two-factor', 'api', 'p', 'reset-password', 'rstmcadmin', 'two-factor', 'verify-email']);
+  assert.deepEqual(dirs.sort(), ['admin-panel', 'admin-two-factor', 'api', 'p', 'reset-password', 'two-factor', 'verify-email']);
   for (const dir of dirs) assert.ok(RESERVED_PROFILE_PATHS.has(dir), dir);
   assert.ok(existsSync('app/[username]/page.tsx'));
   const usernamePage = readFileSync('app/[username]/page.tsx', 'utf8');

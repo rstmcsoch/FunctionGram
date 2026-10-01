@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PGlite } from '@electric-sql/pglite';
@@ -110,6 +110,15 @@ test('the chooser offers /<username> and the one existing protected admin route'
 });
 
 test('reserved application routes cannot be claimed as usernames', () => {
+  assert.equal(ADMIN_BASE_PATH, '/admin-panel');
+  for (const name of ['admin-panel', 'admin']) {
+    assert.ok(RESERVED_PROFILE_PATHS.has(name), name);
+    assert.ok(isReservedProfilePath(name), name);
+  }
+  assert.ok(!existsSync('app/rstmcadmin'), 'the old admin route folder is gone');
+  assert.ok(!RESERVED_PROFILE_PATHS.has('rstmcadmin'), 'the former admin route is an ordinary profile again');
+  assert.equal(profileUrl('rstmcadmin'), '/rstmcadmin');
+  assert.equal(parseLocation('/rstmcadmin', '').routeValue, 'rstmcadmin');
   assert.equal(validateProfileUsername(alice.username).ok, true);
   assert.equal(validateProfileUsername('john.doe').ok, true);
   assert.equal(validateProfileUsername('john_doe').ok, true);
@@ -120,7 +129,7 @@ test('reserved application routes cannot be claimed as usernames', () => {
 
   // Reserved names that the username grammar would otherwise accept are
   // rejected as reserved, so no account can ever own an application route.
-  for (const reserved of [adminPath, 'admin', 'api', 'media']) {
+  for (const reserved of ['admin', 'api', 'media']) {
     assert.ok(isReservedProfilePath(reserved), reserved);
     const result = validateProfileUsername(reserved);
     assert.equal(result.ok, false, reserved);
@@ -169,7 +178,7 @@ test('the chooser adds no authorization of its own and leaves admin gating untou
   assert.match(guard, /assertAdminSessionFresh\(/);
   assert.match(guard, /assertAdminIpAllowed\(/);
   assert.match(guard, /redirect\('\/admin-two-factor\/setup'\)/);
-  for (const page of ['app/rstmcadmin/layout.tsx', 'app/rstmcadmin/page.tsx']) {
+  for (const page of ['app/admin-panel/layout.tsx', 'app/admin-panel/page.tsx']) {
     assert.match(readFileSync(page, 'utf8'), /requireAdminPage\(\)/, page);
   }
 

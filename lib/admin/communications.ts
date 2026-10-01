@@ -22,7 +22,7 @@ function text(value: unknown, max: number, label: string, required = false) {
 }
 function pageSlug(value: unknown) {
   const slug = text(value, 80, 'page slug', true).toLowerCase();
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || ['admin', 'api', 'rstmcadmin', 'two-factor', 'verify-email', 'reset-password'].includes(slug)) throw new AdminError('Use a simple, non-reserved page slug.');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || ['admin', 'admin-panel', 'api', 'two-factor', 'verify-email', 'reset-password'].includes(slug)) throw new AdminError('Use a simple, non-reserved page slug.');
   return slug;
 }
 function safeUrl(value: unknown, label: string, allowEmpty = false) {

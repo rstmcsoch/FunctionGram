@@ -7,7 +7,7 @@ const cookies=JSON.parse(await readFile('.local/admin-check.json','utf8')) as Re
 if(process.env.ADMIN_TEST_SECURE_COOKIES==='1')for(const id of Object.keys(cookies))cookies[id]='__Secure-'+cookies[id];
 await fetch(origin+'/api/social');
 for(const [who,status]of [['guest',401],['regular',403],['unverified',401],['banned',403],['revoked',401],['expired',401],['admin',200]] as const){
- for(const path of ['/rstmcadmin/appearance','/api/admin/appearance']){const res=await fetch(origin+path,{headers:{cookie:cookies[who]||''}});assert.equal(res.status,status,who+' '+path);assert.match(res.headers.get('cache-control')||'',/no-store|no-cache/);}
+ for(const path of ['/admin-panel/appearance','/api/admin/appearance']){const res=await fetch(origin+path,{headers:{cookie:cookies[who]||''}});assert.equal(res.status,status,who+' '+path);assert.match(res.headers.get('cache-control')||'',/no-store|no-cache/);}
 }
 const save=(value:unknown,who='admin',from=origin)=>fetch(origin+'/api/admin/appearance',{method:'POST',headers:{cookie:cookies[who]||'',origin:from,'content-type':'application/json'},body:JSON.stringify({value})});
 for(const who of ['guest','regular'])assert.equal((await save(DEFAULT_APPEARANCE,who)).status,who==='guest'?401:403);
