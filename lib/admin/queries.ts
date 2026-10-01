@@ -1,4 +1,5 @@
 import type { QueryExecutor } from '../postgres';
+import { dialectOf } from '../sql';
 import { AdminError } from './validation';
 
 export type UserFilters = { q: string; status: string; role: string; page: number; limit: number };
@@ -53,20 +54,24 @@ export async function userDetail(db: QueryExecutor, id: string) {
   return { user, counts, sessions };
 }
 export async function dashboard(db: QueryExecutor) {
-  // Cutoffs are computed here and bound as ISO-8601 UTC strings instead of using
-  // PostgreSQL-only `now()-interval '7 days'`, which libSQL/Turso cannot parse.
-  // Better Auth stores "createdAt"/"updatedAt"/"expiresAt" as ISO text on
-  // Turso and as timestamptz on PostgreSQL; both compare correctly against it.
-  const now = Date.now();
-  const nowIso = new Date(now).toISOString();
-  const weekAgoIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // Turso/libSQL stores these Better Auth timestamps as Unix milliseconds and
+  // cannot parse PostgreSQL `interval '7 days'` arithmetic (SQL_PARSE_ERROR).
+  // The "last seven days" window is therefore compared in epoch milliseconds:
+  //   libSQL:     "createdAt" > (unixepoch()*1000 - 7*24*60*60*1000)
+  //   PostgreSQL: "createdAt" > (extract(epoch from "createdAt")*1000 ...)
+  // The local PostgreSQL/PGlite runtime keeps timestamptz columns, so it keeps
+  // the equivalent epoch expression instead of the millisecond integer.
+  const sqlite = dialectOf(db) === 'sqlite';
+  const epochMs = (column: string) => sqlite ? column : `(extract(epoch from ${column})*1000)`;
+  const nowMs = sqlite ? 'unixepoch()*1000' : 'extract(epoch from now())*1000';
+  const weekAgoMs = `(${nowMs} - 7*24*60*60*1000)`;
   const { rows: [stats] } = await db.query(`SELECT
     (SELECT COUNT(*) FROM "user") AS users,
-    (SELECT COUNT(*) FROM "user" WHERE "createdAt">$1) AS new_users,
-    (SELECT COUNT(DISTINCT "userId") FROM session WHERE "updatedAt">$1 AND "expiresAt">$2) AS active_users,
+    (SELECT COUNT(*) FROM "user" WHERE ${epochMs('"createdAt"')} > ${weekAgoMs}) AS new_users,
+    (SELECT COUNT(DISTINCT "userId") FROM session WHERE ${epochMs('"updatedAt"')} > ${weekAgoMs} AND ${epochMs('"expiresAt"')} > (${nowMs})) AS active_users,
     (SELECT COUNT(*) FROM posts WHERE deleted_at IS NULL) AS posts,
     (SELECT COUNT(*) FROM reports WHERE status IN ('new','triage')) AS reports,
-    (SELECT COALESCE(SUM(size),0) FROM assets) AS storage_bytes`, [weekAgoIso, nowIso]);
+    (SELECT COALESCE(SUM(size),0) FROM assets) AS storage_bytes`);
   return stats;
 }
 export function usersCsv(users: UserRow[]) {

@@ -6,7 +6,7 @@ import {
 import type { QueryResultRow as PgQueryResultRow } from 'pg';
 
 import { serializedPool } from './serialized-pool';
-import { postgresQuery } from './sql';
+import { postgresQuery, type SqlDialect } from './sql';
 
 import { tursoSchemaStatements } from './turso-schema';
 
@@ -18,6 +18,14 @@ export interface QueryResult {
 }
 
 export interface QueryExecutor {
+  /**
+   * Storage dialect of the underlying database. Turso/libSQL keeps the Better
+   * Auth timestamps as Unix milliseconds; the local PostgreSQL/PGlite fallback
+   * keeps them as `timestamptz`. Defaults to the deployed libSQL runtime.
+   * Deliberately not named `dialect`: Better Auth treats any database object
+   * with a `dialect` property as a Kysely instance.
+   */
+  readonly storageDialect?: SqlDialect;
   query(
     text: string,
     values?: unknown[],
@@ -156,7 +164,7 @@ async function createLocalPool(): Promise<PoolLike> {
     };
   };
 
-  return serializedPool({ query });
+  return serializedPool({ storageDialect: 'postgres', query });
 }
 
 async function getLocalPool(): Promise<PoolLike> {
@@ -184,6 +192,8 @@ async function getLocalPool(): Promise<PoolLike> {
 // statement after BEGIN). So BEGIN / COMMIT / ROLLBACK are no-ops here and
 // each statement runs on its own. Use pool.batch() when you need atomic writes.
 class TursoConnection implements QueryExecutor {
+  readonly storageDialect = 'sqlite' as const;
+
   constructor(private readonly client: Client) {}
 
   async query(
@@ -218,7 +228,11 @@ class TursoConnection implements QueryExecutor {
   }
 }
 
-class TursoPool implements PoolLike {
+// Exported so tests can run the real production executor against a local
+// in-memory libSQL database without any Turso credentials.
+export class TursoPool implements PoolLike {
+  readonly storageDialect = 'sqlite' as const;
+
   constructor(private readonly client: Client) {}
 
   async query(
