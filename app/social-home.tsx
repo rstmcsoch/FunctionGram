@@ -1,6 +1,7 @@
 import {getTranslator} from '@/lib/public-labels';
 import {identity} from '@/lib/server';
 import {featurePolicy} from '@/lib/feature-policy';
+import {adminPanelAuthority} from '@/lib/admin/authority';
 import {AccessScreen} from '@/components/social/access-screen';
 import { publicAppearance } from '@/lib/public-appearance';
 import {bootstrap} from '@/lib/server';
@@ -18,6 +19,9 @@ export async function SocialHome({ initialUsername }: { initialUsername?: string
  if(!viewer&&!policy.flags.guestBrowsing)return <AccessScreen title={t("page.sign_in_to_continue")} message={t("page.browsing_is_available_to_signed_in_members_")} appearance={appearance} flags={policy.flags} maintenance={false}/>;
  let initial:SocialData|null=null;
  try{initial=await bootstrap();}catch(error){console.error('Feed unavailable',error);}
- const [cmsPages,announcements]=await Promise.all([publicCmsFooterPages(),activePublicAnnouncements(!!viewer)]);
- return <RstmcApp initial={initial} appearance={appearance} cmsPages={cmsPages} announcements={announcements} initialUsername={initialUsername}/>;
+ const [cmsPages,announcements,adminAccess]=await Promise.all([publicCmsFooterPages(),activePublicAnnouncements(!!viewer),adminPanelAuthority(viewer)]);
+ // Only this boolean crosses to the browser: "may this account open the Admin
+ // Panel?" It drives the destination chooser UI and grants nothing — the panel
+ // re-checks role, two-factor, IP policy and session age on every request.
+ return <RstmcApp initial={initial} appearance={appearance} cmsPages={cmsPages} announcements={announcements} initialUsername={initialUsername} adminAccess={adminAccess}/>;
 }

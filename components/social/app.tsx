@@ -18,6 +18,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Avatar, IconButton, Modal, Empty, Busy, request, subscribeTheme, readTheme, toggleStoredTheme } from "./common";
 import { AuthForm, SignOutButton } from "./auth-form";
+import { AuthorityChooser } from "./authority-chooser";
 import type { PostActions } from "./post-card";
 import { PostViewer, Relations } from "./post-viewer";
 import { CreateDialog, EditProfile, EditPostDialog } from "./create";
@@ -33,7 +34,16 @@ import { parseLocation, profileShareLink, resolvePerson, viewLocation } from "@/
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
 type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
-export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE, cmsPages = [], announcements = [], initialUsername }: { initial: SocialData | null; appearance?: Appearance; cmsPages?: CmsFooterPage[]; announcements?: LiveAnnouncement[]; initialUsername?: string }) {
+// One chooser per browser session after sign-in; avatar taps always reopen it.
+const AUTHORITY_CHOOSER_KEY = "functiongram.authorityDestination";
+function authorityChooserSeen() {
+  try { return window.sessionStorage.getItem(AUTHORITY_CHOOSER_KEY) === "1"; } catch { return false; }
+}
+function rememberAuthorityChooser() {
+  try { window.sessionStorage.setItem(AUTHORITY_CHOOSER_KEY, "1"); } catch { /* storage blocked: in-memory state only */ }
+}
+
+export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE, cmsPages = [], announcements = [], initialUsername, adminAccess = false }: { initial: SocialData | null; appearance?: Appearance; cmsPages?: CmsFooterPage[]; announcements?: LiveAnnouncement[]; initialUsername?: string; adminAccess?: boolean }) {
   const t=useLabels();
   const [data, setData] = useState<SocialData>(initial || emptyData);
   const mediaPolicy=useMediaPolicy();const resolvedFlags=data.features||ALL_FEATURES;const flags={...resolvedFlags,uploads:resolvedFlags.uploads&&mediaPolicy.enabled};
@@ -64,6 +74,9 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const [moreLoading, setMoreLoading] = useState(false);
   const [relation, setRelation] = useState<{ person: Person; kind: "followers" | "following" } | null>(null);
   const [settings, setSettings] = useState(false);
+  // Authority destination chooser (My Profile vs. Admin Panel). UI only: the
+  // Admin Panel link re-runs the panel's own authorization and verification.
+  const [chooser, setChooser] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [reportTarget, setReportTarget] = useState<Person | null>(null);
   const [followingFeed, setFollowingFeed] = useState<{ posts: Post[]; hasMore: boolean; loading: boolean }>({ posts: [], hasMore: false, loading: false });
@@ -74,6 +87,19 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const scrollMemory = useRef<Record<string, number>>({});
 
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
+
+  // After a successful sign-in, an account with Admin Panel authority is asked
+  // where to go instead of being pushed into the panel. `adminAccess` comes from
+  // the server-side role/permission check, so an ordinary account never reaches
+  // this branch and never sees the Admin Panel option. The sessionStorage flag
+  // keeps a reload from nagging and stops two surfaces stacking the popup.
+  const authorityViewerId = adminAccess ? viewerId ?? null : null;
+  useEffect(() => {
+    if (!authorityViewerId || authorityChooserSeen()) return;
+    rememberAuthorityChooser();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time prompt for a freshly signed-in authority account; the sessionStorage flag above keeps it from ever repeating or stacking.
+    setChooser(true);
+  }, [authorityViewerId]);
 
 
   /* --------------------------------- data layer --------------------------------- */
@@ -114,6 +140,12 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const navigate = useCallback((next: View | string, id?: string) => {
     const target = next as View;
     const person = target === "profile" ? (id ? resolvePerson(data.people, data.me, id) : data.me) : null;
+    // Authority accounts pick between their profile and the Admin Panel rather
+    // than being sent straight to /<username>. Every own-profile entry point
+    // (dock avatar, sidebar, header, home account card) funnels through here,
+    // so no surface can bypass the chooser; other people's profiles, which
+    // always carry an id, are unaffected.
+    if (target === "profile" && adminAccess && data.me && (!person || person.id === data.me.id)) { setChooser(true); return; }
     const routeValue = target === "profile" ? (person?.id || id || null) : (id || null);
     const fromKey = view + ":" + (profileId || "");
     const toKey = target + ":" + (routeValue || "");
@@ -125,7 +157,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     const nextUrl = viewLocation(target, id, data.people, data.me);
     if (window.location.pathname + window.location.hash !== nextUrl) window.history.pushState(null, "", nextUrl);
     requestAnimationFrame(() => { window.scrollTo({ top: scrollMemory.current[toKey] ?? 0 }); });
-  }, [view,profileId,data.people,data.me,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
+  }, [view,profileId,adminAccess,data.people,data.me,setChooser,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
 
   useEffect(() => {
     const update = () => {
@@ -451,7 +483,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   // Full-screen viewers and bottom sheets own the screen, so the floating dock
   // steps aside instead of floating over them.
-  const dockCovered = !!create || !!edit || (flags.stories && story !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation;
+  const dockCovered = !!create || !!edit || (flags.stories && story !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation || chooser;
 
   return (
     <FeatureContext value={flags}><div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
@@ -537,6 +569,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       <Modal open={login} onClose={() => setLogin(false)} title={t("app.make_yourself_at_home")} description={t("app.sign_in_to_share_your_moments_follow_people_and_join_the_conversa")}>
         <div className="sign-in-content"><AuthForm key={authMode} initialMode={authMode} /></div>
       </Modal>
+      {chooser && data.me && <AuthorityChooser username={data.me.username} onClose={() => setChooser(false)} />}
       <AlertDialog open={!!deleteTarget} onOpenChange={value => { if (!value) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

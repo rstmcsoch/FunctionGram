@@ -19,6 +19,22 @@ Permissions are compiled into server-side policy. The browser UI is not an autho
 - `ADMIN_IP_ALLOWLIST`, when non-empty, is enforced server-side and fails closed for malformed policy. Confirm the operator's actual stable network and recovery path before enabling or editing it.
 - Never share session cookies, passwords, TOTP seeds, recovery codes, auth secrets, database URLs, Blob tokens, or provider credentials. Use the deployment secret manager; the system inspector only reports configured/not-configured booleans.
 
+### Choosing between your profile and the panel
+
+Public profiles live at `/<username>` (for example `/alice`), and the panel lives at its own static route `/rstmcadmin`. Because a username occupies the same root path segment as an application route, the reserved route names are derived from the routing table (`RESERVED_PROFILE_PATHS`) and enforced on write: `validateProfileUsername()` rejects a profile username that equals a reserved route, so no account can ever own `/rstmcadmin`, `/api`, or another application path. Next.js static segments already outrank `/[username]`, so `/rstmcadmin` always resolves to the panel and never to a profile.
+
+Accounts with panel authority get a dismissible **Choose destination** popup:
+
+- once per browser session after sign-in, and
+- whenever they tap their own profile picture/avatar (dock, sidebar, header, or the home account card).
+
+It offers **My Profile** (`/<username>`) and **Admin Panel** (`/rstmcadmin`). It is a navigation convenience only:
+
+- Authority comes from the live server-side check (`lib/admin/authority.ts` reuses `authorizeAdmin()` plus the `admin.access` permission). Exactly one boolean reaches the browser; no role, permission list, session data, or verification state does.
+- Accounts without `admin.access` never see the popup or the panel link, and editing client state cannot grant it.
+- Opening the panel still runs the full existing gate on every request — database role, verified email, account status, TOTP/recovery-code second factor, `ADMIN_IP_ALLOWLIST`, and the absolute 12-hour admin session — and role permissions still decide which sections that operator can open. The chooser cannot bypass, weaken, or replace any of it.
+- An administrator who has not enrolled a second factor is still routed to the existing enrollment screen; a password-only session never reaches a panel page.
+
 ### Bootstrap and administrator email rotation
 
 `ADMIN_BOOTSTRAP_EMAIL` is a one-time bootstrap selector, not an ongoing owner assignment. On sign-in, a matching verified ordinary account can receive the bootstrap `admin` role only if the durable `admin_bootstrap` marker is absent and no privileged account already exists. Once the marker is written, changing the environment variable does not transfer access or reopen bootstrap. Do not delete/reset `admin_bootstrap` to rotate an address.
