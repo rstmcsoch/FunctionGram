@@ -12,7 +12,8 @@
 .admin-shell .admin-page-head-banner {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  z-index: 30;
+  overflow: visible;
   padding: 28px;
   border: 1px solid var(--adm-border);
   border-radius: 14px;
@@ -33,6 +34,7 @@
   height: 320px;
   border-radius: 50%;
   background: radial-gradient(closest-side, rgba(27, 132, 255, .08), transparent);
+  clip-path: inset(0 round 14px);
   pointer-events: none;
 }
 
