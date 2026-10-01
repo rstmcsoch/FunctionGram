@@ -12,31 +12,13 @@
    ========================================================================== */
 
 /* ==========================================================================
-   0. Field border tokens (§7 of the fix list)
+   0. Field borders
+
+   `--adm-field-border` / `--adm-field-border-hover` are defined for both
+   palettes in admin-tokens.css and mapped by the admin theme attribute, so no
+   per-theme override is needed here any more (an old `data-theme` copy here
+   would fight the panel's own theme when the public site is dark).
    ========================================================================== */
-
-.admin-shell,
-.admin-confirm-dialog {
-  --adm-field-border: #cfd3db;
-  --adm-field-border-hover: #b6bcc7;
-}
-
-html[data-theme="dark"] .admin-shell,
-html[data-theme="dark"] .admin-confirm-dialog,
-.dark .admin-shell,
-.dark .admin-confirm-dialog {
-  --adm-field-border: #3f3f49;
-  --adm-field-border-hover: #52525e;
-}
-
-@media (prefers-color-scheme: dark) {
-
-  html:not([data-theme]) .admin-shell,
-  html:not([data-theme]) .admin-confirm-dialog {
-    --adm-field-border: #3f3f49;
-    --adm-field-border-hover: #52525e;
-  }
-}
 
 /* ==========================================================================
    1. Sidebar — nothing overlaps at any screen height
@@ -63,11 +45,15 @@ html[data-theme="dark"] .admin-confirm-dialog,
   background: var(--adm-bg);
 }
 
-/* Nav: normal flow, never absolute, never a scroll container of its own. */
+/* Nav: normal flow, never absolute. It is the sidebar's scroll container so
+   the brand, theme switcher and account card stay pinned and reachable. */
 .admin-shell .admin-nav {
   position: static;
-  flex: none;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   /* 8px shell gap + 4px = the 12px of clear space above the account card. */
   padding-bottom: var(--adm-s1);
 }
@@ -509,7 +495,7 @@ html[data-theme="dark"] .admin-confirm-dialog,
 .admin-shell .admin-skeleton {
   display: block;
   border-radius: var(--adm-r-control);
-  background: linear-gradient(90deg, var(--adm-muted-surface), var(--adm-border-subtle), var(--adm-muted-surface));
+  background: linear-gradient(90deg, var(--adm-muted-surface) 0%, color-mix(in srgb, var(--adm-accent) 8%, var(--adm-border-subtle)) 50%, var(--adm-muted-surface) 100%);
   background-size: 200% 100%;
   animation: admin-skeleton-pulse 1.2s ease-in-out infinite;
 }

@@ -11,6 +11,8 @@
      4. admin-components.css §8 reusable primitives
      5. admin-pages.css      §9 page recipes and §10 designer touches
      6. admin-fixes.css      fix pass 1 — layout, colour and responsive repairs
+     7. admin-search.css     universal search
+     8. admin-theme.css      light/dark theme system (chrome, components)
 
    Later layers must win at equal specificity, so they are imported last.
    ========================================================================== */
@@ -23,3 +25,4 @@
 @import './admin-fixes.css';
 
 @import './admin-search.css';
+@import './admin-theme.css';
