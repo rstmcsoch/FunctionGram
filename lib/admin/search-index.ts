@@ -22,12 +22,13 @@ const item = (
 
 const section = (
   page: string,
+  root: string,
   title: string,
   leaves: Array<{ title: string; keywords?: string[] }>,
   permission: AdminPermission,
 ) => leaves.map(leaf => item(
   leaf.title,
-  [title, leaf.title],
+  [root, title, leaf.title],
   BASE + page,
   permission,
   [page.replace(/^\//, ''), title, ...(leaf.keywords ?? [])],
@@ -79,7 +80,7 @@ const STATIC_ITEMS: AdminSearchItem[] = [
 ];
 
 const APPEARANCE_ITEMS: AdminSearchItem[] = [
-  ...section('/appearance', 'Brand & layout', [
+  ...section('/appearance', 'Appearance', 'Brand & layout', [
     { title: 'Site name', keywords: ['brand.name', 'branding', 'name'] },
     { title: 'Wordmark', keywords: ['brand', 'logo'] },
     { title: 'Default theme', keywords: ['theme.defaultTheme', 'light', 'dark', 'system'] },
@@ -91,25 +92,25 @@ const APPEARANCE_ITEMS: AdminSearchItem[] = [
     { title: 'Dark logo URL', keywords: ['logo', 'dark'] },
     { title: 'Favicon URL', keywords: ['favicon', 'icon'] },
   ], 'settings.manage'),
-  ...section('/appearance', 'Light palette', [
+  ...section('/appearance', 'Appearance', 'Light palette', [
     ...['primary', 'background', 'foreground', 'card', 'canvas', 'muted', 'border'].map(key => ({
       title: 'Light ' + key,
       keywords: ['palette', 'color', 'colour', key, 'light', 'theme'],
     })),
   ], 'settings.manage'),
-  ...section('/appearance', 'Dark palette', [
+  ...section('/appearance', 'Appearance', 'Dark palette', [
     ...['primary', 'background', 'foreground', 'card', 'canvas', 'muted', 'border'].map(key => ({
       title: 'Dark ' + key,
       keywords: ['palette', 'color', 'colour', key, 'dark', 'theme'],
     })),
   ], 'settings.manage'),
-  ...section('/appearance', 'Announcement', [
+  ...section('/appearance', 'Appearance', 'Announcement', [
     { title: 'Show announcement', keywords: ['announcement.enabled', 'enable', 'announcement'] },
     { title: 'Announcement text', keywords: ['announcement', 'message', 'text'] },
     { title: 'Announcement label', keywords: ['announcement', 'badge', 'label'] },
     { title: 'Announcement URL', keywords: ['announcement', 'link', 'url'] },
   ], 'settings.manage'),
-  ...section('/appearance', 'Hero banner', [
+  ...section('/appearance', 'Appearance', 'Hero banner', [
     { title: 'Show hero', keywords: ['hero', 'banner', 'enabled'] },
     { title: 'Hero title', keywords: ['hero', 'banner', 'title'] },
     { title: 'Hero text', keywords: ['hero', 'banner', 'text'] },
@@ -117,7 +118,7 @@ const APPEARANCE_ITEMS: AdminSearchItem[] = [
     { title: 'Hero label', keywords: ['hero', 'banner', 'label'] },
     { title: 'Hero URL', keywords: ['hero', 'banner', 'link', 'url'] },
   ], 'settings.manage'),
-  ...section('/appearance', 'Navigation builder', [
+  ...section('/appearance', 'Appearance', 'Navigation builder', [
     { title: 'Navigation label', keywords: ['nav', 'navigation', 'label'] },
     { title: 'Navigation icon', keywords: ['nav', 'icon'] },
     { title: 'Navigation target', keywords: ['nav', 'route', 'url', 'target'] },
@@ -130,7 +131,7 @@ const APPEARANCE_ITEMS: AdminSearchItem[] = [
     { title: 'Navigation item removal', keywords: ['remove', 'delete', 'nav'] },
     { title: 'Add navigation item', keywords: ['custom link', 'nav'] },
   ], 'settings.manage'),
-  ...section('/appearance', 'Public footer', [
+  ...section('/appearance', 'Appearance', 'Public footer', [
     { title: 'Show footer', keywords: ['footer'] },
     { title: 'Copyright / legal row', keywords: ['footer', 'copyright', 'legal'] },
     { title: 'Footer column heading', keywords: ['footer', 'column'] },
@@ -168,20 +169,20 @@ const FEATURE_ITEMS: AdminSearchItem[] = FEATURE_KEYS.flatMap(key => [
 ]);
 
 const FEATURE_OTHER: AdminSearchItem[] = [
-  ...section('/features', 'Maintenance', [
+  ...section('/features', 'Features & availability', 'Maintenance', [
     { title: 'Enable maintenance mode', keywords: ['maintenance.enabled', 'maintenance', 'mode'] },
     { title: 'Public title', keywords: ['maintenance', 'title'] },
     { title: 'Public message', keywords: ['maintenance', 'message'] },
     { title: 'Maintenance confirmation', keywords: ['maintenance', 'confirmation'] },
   ], 'settings.manage'),
-  ...section('/features', 'Displayed engagement', [
+  ...section('/features', 'Features & availability', 'Displayed engagement', [
     { title: 'Multiplier', keywords: ['counters.multiplier', 'engagement', 'counts'] },
     { title: 'Jitter amplitude', keywords: ['counters.jitter', 'engagement', 'jitter'] },
     { title: 'Hide public post engagement counts', keywords: ['counters.hide', 'likes', 'comments', 'views'] },
   ], 'settings.manage'),
 ];
 
-const MEDIA_ITEMS = section('/media', 'Upload controls', [
+const MEDIA_ITEMS = section('/media', 'Media', 'Upload controls', [
   { title: 'Enable uploads', keywords: ['media.enabled', 'uploads', 'upload'] },
   { title: 'File limit (MB)', keywords: ['upload.maxFileMb', 'file', 'size', 'mb'] },
   { title: 'Rolling 24-hour quota per account (MB)', keywords: ['upload.dailyQuotaMb', 'quota', 'daily', '24 hour', 'mb'] },
@@ -193,7 +194,7 @@ const MEDIA_ITEMS = section('/media', 'Upload controls', [
   { title: 'Allowed media types', keywords: ['allowedTypes', 'mime', 'file types'] },
 ], 'media.manage');
 
-const CONTENT_ITEMS = section('/content', 'Story & reel controls', [
+const CONTENT_ITEMS = section('/content', 'Content', 'Story & reel controls', [
   { title: 'New story lifetime', keywords: ['content.storyHours', 'story', 'hours', 'lifetime', 'expiry'] },
   { title: 'Reels enabled', keywords: ['content.reelsEnabled', 'reels', 'on', 'off'] },
   { title: 'New reel duration cap', keywords: ['content.reelMaxSeconds', 'reel', 'duration', 'seconds'] },
@@ -201,7 +202,7 @@ const CONTENT_ITEMS = section('/content', 'Story & reel controls', [
 ], 'settings.manage');
 
 const SAFETY_ITEMS: AdminSearchItem[] = [
-  ...section('/moderation', 'Word & domain filters', [
+  ...section('/moderation', 'Safety', 'Word & domain filters', [
     { title: 'Enable content filters', keywords: ['moderation.enabled', 'filters', 'safety'] },
     { title: 'Regex mode', keywords: ['moderation.regexMode', 'regex', 'patterns'] },
     { title: 'Blocked words / patterns', keywords: ['blockedWords', 'words', 'patterns'] },
