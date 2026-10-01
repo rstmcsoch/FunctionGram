@@ -1,3 +1,20 @@
+/**
+ * Timestamp storage differs per runtime. The deployed libSQL/Turso database
+ * stores Better Auth dates as Unix milliseconds (Kysely's libSQL dialect turns
+ * a `Date` into its epoch milliseconds), while the local PostgreSQL/PGlite
+ * fallback keeps `timestamptz` columns. SQL that compares these timestamps must
+ * therefore be written per dialect; `now()` alone is not enough.
+ *
+ * Executors that do not declare a dialect are treated as the deployed
+ * libSQL/Turso runtime; only the local PGlite fallback and PostgreSQL test
+ * doubles declare `storageDialect: 'postgres'`.
+ */
+export type SqlDialect = 'sqlite' | 'postgres';
+
+export function dialectOf(executor: { storageDialect?: SqlDialect }): SqlDialect {
+  return executor.storageDialect === 'postgres' ? 'postgres' : 'sqlite';
+}
+
 function replacePostgresParameters(input: string): string {
   // Keep the parameter number: $2 -> ?2. SQLite binds ?N by position in the
   // args array, so reused or out-of-order $N values stay correct.

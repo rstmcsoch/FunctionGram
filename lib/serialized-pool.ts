@@ -12,6 +12,7 @@ export function serializedPool(executor: QueryExecutor): PoolLike {
     return unlock;
   }
   return {
+    storageDialect: executor.storageDialect,
     async query(text, values) {
       const release = await acquire();
       try { return await executor.query(text, values); }
@@ -21,6 +22,7 @@ export function serializedPool(executor: QueryExecutor): PoolLike {
       const unlock = await acquire();
       let released = false;
       return {
+        storageDialect: executor.storageDialect,
         query(text, values) {
           if (released) throw new Error('Database connection already released.');
           return executor.query(text, values);
