@@ -14,6 +14,16 @@ export function accountEnabled(user: { banned?: boolean; banExpires?: Date | str
   if (!user || user.deleted_at != null) return false;
   return !user.banned || (user.banExpires != null && new Date(user.banExpires).getTime() <= Date.now());
 }
+
+/**
+ * Boolean columns read back as `true`/`false` from PostgreSQL and as `1`/`0`
+ * from libsql/SQLite. Access gates must behave identically on both runtimes, so
+ * compare stored flags with this helper instead of `=== true` — a strict
+ * comparison silently rejects every row on libsql.
+ */
+export function flagIsTrue(value: unknown): boolean {
+  return value === true || value === 1;
+}
 export async function accountCanSignIn(db: QueryExecutor, id: string) {
   const { rows: [user] } = await db.query('SELECT banned,"banExpires",deleted_at FROM "user" WHERE id=$1', [id]);
   return accountEnabled(user);

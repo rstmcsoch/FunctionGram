@@ -1,6 +1,6 @@
 // Database primitives are separated from Next request/cache adapters so tests
 // execute the real SQL. Never expose these as actions or import into client UI.
-import { accountEnabled } from '../account-policy';
+import { accountEnabled, flagIsTrue } from '../account-policy';
 import { DEFAULT_MEDIA } from '../media-config';
 import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
@@ -23,7 +23,7 @@ export async function authorizeAdmin(db: QueryExecutor, userId: string | null, o
   if (!userId) throw new AdminError('Sign in to continue.', 401);
   // Read current state, not claims or cached role/email from a session cookie.
   const { rows: [user] } = await db.query('SELECT id, email, role, banned, "banExpires", deleted_at, "emailVerified", "twoFactorEnabled" FROM "user" WHERE id=$1', [userId]);
-  if (!user || user.emailVerified !== true || !accountEnabled(user) || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
+  if (!user || !flagIsTrue(user.emailVerified) || !accountEnabled(user) || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
     throw new AdminError('Administrator access required.', 403);
   }
   return { userId: user.id, email: user.email, role: user.role };

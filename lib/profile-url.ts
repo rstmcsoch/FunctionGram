@@ -21,6 +21,11 @@ export const RESERVED_PROFILE_PATHS = new Set([
 export type PersonRef = { id: string; username: string };
 
 export function profileUrl(username: string): string {
+  // A legacy account whose name matches a static application route keeps the
+  // hash profile route: that root path belongs to the application route (the
+  // Admin Panel, `/api`, …) and must never be handed out as a profile link.
+  // Such names cannot be claimed any more; see `validateProfileUsername`.
+  if (isReservedProfilePath(username)) return "/#/profile/" + encodeURIComponent(username);
   return "/" + encodeURIComponent(username);
 }
 
@@ -34,6 +39,30 @@ export function decodeRouteSegment(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A profile URL is the account's username as a single root path segment, so a
+ * username may never equal a name the application itself serves: the Admin
+ * Panel at `ADMIN_BASE_PATH`, `/api`, and the other reserved routes. Next.js
+ * already gives those static routes precedence over `/[username]`; reserving
+ * the names as well keeps a profile link and an application route from ever
+ * being confused, and it is derived from the route table rather than from any
+ * particular administrator's username.
+ */
+export function isReservedProfilePath(segment: string): boolean {
+  const decoded = decodeRouteSegment(segment.toLowerCase());
+  return decoded === null || RESERVED_PROFILE_PATHS.has(decoded);
+}
+
+export const USERNAME_PATTERN = /^[a-z0-9_][a-z0-9_.]{2,29}$/;
+
+/** Single username rule set for the write path, so an account can never claim
+ * a route the application serves. Statuses match the existing API contract. */
+export function validateProfileUsername(username: string): { ok: true } | { ok: false; status: number; message: string } {
+  if (!USERNAME_PATTERN.test(username)) return { ok: false, status: 400, message: 'Use 3–30 letters, numbers, dots, or underscores for your username.' };
+  if (isReservedProfilePath(username)) return { ok: false, status: 409, message: 'That username is reserved for an application page. Try another.' };
+  return { ok: true };
 }
 
 export type ParsedRoute = {

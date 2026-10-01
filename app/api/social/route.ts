@@ -6,6 +6,7 @@ import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
 import { checkReelDuration } from '@/lib/reel-duration';
 import { AdminError } from '@/lib/admin/validation';
 import { visibleComment, visiblePost, readablePost } from '@/lib/content-visibility';
+import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
 import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
@@ -164,7 +165,9 @@ export async function POST(request:Request){try{
     return json({ok:true});
   }
   if(action==='profile'){
-    const username=clean(input.username,30,true).toLowerCase();if(!/^[a-z0-9_][a-z0-9_.]{2,29}$/.test(username))throw new AppError('Use 3–30 letters, numbers, dots, or underscores for your username.');
+    // Usernames are the /<username> profile route, so a name owned by a static
+    // application route (the Admin Panel, /api, …) can never be claimed.
+    const username=clean(input.username,30,true).toLowerCase();const usernameCheck=validateProfileUsername(username);if(!usernameCheck.ok)throw new AppError(usernameCheck.message,usernameCheck.status);
     const name=clean(input.name,60,true),bio=clean(input.bio,150),avatar=clean(input.avatar,200),website=clean(input.website||'',200);
     if(website){let url:URL;try{url=new URL(website);}catch{throw new AppError('Enter a complete website URL, starting with https://.');}if(!['https:','http:'].includes(url.protocol)||!url.hostname||url.username||url.password)throw new AppError('Enter a valid http(s) website URL.');}
     const currentAvatar=(await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>())?.avatar;
