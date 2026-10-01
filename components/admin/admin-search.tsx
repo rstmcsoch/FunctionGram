@@ -35,7 +35,7 @@ function Tree({ path }: { path: string[] }) {
   return <span className="admin-search-tree" aria-label={path.join(' / ')}>
     {path.map((part, index) => (
       <span className="admin-search-tree-line" key={part + index}>
-        {index === 0 ? part : '│ '.repeat(index - 1) + '└── ' + part}
+        {index === 0 ? part : '│  ' + '   '.repeat(Math.max(0, index - 1)) + '└── ' + part}
       </span>
     ))}
   </span>;
