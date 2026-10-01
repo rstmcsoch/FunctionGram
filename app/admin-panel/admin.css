@@ -2,7 +2,7 @@
    FunctionGram / RSTMC admin — stylesheet entry point.
 
    Every admin surface already imports this one file, including the two
-   standalone two-factor screens outside `app/rstmcadmin/`, so the redesign is
+   standalone two-factor screens outside `app/admin-panel/`, so the redesign is
    composed here in cascade order:
 
      1. admin-legacy.css     page styling not yet replaced by a redesign phase

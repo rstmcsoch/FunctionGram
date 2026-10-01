@@ -1,4 +1,5 @@
 'use client';
+import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import {useState} from 'react';
 import { Download } from 'lucide-react';
 import type {AuditFilters,AuditRow} from '@/lib/admin/audit';
@@ -7,7 +8,7 @@ import { Badge, auditTone } from './badge';
 
 export function AuditTools({filters}:{filters:AuditFilters}){
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
- return <><form className="admin-search" action="/rstmcadmin/audit">
+ return <><form className="admin-search" action={ADMIN_BASE_PATH+'/audit'}>
   <label>Search<input name="q" maxLength={160} defaultValue={filters.q} placeholder="Action, actor, target, reason"/></label>
   <label>Action<input name="action" maxLength={160} defaultValue={filters.action}/></label>
   <label>Actor email or ID<input name="actor" maxLength={160} defaultValue={filters.actor}/></label>
@@ -15,7 +16,7 @@ export function AuditTools({filters}:{filters:AuditFilters}){
   <label>Target ID<input name="targetId" maxLength={160} defaultValue={filters.targetId}/></label>
   <label>From (UTC)<input type="date" name="from" defaultValue={filters.from}/></label>
   <label>Through (UTC)<input type="date" name="to" defaultValue={filters.to}/></label>
-  <div className="admin-filter-actions"><button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href="/rstmcadmin/audit">Clear</a></div>
+  <div className="admin-filter-actions"><button className="admin-button admin-primary">Apply filters</button><a className="admin-button" data-tone="ghost" href={ADMIN_BASE_PATH+'/audit'}>Clear</a></div>
  </form><button className="admin-button admin-audit-export" disabled={busy} onClick={async()=>{
   setBusy(true);setError('');
   try{

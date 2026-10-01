@@ -7,7 +7,7 @@ const admin=await browser.newContext();const [key,...value]=cookies.admin.split(
 const original=await admin.request.get(origin+'/api/admin/labels').then(r=>r.json());
 const save=async value=>{const r=await admin.request.post(origin+'/api/admin/labels',{headers:{origin},data:{value}});assert.equal(r.status(),200,await r.text());};
 try{
- await save({});const editor=await admin.newPage();await editor.bringToFront();await editor.goto(origin+'/rstmcadmin/labels');await editor.waitForLoadState('networkidle');await editor.getByRole('searchbox').fill('nav.reels');await editor.getByRole('textbox',{name:'Text for nav.reels',exact:true}).fill('Small films');
+ await save({});const editor=await admin.newPage();await editor.bringToFront();await editor.goto(origin+'/admin-panel/labels');await editor.waitForLoadState('networkidle');await editor.getByRole('searchbox').fill('nav.reels');await editor.getByRole('textbox',{name:'Text for nav.reels',exact:true}).fill('Small films');
  assert.equal((await admin.request.get(origin+'/api/admin/labels').then(r=>r.json()))['nav.reels'],undefined,'draft must not publish early');
  await editor.getByRole('button',{name:'Publish labels',exact:true}).click();await editor.getByRole('status').filter({hasText:'published and audited'}).waitFor();
  const firstPaint=await admin.request.get(origin).then(r=>r.text());assert.match(firstPaint,/aria-label="Small films"/);assert.ok(!firstPaint.includes('aria-label="Reels"'));
@@ -20,7 +20,7 @@ try{
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`reels overflow ${width} ${theme}`);
   await page.evaluate(()=>{location.hash='#/explore';});await page.getByRole('heading',{name:'Explore',exact:true}).waitFor();await page.evaluate(()=>{location.hash='#/search';});await page.getByRole('heading',{name:'Search',exact:true}).waitFor();assert.deepEqual(errors,[]);
   await context.close();
-  const panel=await admin.newPage();await panel.setViewportSize({width,height:900});await panel.goto(origin+'/rstmcadmin/labels');await panel.waitForLoadState('networkidle');await panel.evaluate(t=>document.documentElement.dataset.theme=t,theme);assert.ok(await panel.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`labels overflow ${width} ${theme}`);
+  const panel=await admin.newPage();await panel.setViewportSize({width,height:900});await panel.goto(origin+'/admin-panel/labels');await panel.waitForLoadState('networkidle');await panel.evaluate(t=>document.documentElement.dataset.theme=t,theme);assert.ok(await panel.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`labels overflow ${width} ${theme}`);
   for(const control of await panel.locator('.labels-editor textarea,.labels-editor input:not([type=file]),.labels-editor button').all()){const box=await control.boundingBox();if(box)assert.ok(box.height>=44,`touch target ${box.height}`);}
   await panel.keyboard.press('Tab');assert.ok(await panel.evaluate(()=>document.activeElement!==document.body));await panel.close();console.log(`Labels viewport/theme passed: ${width} ${theme}`);
  }

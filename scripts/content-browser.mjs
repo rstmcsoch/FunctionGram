@@ -5,7 +5,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 const require=createRequire(path.resolve('.local/browser-tools/package.json'));
 const {chromium:playwright}=require('playwright-core');const {default:chromium}=await import(require.resolve('@sparticuz/chromium'));
-const cookies=JSON.parse(fs.readFileSync('.local/admin-check.json','utf8'));const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';const base='/rstmcadmin/content';
+const cookies=JSON.parse(fs.readFileSync('.local/admin-check.json','utf8'));const origin=process.env.ADMIN_TEST_ORIGIN||'http://localhost:3000';const base='/admin-panel/content';
 const browser=await playwright.launch({executablePath:await chromium.executablePath(),args:chromium.args.filter(arg=>arg!=='--single-process'),headless:true});
 try{
  for(const width of [320,360,390,430,768,1024])for(const theme of ['light','dark']){

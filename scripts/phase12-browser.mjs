@@ -9,11 +9,11 @@ const { default: chromium } = await import(require.resolve('@sparticuz/chromium'
 const cookies = JSON.parse(fs.readFileSync('.local/admin-check.json', 'utf8'));
 const baseUrl = process.env.ADMIN_TEST_ORIGIN || 'http://localhost:3000';
 const routes = [
-  '/rstmcadmin', '/rstmcadmin/users', '/rstmcadmin/users/regular', '/rstmcadmin/content',
-  '/rstmcadmin/appearance', '/rstmcadmin/features', '/rstmcadmin/labels', '/rstmcadmin/media',
-  '/rstmcadmin/moderation', '/rstmcadmin/audit', '/rstmcadmin/security',
-  '/rstmcadmin/communications', '/rstmcadmin/analytics', '/rstmcadmin/exports',
-  '/rstmcadmin/system', '/rstmcadmin/guide',
+  '/admin-panel', '/admin-panel/users', '/admin-panel/users/regular', '/admin-panel/content',
+  '/admin-panel/appearance', '/admin-panel/features', '/admin-panel/labels', '/admin-panel/media',
+  '/admin-panel/moderation', '/admin-panel/audit', '/admin-panel/security',
+  '/admin-panel/communications', '/admin-panel/analytics', '/admin-panel/exports',
+  '/admin-panel/system', '/admin-panel/guide',
 ];
 const widths = [320, 360, 390, 430, 768, 1024, 1200, 1440];
 const browser = await playwright.launch({ executablePath: await chromium.executablePath(), args: chromium.args.filter(arg => arg !== '--single-process'), headless: true });

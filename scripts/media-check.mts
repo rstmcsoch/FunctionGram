@@ -10,7 +10,7 @@ const headers=(who='admin')=>({cookie:cookies[who]||'',origin});
 const get=(url:string,who='admin')=>fetch(origin+url,{headers:headers(who)});
 const post=(url:string,value:unknown,who='admin',from=origin)=>fetch(origin+url,{method:'POST',headers:{...headers(who),origin:from,'content-type':'application/json'},body:JSON.stringify(value)});
 await get('/api/social','regular');
-for(const [who,status] of [['guest',401],['regular',403],['unverified',401],['banned',403],['expired',401],['revoked',401],['admin',200]] as const)for(const path of ['/rstmcadmin/media','/api/admin/media'])assert.equal((await get(path,who)).status,status,who+' '+path);
+for(const [who,status] of [['guest',401],['regular',403],['unverified',401],['banned',403],['expired',401],['revoked',401],['admin',200]] as const)for(const path of ['/admin-panel/media','/api/admin/media'])assert.equal((await get(path,who)).status,status,who+' '+path);
 const initial=await get('/api/admin/media').then(r=>r.json()) as {config:unknown};const original=validateMedia(initial.config);
 const save=(value:unknown)=>post('/api/admin/media',{action:'settings',value});
 const upload=async(bytes:Buffer,type:string)=>{const form=new FormData();form.set('key',crypto.randomUUID());form.set('file',new Blob([new Uint8Array(bytes)],{type}),'fixture');return fetch(origin+'/api/dev-upload',{method:'POST',headers:headers('regular'),body:form});};
