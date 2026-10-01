@@ -8,7 +8,11 @@ import {localAssetPath} from '../media-storage';
 import {del} from '@vercel/blob';
 import {promises as fs} from 'node:fs';
 /** Include hidden, expired and trashed posts: restoration must not lose media. */
-export const referencedAsset=(alias='a')=>`(EXISTS(SELECT 1 FROM posts p WHERE p.media::jsonb ? ('/api/media/'||${alias}.key)) OR EXISTS(SELECT 1 FROM profiles p WHERE p.avatar='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM "user" u WHERE u.image='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM app_settings s WHERE s.key IN ('appearance.config','brand.logoUrlLight') AND strpos(s.value,'/api/media/'||${alias}.key)>0))`;
+export const referencedAsset=(alias='a',executor?:QueryExecutor)=>{
+ const postgres=executor?.storageDialect==='postgres';
+ if(postgres)return `(EXISTS(SELECT 1 FROM posts p WHERE p.media::jsonb ? ('/api/media/'||${alias}.key)) OR EXISTS(SELECT 1 FROM profiles p WHERE p.avatar='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM "user" u WHERE u.image='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM app_settings s WHERE s.key IN ('appearance.config','brand.logoUrlLight') AND strpos(s.value,'/api/media/'||${alias}.key)>0))`;
+ return `(EXISTS(SELECT 1 FROM posts p WHERE instr(COALESCE(p.media,''),'/api/media/'||${alias}.key)>0) OR EXISTS(SELECT 1 FROM profiles p WHERE p.avatar='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM "user" u WHERE u.image='/api/media/'||${alias}.key) OR EXISTS(SELECT 1 FROM app_settings s WHERE s.key IN ('appearance.config','brand.logoUrlLight') AND instr(COALESCE(s.value,''),'/api/media/'||${alias}.key)>0))`;
+};
 export function mediaFilters(input:Record<string,unknown>){
  const status=String(input.status||'all'),sort=String(input.sort||'newest'),owner=String(input.owner||''),page=Number(input.page||1);
  if(!['all','ready','quarantined','trash','purging','orphans'].includes(status)||!['newest','largest'].includes(sort)||owner.length>100||!Number.isSafeInteger(page)||page<1||page>10000)throw new AdminError('Invalid media filters.');return {status,sort,owner,page};
@@ -16,11 +20,11 @@ export function mediaFilters(input:Record<string,unknown>){
 export async function mediaReport(db:QueryExecutor,input:Record<string,unknown>={}){
  const filter=mediaFilters(input),values:unknown[]=[];const where=['TRUE'];
  if(filter.owner){values.push(filter.owner);where.push(`COALESCE(a.storage_owner,a.owner_id)=$${values.length}`);}
- if(filter.status==='orphans')where.push(`NOT ${referencedAsset()}`);else if(filter.status!=='all'){values.push(filter.status);where.push(`a.status=$${values.length}`);}
+ if(filter.status==='orphans')where.push(`NOT ${referencedAsset('a',db)}`);else if(filter.status!=='all'){values.push(filter.status);where.push(`a.status=$${values.length}`);}
  const from='FROM assets a WHERE '+where.join(' AND ');
  const {rows:[summary]}=await db.query(`SELECT COUNT(*) assets,COALESCE(SUM(size+source_retained_bytes),0) bytes,COALESCE(SUM(source_retained_bytes),0) retained_source_bytes,COUNT(*) FILTER(WHERE status='quarantined') quarantined,COUNT(*) FILTER(WHERE status='trash') trashed FROM assets`);
  const {rows:[total]}=await db.query('SELECT COUNT(*) total '+from,values);
- const {rows:items}=await db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset()} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET $${values.length+1}`,[...values,(filter.page-1)*50]);
+ const {rows:items}=await db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset('a',db)} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET $${values.length+1}`,[...values,(filter.page-1)*50]);
  const {rows:owners}=await db.query(`SELECT COALESCE(storage_owner,owner_id) owner_id,COUNT(*) assets,SUM(size+source_retained_bytes) bytes FROM assets GROUP BY COALESCE(storage_owner,owner_id) ORDER BY bytes DESC,owner_id LIMIT 25 OFFSET $1`,[(filter.page-1)*25]);
  const {rows:expired}=await db.query(`SELECT key,owner_id,expected_size,mime,created_at FROM upload_claims WHERE completed=false AND created_at<$1 AND (processing_at IS NULL OR processing_at<$2) ORDER BY created_at,key LIMIT 25 OFFSET $3`,[Date.now()-3600000,Date.now()-300000,(filter.page-1)*25]);
  const {rows:[pending]}=await db.query(`SELECT COUNT(*) reservations,COALESCE(SUM(expected_size),0) reserved_bytes FROM upload_claims WHERE completed=false AND (created_at>$1 OR processing_at>$2)`,[Date.now()-3600000,Date.now()-300000]);
@@ -33,7 +37,7 @@ export async function changeMedia(pool:PoolLike,actorId:string,body:Record<strin
  const reason=typeof body.reason==='string'?body.reason.trim():'';if(reason.length>500||(action==='quarantine'&&!reason))throw new AdminError('A quarantine reason is required (up to 500 characters).');
  return transaction(pool,async db=>{
   const actor=await authorizeAdmin(db,actorId,action==='purge');requirePermission(actor,'media.manage');await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
-  const {rows:[asset]}=await db.query(`SELECT a.*,${referencedAsset()} referenced FROM assets a WHERE a.key=$1 FOR UPDATE`,[key]);if(!asset)throw new AdminError('Asset not found.',404);
+  const {rows:[asset]}=await db.query(`SELECT a.*,${referencedAsset('a',db)} referenced FROM assets a WHERE a.key=$1 FOR UPDATE`,[key]);if(!asset)throw new AdminError('Asset not found.',404);
   let status=asset.status,deleted=asset.deleted_at,origin=asset.trash_origin;
   if(action==='quarantine'){if(status!=='ready')throw new AdminError('Choose a ready asset.');status='quarantined';}
   if(action==='release'){if(status!=='quarantined'||!asset.verified)throw new AdminError('Only previously verified media can be released. Failed uploads must be replaced.');const c=await readMediaConfig(db);checkUploadInput({...c,enabled:true},Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);status='ready';}
