@@ -16,6 +16,9 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@hookform/resolvers": "^5.7.1",
     "@libsql/client": "^0.18.0",
     "@libsql/kysely-libsql": "^0.4.1",
@@ -50,6 +53,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
     "@electric-sql/pglite": "^0.5.8",
