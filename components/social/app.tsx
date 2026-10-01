@@ -28,19 +28,21 @@ import { Reels } from "./reels";
 import { StoryViewer } from "./stories";
 import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView, TagView } from "./views";
 import type { SocialData, Post, Person, Comment } from "@/lib/types";
+import { parseLocation, profileShareLink, resolvePerson, viewLocation } from "@/lib/profile-url";
 
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
 type View = "create" | "home" | "search" | "explore" | "reels" | "messages" | "notifications" | "profile" | "saved" | "tag";
 
-export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE, cmsPages = [], announcements = [] }: { initial: SocialData | null; appearance?: Appearance; cmsPages?: CmsFooterPage[]; announcements?: LiveAnnouncement[] }) {
+export default function RstmcApp({ initial, appearance: storedAppearance = DEFAULT_APPEARANCE, cmsPages = [], announcements = [], initialUsername }: { initial: SocialData | null; appearance?: Appearance; cmsPages?: CmsFooterPage[]; announcements?: LiveAnnouncement[]; initialUsername?: string }) {
   const t=useLabels();
   const [data, setData] = useState<SocialData>(initial || emptyData);
   const mediaPolicy=useMediaPolicy();const resolvedFlags=data.features||ALL_FEATURES;const flags={...resolvedFlags,uploads:resolvedFlags.uploads&&mediaPolicy.enabled};
   const appearance={...storedAppearance,nav:storedAppearance.nav.map(item=>{const target=item.target.replace(/^\/#\/?/,""),feature=VIEW_FEATURES[target];return {...item,label:navigationLabel(t,target,item.label),enabled:item.enabled&&(!feature||flags[feature])};})};
   const [loadError, setLoadError] = useState(!initial);
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(initialUsername ? "profile" : "home");
   useEffect(()=>{document.title=view==="home"?t("metadata.title",{site:storedAppearance.name}):t("metadata.sectionTitle",{site:storedAppearance.name,section:navigationLabel(t,view,t.text(view[0].toUpperCase()+view.slice(1)))});},[view,t,storedAppearance.name]);
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileId, setProfileId] = useState<string | null>(initialUsername || null);
+  const [invalidProfile, setInvalidProfile] = useState(false);
   const [feedTab, setFeedTab] = useState("for-you");
   const [profileTab, setProfileTab] = useState("posts");
   const [search, setSearch] = useState("");
@@ -111,42 +113,53 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   const navigate = useCallback((next: View | string, id?: string) => {
     const target = next as View;
+    const person = target === "profile" ? (id ? resolvePerson(data.people, data.me, id) : data.me) : null;
+    const routeValue = target === "profile" ? (person?.id || id || null) : (id || null);
     const fromKey = view + ":" + (profileId || "");
-    const toKey = target + ":" + (id || "");
+    const toKey = target + ":" + (routeValue || "");
     scrollMemory.current[fromKey] = window.scrollY;
     ++postRequest.current;
-    setView(target); setProfileId(id || null); setSelectedPost(null);
+    setView(target); setProfileId(routeValue); setInvalidProfile(false); setSelectedPost(null);
     if (target === "messages") setRecipient(id || null);
     if (target === "profile") setProfileTab("posts");
-    const hash = target === "home" ? "#/" : "#/" + target + (id ? "/" + encodeURIComponent(id) : "");
-    if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+    const nextUrl = viewLocation(target, id, data.people, data.me);
+    if (window.location.pathname + window.location.hash !== nextUrl) window.history.pushState(null, "", nextUrl);
     requestAnimationFrame(() => { window.scrollTo({ top: scrollMemory.current[toKey] ?? 0 }); });
-  }, [view,profileId,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
+  }, [view,profileId,data.people,data.me,setView,setProfileId,setSelectedPost,setRecipient,setProfileTab]);
 
   useEffect(() => {
     const update = () => {
-      const parts = window.location.hash.replace(/^#\/?/, "").split("/");
-      const target = parts[0];
-      let id = "";
-      try { id = decodeURIComponent(parts[1] || ""); } catch {}
-      if (target === "post") {
-        void loadPost(id);
+      const parsed = parseLocation(window.location.pathname, window.location.hash);
+      if (parsed.ignored) return;
+      if (parsed.view === "post") {
+        void loadPost(parsed.routeValue || "");
         return;
       }
       ++postRequest.current;
       setSelectedPost(null);
-      const allowed = ["create", "home", "search", "explore", "reels", "messages", "notifications", "profile", "saved", "tag"];
-      if (!target || allowed.includes(target)) {
-        setView((target || "home") as View);
-        setProfileId(id || null);
-        if (target === "messages") setRecipient(id || null);
-      }
+      setInvalidProfile(parsed.malformed);
+      setView(parsed.view);
+      setProfileId(parsed.malformed ? null : parsed.routeValue);
+      if (parsed.view === "messages") setRecipient(parsed.routeValue);
     };
     update();
     window.addEventListener("hashchange", update);
     window.addEventListener("popstate", update);
     return () => { window.removeEventListener("hashchange", update); window.removeEventListener("popstate", update); };
   }, [loadPost]);
+
+  useEffect(() => {
+    if (view !== "profile" || invalidProfile) return;
+    const parsed = parseLocation(window.location.pathname, window.location.hash);
+    if (parsed.ignored || parsed.view === "post") return;
+    const person = resolvePerson(data.people, data.me, parsed.view === "profile" ? parsed.routeValue : profileId);
+    if (!person?.username) return;
+    if (profileId !== person.id) setProfileId(person.id);
+    const canonical = viewLocation("profile", person.id, data.people, data.me);
+    if (window.location.pathname + window.location.hash !== canonical) {
+      window.history.replaceState(null, "", canonical);
+    }
+  }, [view, invalidProfile, profileId, data.people, data.me]);
 
   useEffect(() => {
     if (view === "notifications" && viewerId) {
@@ -291,7 +304,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   const actions: PostActions = {
     react, submitComment,
-    openPost: post => { window.history.pushState(null, "", "#/post/" + encodeURIComponent(post.id)); void loadPost(post.id); },
+    openPost: post => { window.history.pushState(null, "", viewLocation("post", post.id, data.people, data.me)); void loadPost(post.id); },
     openProfile: id => navigate("profile", id),
     openTag: tag => navigate("tag", tag),
     share: post=>{if(flags.shares)setSharePost(post);},
@@ -370,7 +383,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
   const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
     && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
-  const profile = data.people.find(person => person.id === (profileId || data.me?.id)) || null;
+  const profile = view === "profile" ? resolvePerson(data.people, data.me, profileId) : null;
   const hasNotifications = data.notifications.some(n => !n.read_at);
 
   /* ----------------------------------- shell ----------------------------------- */
@@ -479,7 +492,9 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
                   navigate={(target, id) => navigate(target, id)} />
               : <ExploreView category={category} setCategory={setCategory} openPost={actions.openPost} />)}
             {view === "reels" && <Reels posts={data.posts} actions={actions} onCreate={() => openCreate("reel")} />}
-            {view === "profile" && (profile
+            {view === "profile" && (invalidProfile || (profileId && !profile)
+              ? <Empty icon={<UserRound />} heading={t("app.profile_not_found")} body={t("app.this_profile_is_unavailable")} />
+              : profile
               ? <ProfileView profile={profile} me={data.me} tab={profileTab} setTab={setProfileTab} posts={data.posts}
                   openPost={actions.openPost} onCreate={() => openCreate()} onEdit={() => setEdit(true)}
                   follow={person => void follow(person)} followPending={followPending} onShare={() => setShareProfile(profile)}
@@ -514,7 +529,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       )}
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
-          onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", view === "home" ? "#/" : "#/" + view + (profileId ? "/" + encodeURIComponent(profileId) : "")); }}
+          onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", viewLocation(view, profileId || undefined, data.people, data.me)); }}
           onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id), undefined, t).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
@@ -589,7 +604,7 @@ function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | n
 
 function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: () => void }) {
   const t=useLabels();
-  const link = typeof window !== "undefined" ? window.location.origin + "/#/profile/" + encodeURIComponent(profile.id) : "";
+  const link = typeof window !== "undefined" ? profileShareLink(window.location.origin, profile.username) : "";
   return (
     <Modal open onClose={onClose} title={t("app.share") + profile.username + t("app.s_profile")}>
       <div className="share-link">
