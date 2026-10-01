@@ -4,6 +4,7 @@ import { hasPermission } from '@/lib/admin/permissions';
 import type { AdminPermission } from '@/lib/admin/permissions';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { AdminNav, type AdminNavGroup, type AdminNavIcon } from '@/components/admin/admin-nav';
+import { AdminThemeScope } from '@/components/admin/theme';
 import './admin.css';
 
 export const metadata: Metadata = { title: 'RSTMC — Administration', robots: { index: false, follow: false } };
@@ -42,6 +43,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   system.items.push({ label: 'View site', href: '/', icon: 'ExternalLink', match: 'none', external: true });
 
   return <div className="admin-shell admin-layout">
+    <AdminThemeScope />
     <a className="admin-skip-link" href="#admin-main">Skip to main content</a>
     <AdminNav groups={groups} wordmark="RSTMC" account={{ email: actor.email, role: actor.role, userId: actor.userId }} />
     <div className="admin-panel">

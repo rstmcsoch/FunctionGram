@@ -1,4 +1,13 @@
 // Local-only final admin smoke/accessibility pass; requires .local/browser-tools.
+//
+// The panel owns its own theme: the choice lives in `rstmc-admin-theme` and the
+// resolved palette in `html[data-admin-theme]` (`data-admin-theme-mode` keeps the
+// user's light/dark/system preference). The public site's `rstmc-theme` /
+// `data-theme` pair is deliberately untouched by the admin surface.
+//
+// Sandbox note: this script cannot run where a Chromium build with the required
+// shared libraries is unavailable (no apt access, no system chrome). It is
+// expected to run on a normal developer machine with `npm i` + browser tooling.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,12 +25,19 @@ const routes = [
   '/admin-panel/system', '/admin-panel/guide',
 ];
 const widths = [320, 360, 390, 430, 768, 1024, 1200, 1440];
-const browser = await playwright.launch({ executablePath: await chromium.executablePath(), args: chromium.args.filter(arg => arg !== '--single-process'), headless: true });
+// `--single-process` makes Chromium 153 tear down the browser between contexts,
+// so it is filtered out here; `LD_LIBRARY_PATH` is honoured when the caller has
+// unpacked the Amazon Linux runtime libs next to the binary.
+const browser = await playwright.launch({
+  executablePath: process.env.CHROMIUM_EXECUTABLE || await chromium.executablePath(),
+  args: chromium.args.filter(arg => arg !== '--single-process'),
+  headless: true,
+});
 const summaries = [];
 try {
   for (const width of widths) for (const theme of ['light', 'dark']) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
-    await context.addInitScript(value => localStorage.setItem('rstmc-theme', value), theme);
+    await context.addInitScript(value => localStorage.setItem('rstmc-admin-theme', value), theme);
     const [name, ...value] = cookies.admin.split('=');
     await context.addCookies([{ name, value: value.join('='), domain: 'localhost', path: '/' }]);
     const page = await context.newPage();
@@ -54,7 +70,8 @@ try {
         return {
           width: innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
-          theme: document.documentElement.dataset.theme,
+          theme: document.documentElement.getAttribute('data-admin-theme'),
+          themeMode: document.documentElement.getAttribute('data-admin-theme-mode'),
           heading: document.querySelector('main h1')?.textContent?.trim() || '',
           tables,
           unlabeledButtons,
@@ -62,6 +79,7 @@ try {
         };
       });
       assert.equal(result.theme, theme, `${route} did not apply ${theme} theme`);
+      assert.equal(result.themeMode, theme, `${route} did not keep ${theme} as the stored mode`);
       assert.ok(result.scrollWidth <= result.width, `Horizontal document overflow at ${width}px: ${route} (${result.scrollWidth}px)`);
       assert.ok(result.heading, `Missing main heading: ${route}`);
       for (const table of result.tables) {
@@ -84,7 +102,7 @@ try {
     await context.close();
     console.log(`Phase 12 UI pass: ${width}px ${theme}`);
   }
-  console.log(JSON.stringify({ scope: 'local isolated PGlite + production/dev server only; no preview/provider verification', summaries }, null, 2));
+  console.log(JSON.stringify({ scope: 'local admin dev server only; no preview/provider verification', summaries }, null, 2));
 } finally {
   await browser.close();
 }

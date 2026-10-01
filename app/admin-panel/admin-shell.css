@@ -68,8 +68,15 @@
   display: flex;
   flex-direction: column;
   gap: var(--adm-s3);
-  flex: none;
+  /* The nav is the sidebar's scroll container, so the brand, the theme
+     switcher and the account card stay pinned and visible on every screen
+     height. `min-height: 0` lets it shrink instead of pushing them out. */
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .admin-nav-group {
@@ -469,7 +476,7 @@
     display: block;
     border: 0;
     padding: 0;
-    background: rgba(0, 0, 0, .55);
+    background: var(--adm-scrim, rgba(0, 0, 0, .55));
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
     opacity: 0;

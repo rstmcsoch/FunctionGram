@@ -80,7 +80,8 @@
   padding: 8px;
   border: 1px solid var(--adm-border);
   border-radius: 18px;
-  background: var(--adm-panel);
+  background-color: var(--adm-card);
+  background-image: var(--adm-grad-card);
   box-shadow: var(--adm-shadow-lg);
 }
 

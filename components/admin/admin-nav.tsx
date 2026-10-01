@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from './avatar';
 import { Badge, toneFor } from './badge';
+import { ThemeToggle, ThemeToggleButton } from './theme';
 
 /** Decorative icons only; every one is aria-hidden (§11). */
 const ICONS = {
@@ -106,6 +107,7 @@ export function AdminNav({ groups, wordmark, account }: {
         onClick={() => setOpen(value => !value)}
       ><Menu aria-hidden="true" size={22} strokeWidth={1.75} /></button>
       {brand}
+      <ThemeToggleButton />
     </div>
 
     <button
@@ -141,6 +143,7 @@ export function AdminNav({ groups, wordmark, account }: {
           })}
         </div>)}
       </nav>
+      <ThemeToggle />
       <div className="admin-account">
         <Avatar seed={account.userId || account.email} email={account.email} size={40} />
         <span className="admin-account-body">

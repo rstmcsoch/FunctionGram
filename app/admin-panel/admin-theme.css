@@ -1,0 +1,622 @@
+/* ==========================================================================
+   FunctionGram / RSTMC admin — THEME SYSTEM (light ↔ dark)
+
+   One central layer that turns the tokens in `admin-tokens.css` into the
+   orange + neutral visual identity required by the theme update:
+
+     dark  → near-black / deep charcoal foundation, subtle orange gradient
+             wash, orange used only for accents, active states and CTAs
+     light → white / soft off-white foundation, the same restrained orange
+
+   It is imported last by `admin.css` so it can settle the cascade once,
+   instead of every page carrying its own overrides. Colour, gradients,
+   borders, shadows, transitions and the toggle's own layout only — no
+   markup, routing, permission, data or behaviour changes.
+
+   Component-local styling (avatars, badges, alerts, fields, skeletons …)
+   stays in its own layer and is *token-driven* there, so it follows the
+   theme without being restated here. What lives here is the part that must
+   win the cascade or that spans components.
+
+   Sections
+     0. Third-party token bridge     6. Theme toggle
+     1. Shell chrome                 7. Theme transition
+     2. Sidebar navigation           8. Responsive
+     3. Cards, tables, sections
+     4. Forms and native dropdowns
+     5. Buttons
+   ========================================================================== */
+
+/* ==========================================================================
+   0. Third-party (shadcn/Tailwind) token bridge
+
+   The panel reuses `components/ui/dialog`. Portaled dialogs land on <body>,
+   outside `.admin-shell`, so the public design tokens they read are re-pointed
+   at the admin palette for as long as an admin shell is mounted. This keeps
+   every third-party surface in the same theme without touching the public
+   site's own token values (`:root` is never overridden).
+   ========================================================================== */
+
+body:has(.admin-shell) {
+  background: var(--adm-bg);
+  color: var(--adm-text);
+  --background: var(--adm-bg);
+  --foreground: var(--adm-text);
+  --card: var(--adm-card);
+  --card-foreground: var(--adm-text);
+  --popover: var(--adm-card);
+  --popover-foreground: var(--adm-text);
+  --primary: var(--adm-accent);
+  --primary-foreground: var(--adm-on-accent);
+  --secondary: var(--adm-muted-surface);
+  --secondary-foreground: var(--adm-text);
+  --muted: var(--adm-muted-surface);
+  --muted-foreground: var(--adm-text-2);
+  --accent: var(--adm-accent-soft);
+  --accent-foreground: var(--adm-accent-text);
+  --destructive: var(--adm-danger);
+  --border: var(--adm-border);
+  --input: var(--adm-input-border);
+  --ring: var(--adm-accent);
+}
+
+/* ==========================================================================
+   1. Shell chrome — header, sidebar, panel and footer
+   ========================================================================== */
+
+/* Page foundation: neutral base with one very soft orange bloom (§2/§3). */
+.admin-shell.admin-layout {
+  background-color: var(--adm-bg);
+  background-image: var(--adm-shell-glow);
+  background-repeat: no-repeat;
+}
+
+/* Sidebar and header share one visual language, so the chrome reads as a
+   single object: the same gradient recipe runs down the sidebar and across
+   the (mobile) top bar. */
+.admin-shell .admin-sidebar {
+  background-color: var(--adm-chrome-top);
+  background-image: var(--adm-grad-chrome);
+  background-repeat: no-repeat;
+  border-right: 1px solid var(--adm-border-subtle);
+}
+
+/* The brand row is the one opaque, sticky piece of the sidebar: it gets the
+   flat top colour of the gradient, plus a hairline so it reads as a header. */
+.admin-shell .admin-sidebar > .admin-brand {
+  background: var(--adm-chrome-top);
+  box-shadow: inset 0 -1px 0 var(--adm-border-subtle);
+}
+
+.admin-shell .admin-panel {
+  background-color: var(--adm-panel);
+  background-image: var(--adm-grad-panel);
+  border-color: var(--adm-border);
+  box-shadow: var(--adm-shadow);
+}
+
+/* Page head keeps its divider but earns a restrained orange hairline. */
+.admin-shell .admin-page-head:not(.admin-page-head-banner) {
+  border-bottom: 0;
+  background-color: transparent;
+  background-image: var(--adm-grad-hairline);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 1px;
+}
+
+/* Overview banner (§9.1.1): the one larger orange wash in the panel. */
+.admin-shell .admin-page-head-banner {
+  background-image:
+    linear-gradient(135deg, var(--adm-accent-tint) 0%, rgba(249, 115, 22, 0) 62%),
+    var(--adm-grad-card);
+}
+
+/* Footer: an orange → neutral relationship with the header, still dark enough
+   in dark mode to stay inside the theme (§2). */
+.admin-shell .admin-footer {
+  background-image: var(--adm-grad-footer);
+  background-repeat: no-repeat;
+  border-top-color: var(--adm-border-subtle);
+}
+
+.admin-shell .admin-account {
+  background-image: var(--adm-grad-card);
+  border-color: var(--adm-border-subtle);
+  box-shadow: var(--adm-shadow-sm);
+}
+
+/* Mobile top bar: identical recipe to the sidebar. */
+@media (max-width: 767px) {
+  .admin-shell .admin-topbar {
+    background-color: var(--adm-chrome-top);
+    background-image: var(--adm-grad-chrome);
+    border-bottom-color: var(--adm-border);
+    box-shadow: var(--adm-shadow-sm);
+  }
+}
+
+/* ==========================================================================
+   2. Sidebar navigation — clear hierarchy, orange only where it means state
+   ========================================================================== */
+
+.admin-shell .admin-nav a.admin-nav-link:hover,
+.admin-shell .admin-nav a.admin-nav-link:focus-visible {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+}
+
+.admin-shell .admin-nav a.admin-nav-link:hover svg,
+.admin-shell .admin-nav a.admin-nav-link:focus-visible svg {
+  color: var(--adm-text-2);
+}
+
+/* The global ring is drawn 2px outside the box; inside the scrolling nav
+   that would be clipped, so nav links draw it just inside their own edge. */
+.admin-shell .admin-nav a.admin-nav-link:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Active item: soft accent surface, accent text and the 3px accent bar —
+   immediately recognisable without becoming heavy (§2). */
+.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] {
+  background: var(--adm-active-bg);
+  color: var(--adm-accent-text);
+  box-shadow: inset 0 0 0 1px var(--adm-accent-tint);
+}
+
+.admin-shell .admin-nav a.admin-nav-link[aria-current="page"] svg {
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-nav a.admin-nav-link[aria-current="page"]::before,
+.admin-shell .admin-nav a[aria-current="page"]::before {
+  background: var(--adm-accent-line);
+}
+
+/* ==========================================================================
+   3. Cards, tables and other section containers
+   ========================================================================== */
+
+/* Every card/section follows the same recipe: neutral surface, subtle top-lit
+   gradient, hairline border, soft shadow. Orange stays an accent (§2/§3). */
+.admin-shell .admin-card,
+.admin-shell .admin-stat {
+  background-color: var(--adm-card);
+  background-image: var(--adm-grad-card);
+  box-shadow: var(--adm-shadow), var(--adm-card-highlight);
+}
+
+/* Metric cards carry the only decorative orange hairline, so the dashboard
+   keeps a signature accent without tinting every container. */
+.admin-shell .admin-stat {
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-shell .admin-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--adm-grad-hairline);
+  pointer-events: none;
+}
+
+.admin-shell .admin-drawer[open] > summary {
+  background-image: var(--adm-accent-tint);
+  border-bottom-color: var(--adm-border-subtle);
+}
+
+.admin-shell .admin-bulk-bar {
+  background-color: var(--adm-muted-surface);
+  background-image: var(--adm-accent-tint);
+  border-color: var(--adm-accent-border);
+}
+
+/* Tables. */
+.admin-shell .admin-table-scroll {
+  background-color: var(--adm-card);
+  box-shadow: var(--adm-shadow), var(--adm-card-highlight);
+}
+
+.admin-shell .admin-table-scroll th {
+  background-color: var(--adm-muted-surface);
+  background-image: var(--adm-accent-tint);
+  border-bottom-color: var(--adm-border);
+}
+
+.admin-shell .admin-table-scroll tbody tr:hover td {
+  background-color: var(--adm-hover);
+}
+
+/* Meters, bars and funnels use the accent gradient (§4: progress indicators). */
+.admin-shell .admin-meter-fill,
+.admin-shell .analytics-funnel-bar > span {
+  background-color: var(--adm-accent);
+  background-image: var(--adm-grad-primary);
+}
+
+.admin-shell .analytics-bars > * {
+  background-color: var(--adm-accent);
+  background-image: var(--adm-grad-primary);
+}
+
+.admin-shell .analytics-bars > *:hover {
+  background-color: var(--adm-accent-hover);
+}
+
+/* Pagination buttons follow the secondary button recipe. */
+.admin-shell .admin-pagination a:hover {
+  background-color: var(--adm-hover);
+  border-color: var(--adm-accent-border);
+  color: var(--adm-text);
+}
+
+/* ==========================================================================
+   4. Forms — native dropdown entries follow the admin palette
+   ========================================================================== */
+
+.admin-shell select option,
+.admin-shell select optgroup,
+.admin-confirm-dialog select option {
+  background-color: var(--adm-card);
+  color: var(--adm-text);
+}
+
+.admin-shell input[type="checkbox"]:checked,
+.admin-shell input[type="checkbox"]:indeterminate,
+.admin-shell input[type="radio"]:checked,
+.admin-confirm-dialog input[type="checkbox"]:checked {
+  border-color: var(--adm-accent);
+}
+
+/* ==========================================================================
+   5. Buttons — one hierarchy in both themes (§2/§3)
+   ========================================================================== */
+
+/* Secondary (default): neutral surface, hairline border, orange on hover. */
+.admin-shell .admin-button,
+.admin-confirm-dialog .admin-button {
+  background-color: var(--adm-card);
+  border-color: var(--adm-border);
+  color: var(--adm-text);
+  box-shadow: var(--adm-shadow-sm);
+}
+
+.admin-shell .admin-button:hover:not(:disabled),
+.admin-confirm-dialog .admin-button:hover:not(:disabled) {
+  background-color: var(--adm-hover);
+  border-color: var(--adm-accent-border);
+  color: var(--adm-text);
+}
+
+/* Primary: the orange CTA. Dark ink on the bright orange gradient keeps the
+   label at 4.9:1 or better in both themes. */
+.admin-shell .admin-button.admin-primary,
+.admin-confirm-dialog .admin-button.admin-primary {
+  background-color: var(--adm-accent);
+  background-image: var(--adm-grad-primary);
+  border-color: var(--adm-accent);
+  color: var(--adm-on-accent);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(23, 12, 6, .18), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+
+.admin-shell .admin-button.admin-primary:hover:not(:disabled),
+.admin-confirm-dialog .admin-button.admin-primary:hover:not(:disabled) {
+  background-color: var(--adm-accent-hover);
+  border-color: var(--adm-accent-hover);
+  color: var(--adm-on-accent);
+  filter: brightness(1.04);
+}
+
+/* Ghost: transparent until it is hovered, then a clean orange wash. */
+.admin-shell .admin-button[data-tone="ghost"],
+.admin-confirm-dialog .admin-button[data-tone="ghost"] {
+  background: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--adm-accent-text);
+}
+
+.admin-shell .admin-button[data-tone="ghost"]:hover:not(:disabled),
+.admin-confirm-dialog .admin-button[data-tone="ghost"]:hover:not(:disabled) {
+  background: var(--adm-accent-soft);
+  border-color: transparent;
+  color: var(--adm-accent-text);
+}
+
+/* Destructive keeps its semantic red. */
+.admin-shell .admin-button[data-tone="danger"],
+.admin-shell .admin-button.admin-danger,
+.admin-confirm-dialog .admin-button[data-tone="danger"],
+.admin-confirm-dialog .admin-button.admin-danger {
+  background-color: var(--adm-card);
+  background-image: none;
+  border-color: color-mix(in srgb, var(--adm-danger) 45%, transparent);
+  box-shadow: var(--adm-shadow-sm);
+  color: var(--adm-danger-text);
+}
+
+.admin-shell .admin-button[data-tone="danger"]:hover:not(:disabled),
+.admin-shell .admin-button.admin-danger:hover:not(:disabled),
+.admin-confirm-dialog .admin-button[data-tone="danger"]:hover:not(:disabled),
+.admin-confirm-dialog .admin-button.admin-danger:hover:not(:disabled) {
+  background: var(--adm-danger);
+  background-image: none;
+  border-color: var(--adm-danger);
+  color: #fff;
+}
+
+/* Disabled: visibly inactive, still legible — no opacity wash (§2/§3/§5). */
+.admin-shell .admin-button:disabled,
+.admin-shell .admin-button:disabled:hover,
+.admin-confirm-dialog .admin-button:disabled,
+.admin-confirm-dialog .admin-button:disabled:hover {
+  background-color: var(--adm-muted-surface);
+  background-image: none;
+  border-color: var(--adm-border-subtle);
+  color: var(--adm-text-3);
+  box-shadow: none;
+  opacity: 1;
+  filter: none;
+  cursor: not-allowed;
+}
+
+.admin-shell .admin-button.admin-primary:disabled,
+.admin-shell .admin-button.admin-primary:disabled:hover,
+.admin-confirm-dialog .admin-button.admin-primary:disabled,
+.admin-confirm-dialog .admin-button.admin-primary:disabled:hover {
+  background-color: var(--adm-muted-surface);
+  background-image: none;
+  border-color: var(--adm-border-subtle);
+  color: var(--adm-text-3);
+}
+
+/* ==========================================================================
+   6. Theme toggle (sidebar / mobile drawer and mobile top bar)
+   ========================================================================== */
+
+.admin-theme-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+  margin-top: auto;
+  min-width: 0;
+}
+
+.admin-theme-label {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--adm-text-3);
+}
+
+.admin-theme-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-control);
+  background: var(--adm-muted-surface);
+}
+
+/* Icon above label: the label always has the full tile width, so "System"
+   can never be clipped by the 240px sidebar (measured: 21px slack). */
+.admin-theme-option {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 7px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--adm-text-2);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: .01em;
+  cursor: pointer;
+}
+
+.admin-theme-option svg {
+  flex: none;
+  color: var(--adm-text-3);
+}
+
+.admin-theme-option:hover {
+  background: var(--adm-hover);
+  color: var(--adm-text);
+}
+
+.admin-theme-option:hover svg {
+  color: var(--adm-text-2);
+}
+
+.admin-theme-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Selected state is driven by the attribute the pre-paint script writes, so
+   it is correct before React hydrates and stays correct without JS. */
+html[data-admin-theme-mode="light"] .admin-theme-option[data-theme-value="light"],
+html[data-admin-theme-mode="dark"] .admin-theme-option[data-theme-value="dark"],
+html[data-admin-theme-mode="system"] .admin-theme-option[data-theme-value="system"],
+html:not([data-admin-theme-mode]) .admin-theme-option[data-theme-value="system"],
+.admin-theme-option[aria-pressed="true"] {
+  background: var(--adm-card);
+  background-image: var(--adm-grad-card);
+  border-color: var(--adm-accent-border);
+  color: var(--adm-text);
+  box-shadow: var(--adm-shadow-sm);
+}
+
+html[data-admin-theme-mode="light"] .admin-theme-option[data-theme-value="light"] svg,
+html[data-admin-theme-mode="dark"] .admin-theme-option[data-theme-value="dark"] svg,
+html[data-admin-theme-mode="system"] .admin-theme-option[data-theme-value="system"] svg,
+html:not([data-admin-theme-mode]) .admin-theme-option[data-theme-value="system"] svg,
+.admin-theme-option[aria-pressed="true"] svg {
+  color: var(--adm-accent-text);
+}
+
+/* Compact top-bar switch: shows the palette that is on screen, toggles it. */
+.admin-theme-cycle {
+  margin-left: auto;
+  color: var(--adm-text-2);
+}
+
+.admin-theme-glyph {
+  display: none;
+  place-items: center;
+}
+
+html[data-admin-theme="dark"] .admin-theme-cycle .admin-theme-glyph[data-glyph="moon"],
+html[data-admin-theme="light"] .admin-theme-cycle .admin-theme-glyph[data-glyph="sun"],
+html:not([data-admin-theme]) .admin-theme-cycle .admin-theme-glyph[data-glyph="sun"] {
+  display: grid;
+}
+
+/* ==========================================================================
+   7. Theme transition — short, subtle, never layout-affecting (§8)
+   ========================================================================== */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  .admin-shell,
+  .admin-shell .admin-panel,
+  .admin-shell .admin-topbar,
+  .admin-shell .admin-footer,
+  .admin-shell .admin-page-head,
+  .admin-shell .admin-card,
+  .admin-shell .admin-stat,
+  .admin-shell .admin-table-scroll,
+  .admin-shell .admin-table-scroll th,
+  .admin-shell .admin-table-scroll td,
+  .admin-shell .admin-account,
+  .admin-shell .admin-button,
+  .admin-shell .admin-badge,
+  .admin-shell .admin-chips span,
+  .admin-shell .admin-icon-tile,
+  .admin-shell .admin-avatar,
+  .admin-shell input,
+  .admin-shell select,
+  .admin-shell textarea,
+  .admin-shell .admin-note,
+  .admin-shell .admin-empty-icon,
+  .admin-shell .admin-skeleton,
+  .admin-theme-option,
+  .admin-confirm-dialog,
+  .admin-confirm-dialog[data-slot="dialog-content"] {
+    transition:
+      background-color var(--adm-dur-lg) var(--adm-ease),
+      border-color var(--adm-dur-lg) var(--adm-ease),
+      color var(--adm-dur-lg) var(--adm-ease),
+      box-shadow var(--adm-dur-lg) var(--adm-ease);
+  }
+
+  /* Outside the mobile drawer the sidebar is a static column, so it can
+     transition its surfaces without touching the drawer's transform. */
+  @media (min-width: 768px) {
+    .admin-shell .admin-sidebar {
+      transition: background-color var(--adm-dur-lg) var(--adm-ease), border-color var(--adm-dur-lg) var(--adm-ease);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .admin-shell .admin-main {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   8. Responsive — the toggle and the chrome stay usable on every screen
+   ========================================================================== */
+
+/* 768–1023px: the sidebar is a 76px icon rail, so the segmented control
+   collapses to three stacked 44px icon buttons and the group label hides. */
+@media (max-width: 1023px) {
+  .admin-theme-label,
+  .admin-theme-option-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .admin-theme-toggle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-theme-option {
+    min-height: 44px;
+    padding: 0;
+  }
+}
+
+/* < 768px: the same control lives in the slide-in drawer again, in full. */
+@media (max-width: 767px) {
+  .admin-theme-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .admin-theme-toggle {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .admin-theme-option {
+    min-height: 52px;
+    padding: 7px 4px 6px;
+  }
+
+  .admin-theme-option-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip: auto;
+    clip-path: none;
+    text-overflow: ellipsis;
+  }
+
+  .admin-shell .admin-topbar .admin-brand {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Nothing gained from the theme may introduce sideways scrolling (§7). */
+.admin-shell .admin-theme-row,
+.admin-shell .admin-theme-toggle,
+.admin-shell .admin-theme-option {
+  max-width: 100%;
+}

@@ -2,31 +2,155 @@
    FunctionGram / RSTMC admin — design tokens and typography
    Redesign guide §4 (tokens), §5 (typography), §10 (touches), §11 (motion/a11y).
 
-   VISUAL ONLY. Everything is scoped to `.admin-shell`; no public-site token,
-   `app/globals.css` value or component behaviour is touched.
+   VISUAL ONLY. Everything here is consumed by `.admin-shell` and the portaled
+   `.admin-confirm-dialog`; no public-site token, `app/globals.css` value or
+   component behaviour is touched.
 
-   Theme switching mirrors the selectors the app already emits from
-   `appearanceCss()` in `lib/appearance.ts`:
-     html:root{...}                       -> light
-     html:root[data-theme="dark"]{...}    -> explicit dark
-     @media(prefers-color-scheme:dark){html:root:not([data-theme]){...}}
-   A `.dark` class is honoured too, in case a later theme provider sets one.
+   ---------------------------------------------------------------------------
+   THEME ARCHITECTURE — one source of truth
+   ---------------------------------------------------------------------------
+   The admin/control panel has its own theme channel, separate from the public
+   site, so switching the admin theme never changes the public appearance:
+
+     html[data-admin-theme="light"]      -> light palette (also the default)
+     html[data-admin-theme="dark"]       -> dark palette
+     html:not([data-admin-theme])        -> light, or dark when the OS asks for
+                                            dark and the inline theme script
+                                            has not run (no-JS fallback)
+
+   The value is written by `components/admin/theme.tsx` (inline script before
+   first paint, then kept in sync by the store) and hovers only on <html> while
+   an admin route is mounted. It is a distinct attribute from the public
+   `data-theme`, so the public site keeps its own light/dark/system behaviour.
+   Every colour below is defined for both palettes, so no component needs its
+   own theme branch.
+
+   ORANGE RULE (§4): orange is an accent, never a surface. It appears in
+   active/selected states, focus rings, primary buttons, icons, hairlines and
+   small gradient washes over neutral black/charcoal (dark) or white/off-white
+   (light) foundations.
    ========================================================================== */
 
-.admin-shell,
-.admin-confirm-dialog {
-  /* ---- Accent. Change ONLY this block to re-brand (brand pink = #eb456e) -- */
-  --adm-accent: #1b84ff;
-  --adm-accent-hover: #0f6fe0;
-  --adm-accent-soft: rgba(27, 132, 255, .14);
-  --adm-on-accent: #fff;
+/* ==========================================================================
+   PALETTES
+   Light values are the base; the dark values are declared once as `--adm-dark-*`
+   and mapped by the explicit-dark and system-dark blocks below, so no raw
+   colour is ever written twice.
+   ========================================================================== */
 
-  /* ---- Status tones ---------------------------------------------------- */
-  --adm-success: #17c653;
-  --adm-warning: #f6b100;
-  --adm-danger: #f8285a;
-  --adm-purple: #7239ea;
-  --adm-cyan: #06b6d4;
+:root {
+  /* ---- LIGHT — foundation: white / soft off-white --------------------- */
+  color-scheme: light;
+  --adm-bg: #f6f6f8;                    /* app background behind the panel */
+  --adm-panel: #ffffff;                 /* main content panel */
+  --adm-card: #ffffff;                  /* cards, tables, code wells */
+  --adm-input-bg: #ffffff;              /* fields sit slightly above the card */
+  --adm-muted-surface: #f7f7f9;         /* table head, chips, code wells */
+  --adm-hover: #f1f1f4;
+  --adm-border: #e6e6ec;
+  --adm-border-subtle: #eeeef3;
+  --adm-input-border: #8f8f9d;          /* ≥3:1 on white: fields stay identifiable */
+  --adm-input-border-hover: #6e6e7e;
+  --adm-text: #17171b;                  /* primary text */
+  --adm-text-2: #55555f;                /* secondary text */
+  --adm-text-3: #6e6e7a;                /* hints, captions (AA on white) */
+  --adm-shadow: 0 1px 2px rgba(23, 12, 6, .05);
+  --adm-shadow-sm: 0 1px 2px rgba(23, 12, 6, .06);
+  --adm-shadow-lg: 0 18px 48px -20px rgba(23, 12, 6, .28), 0 2px 8px rgba(23, 12, 6, .06);
+  --adm-dialog-shadow: 0 24px 64px rgba(23, 12, 6, .22);
+  --adm-scrim: rgba(28, 16, 8, .45);
+  --adm-card-highlight: inset 0 1px 0 rgba(255, 255, 255, .9);
+  --adm-chrome-top: #ffffff;            /* opaque top of the sidebar/topbar */
+
+  /* orange accent (brand) */
+  --adm-accent: #ea580c;               /* ≥3:1 on white (focus rings, bars, controls) */
+  --adm-accent-hover: #c2410c;
+  --adm-accent-soft: rgba(234, 88, 12, .12);
+  --adm-accent-tint: rgba(234, 88, 12, .06);
+  --adm-on-accent: #2a1408;             /* dark ink reads 4.9:1+ on the CTA */
+  --adm-accent-text: #c2410c;           /* links + active nav text (AA) */
+  --adm-accent-ink: #9a3412;            /* small text on orange-tinted pills */
+  --adm-accent-border: rgba(234, 88, 12, .34);
+  --adm-active-bg: var(--adm-accent-soft);
+
+  /* status tones (light variants are the readable text colours) */
+  --adm-success: #17a34a;
+  --adm-warning: #d97706;
+  --adm-danger: #e11d48;
+  --adm-purple: #7c3aed;
+  --adm-cyan: #0891b2;
+  --adm-blue: #2563eb;
+  --adm-success-text: #0f7a37;
+  --adm-warning-text: #a15c07;
+  --adm-danger-text: #d61f4c;
+  --adm-purple-text: #6234c7;
+  --adm-cyan-text: #0e7490;
+  --adm-blue-text: #1d4ed8;
+
+  /* restrained orange gradients (§2/§3) */
+  --adm-grad-chrome: linear-gradient(180deg, #ffffff 0%, #fff8f3 100%);
+  --adm-grad-panel: linear-gradient(180deg, #ffffff 0%, #fcfcfe 100%);
+  --adm-grad-card: linear-gradient(180deg, #ffffff 0%, #fdfcfa 100%);
+  --adm-grad-primary: linear-gradient(135deg, #fb923c 0%, #f97316 48%, #ea580c 100%);
+  --adm-grad-footer: linear-gradient(100deg, rgba(249, 115, 22, .10) 0%, rgba(249, 115, 22, .02) 42%, rgba(249, 115, 22, 0) 72%);
+  --adm-grad-hairline: linear-gradient(90deg, rgba(249, 115, 22, .55) 0%, rgba(249, 115, 22, .12) 42%, rgba(249, 115, 22, 0) 78%);
+  --adm-accent-line: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  --adm-glow: radial-gradient(closest-side, rgba(249, 115, 22, .16), rgba(249, 115, 22, 0));
+  --adm-shell-glow: radial-gradient(1100px 520px at 8% -10%, rgba(249, 115, 22, .07), rgba(249, 115, 22, 0) 70%);
+
+  /* ---- DARK — raw palette (mapped by the dark theme blocks) ------------ */
+  --adm-dark-bg: #0b0b0e;
+  --adm-dark-panel: #101014;
+  --adm-dark-card: #16161b;
+  --adm-dark-input-bg: #1b1b21;
+  --adm-dark-muted-surface: #1c1c22;
+  --adm-dark-hover: #22222a;
+  --adm-dark-border: #2a2a33;
+  --adm-dark-border-subtle: #202027;
+  --adm-dark-input-border: #64646f;     /* ≥3:1 on the dark card surface */
+  --adm-dark-input-border-hover: #7a7a8a;
+  --adm-dark-text: #f5f5f7;
+  --adm-dark-text-2: #b4b4be;
+  --adm-dark-text-3: #8f8f9c;
+  --adm-dark-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+  --adm-dark-shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
+  --adm-dark-shadow-lg: 0 18px 48px -20px rgba(0, 0, 0, .8), 0 2px 8px rgba(0, 0, 0, .5);
+  --adm-dark-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .66);
+  --adm-dark-scrim: rgba(0, 0, 0, .62);
+  --adm-dark-card-highlight: inset 0 1px 0 rgba(255, 255, 255, .045);
+  --adm-dark-chrome-top: #18181f;
+
+  --adm-dark-accent: #f97316;
+  --adm-dark-accent-hover: #fb923c;
+  --adm-dark-accent-soft: rgba(249, 115, 22, .16);
+  --adm-dark-accent-tint: rgba(249, 115, 22, .07);
+  --adm-dark-on-accent: #23120a;        /* 6.4:1+ on the dark-mode CTA */
+  --adm-dark-accent-text: #fdba74;      /* links + active nav text (11:1) */
+  --adm-dark-accent-ink: #fdba74;       /* small text on orange-tinted pills */
+  --adm-dark-accent-border: rgba(249, 115, 22, .38);
+
+  --adm-dark-success: #22c55e;
+  --adm-dark-warning: #f59e0b;
+  --adm-dark-danger: #f43f5e;
+  --adm-dark-purple: #a78bfa;
+  --adm-dark-cyan: #22d3ee;
+  --adm-dark-blue: #60a5fa;
+  --adm-dark-success-text: #3ddc84;
+  --adm-dark-warning-text: #ffc933;
+  --adm-dark-danger-text: #ff5c85;
+  --adm-dark-purple-text: #c4b5fd;
+  --adm-dark-cyan-text: #67e8f9;
+  --adm-dark-blue-text: #93c5fd;
+
+  --adm-dark-grad-chrome: linear-gradient(180deg, #18181f 0%, #0d0d11 100%);
+  --adm-dark-grad-panel: linear-gradient(180deg, #131318 0%, #0e0e12 100%);
+  --adm-dark-grad-card: linear-gradient(180deg, #1b1b22 0%, #15151b 100%);
+  --adm-dark-grad-primary: linear-gradient(135deg, #fdba74 0%, #fb923c 50%, #f97316 100%);
+  --adm-dark-grad-footer: linear-gradient(100deg, rgba(249, 115, 22, .13) 0%, rgba(249, 115, 22, .03) 45%, rgba(249, 115, 22, 0) 75%);
+  --adm-dark-grad-hairline: linear-gradient(90deg, rgba(251, 146, 60, .6) 0%, rgba(249, 115, 22, .16) 45%, rgba(249, 115, 22, 0) 80%);
+  --adm-dark-accent-line: linear-gradient(180deg, #fdba74 0%, #f97316 100%);
+  --adm-dark-glow: radial-gradient(closest-side, rgba(249, 115, 22, .20), rgba(249, 115, 22, 0));
+  --adm-dark-shell-glow: radial-gradient(1100px 520px at 8% -10%, rgba(249, 115, 22, .10), rgba(249, 115, 22, 0) 70%);
 
   /* ---- Shape ----------------------------------------------------------- */
   --adm-r-panel: 20px;
@@ -57,105 +181,147 @@
   --adm-s8: 32px;
   --adm-s9: 48px;
 
-  /* ---- Inline SVG decorations (no external asset, no CDN) -------------- */
-  --adm-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>");
-  --adm-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'><path d='M5 12h14'/></svg>");
+  /* ---- Inline SVG decorations (no external asset, no CDN) --------------
+     The check/dash glyphs sit on the orange accent, whose ink is dark in both
+     themes, so they are drawn dark as well.                                */
+  --adm-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1408' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>");
+  --adm-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1408' stroke-width='3' stroke-linecap='round'><path d='M5 12h14'/></svg>");
   /* Used as mask images, so the declared colour is irrelevant. */
   --adm-icon-success: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='m9 12 2 2 4-4'/></svg>");
   --adm-icon-danger: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 8v4'/><path d='M12 16h.01'/></svg>");
   --adm-icon-info: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 16v-4'/><path d='M12 8h.01'/></svg>");
 
-  /* The single remaining piece of brand pink: the wordmark dot (§6.2). */
-  --adm-brand-dot: #eb456e;
+  /* The wordmark dot is the one decorative mark that follows the accent. */
+  --adm-brand-dot: var(--adm-accent);
+
+  /* Field borders (kept as separate tokens for the fix layer §7). */
+  --adm-field-border: var(--adm-input-border);
+  --adm-field-border-hover: var(--adm-input-border-hover);
+
+  /* Chevron / magnifier glyphs, coloured for the light palette. */
+  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2355555f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2355555f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+
+  --adm-dark-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b4b4be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  --adm-dark-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b4b4be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
 }
 
-/* ---- LIGHT (base) -------------------------------------------------------- */
-.admin-shell,
-.admin-confirm-dialog {
-  color-scheme: light;
-  --adm-bg: #f3f4f6;
-  --adm-panel: #fff;
-  --adm-card: #fff;
-  --adm-muted-surface: #f7f8fa;
-  --adm-hover: #f1f3f6;
-  --adm-border: #e4e6eb;
-  --adm-border-subtle: #eceef2;
-  --adm-input-border: #cfd3db;
-  --adm-input-border-hover: #b9bfca;
-  --adm-text: #15161a;
-  --adm-text-2: #5b606c;
-  --adm-text-3: #8a8f9b;
-  --adm-accent-text: #0f63d6;           /* passes AA on white */
-  --adm-active-bg: var(--adm-accent-soft);
-  --adm-shadow: 0 1px 2px rgba(16, 24, 40, .06);
-  --adm-success-text: #0d8a3c;
-  --adm-warning-text: #a15c07;
-  --adm-danger-text: #d61f4c;
-  --adm-purple-text: #6234c7;
-  --adm-cyan-text: #0e7490;             /* companion to --adm-cyan (§9.1) */
-  --adm-dialog-shadow: 0 24px 64px rgba(16, 24, 40, .24);
-  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
-  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b606c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
-}
-
-/* ---- DARK (default look, matches the reference) -------------------------- */
-html[data-theme="dark"] .admin-shell,
-html[data-theme="dark"] .admin-confirm-dialog,
-.dark .admin-shell,
-.dark .admin-confirm-dialog {
+/* ---- EXPLICIT DARK ------------------------------------------------------- */
+html[data-admin-theme="dark"],
+html.dark {
   color-scheme: dark;
-  --adm-bg: #0f0f12;                    /* page + sidebar */
-  --adm-panel: #08080a;                 /* main panel */
-  --adm-card: #0c0c0f;
-  --adm-muted-surface: #131317;         /* table header, chips, code */
-  --adm-hover: #17171c;
-  --adm-border: #222228;
-  --adm-border-subtle: #1a1a1f;
-  --adm-input-border: #3f3f49;
-  --adm-input-border-hover: #52525e;
-  --adm-text: #f5f5f7;
-  --adm-text-2: #a1a1aa;                /* secondary */
-  --adm-text-3: #71717a;                /* hints */
-  --adm-accent-text: #4da3ff;           /* links + active nav text */
-  --adm-active-bg: #000;
-  --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
-  --adm-success-text: #3ddc84;
-  --adm-warning-text: #ffc933;
-  --adm-danger-text: #ff5c85;
-  --adm-purple-text: #a78bfa;
-  --adm-cyan-text: #45d0e8;
-  --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
-  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
-  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+  --adm-bg: var(--adm-dark-bg);
+  --adm-panel: var(--adm-dark-panel);
+  --adm-card: var(--adm-dark-card);
+  --adm-input-bg: var(--adm-dark-input-bg);
+  --adm-muted-surface: var(--adm-dark-muted-surface);
+  --adm-hover: var(--adm-dark-hover);
+  --adm-border: var(--adm-dark-border);
+  --adm-border-subtle: var(--adm-dark-border-subtle);
+  --adm-input-border: var(--adm-dark-input-border);
+  --adm-input-border-hover: var(--adm-dark-input-border-hover);
+  --adm-field-border: var(--adm-dark-input-border);
+  --adm-field-border-hover: var(--adm-dark-input-border-hover);
+  --adm-text: var(--adm-dark-text);
+  --adm-text-2: var(--adm-dark-text-2);
+  --adm-text-3: var(--adm-dark-text-3);
+  --adm-shadow: var(--adm-dark-shadow);
+  --adm-shadow-sm: var(--adm-dark-shadow-sm);
+  --adm-shadow-lg: var(--adm-dark-shadow-lg);
+  --adm-dialog-shadow: var(--adm-dark-dialog-shadow);
+  --adm-scrim: var(--adm-dark-scrim);
+  --adm-card-highlight: var(--adm-dark-card-highlight);
+  --adm-chrome-top: var(--adm-dark-chrome-top);
+  --adm-accent: var(--adm-dark-accent);
+  --adm-accent-hover: var(--adm-dark-accent-hover);
+  --adm-accent-soft: var(--adm-dark-accent-soft);
+  --adm-accent-tint: var(--adm-dark-accent-tint);
+  --adm-on-accent: var(--adm-dark-on-accent);
+  --adm-accent-text: var(--adm-dark-accent-text);
+  --adm-accent-ink: var(--adm-dark-accent-ink);
+  --adm-accent-border: var(--adm-dark-accent-border);
+  --adm-success: var(--adm-dark-success);
+  --adm-warning: var(--adm-dark-warning);
+  --adm-danger: var(--adm-dark-danger);
+  --adm-purple: var(--adm-dark-purple);
+  --adm-cyan: var(--adm-dark-cyan);
+  --adm-blue: var(--adm-dark-blue);
+  --adm-success-text: var(--adm-dark-success-text);
+  --adm-warning-text: var(--adm-dark-warning-text);
+  --adm-danger-text: var(--adm-dark-danger-text);
+  --adm-purple-text: var(--adm-dark-purple-text);
+  --adm-cyan-text: var(--adm-dark-cyan-text);
+  --adm-blue-text: var(--adm-dark-blue-text);
+  --adm-grad-chrome: var(--adm-dark-grad-chrome);
+  --adm-grad-panel: var(--adm-dark-grad-panel);
+  --adm-grad-card: var(--adm-dark-grad-card);
+  --adm-grad-primary: var(--adm-dark-grad-primary);
+  --adm-grad-footer: var(--adm-dark-grad-footer);
+  --adm-grad-hairline: var(--adm-dark-grad-hairline);
+  --adm-accent-line: var(--adm-dark-accent-line);
+  --adm-glow: var(--adm-dark-glow);
+  --adm-shell-glow: var(--adm-dark-shell-glow);
+  --adm-chevron: var(--adm-dark-chevron);
+  --adm-magnifier: var(--adm-dark-magnifier);
 }
 
+/* ---- SYSTEM DARK (before the inline script sets the attribute) ----------- */
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme]) .admin-shell,
-  html:not([data-theme]) .admin-confirm-dialog {
+  html:not([data-admin-theme]):not(.dark) {
     color-scheme: dark;
-    --adm-bg: #0f0f12;
-    --adm-panel: #08080a;
-    --adm-card: #0c0c0f;
-    --adm-muted-surface: #131317;
-    --adm-hover: #17171c;
-    --adm-border: #222228;
-    --adm-border-subtle: #1a1a1f;
-    --adm-input-border: #3f3f49;
-    --adm-input-border-hover: #52525e;
-    --adm-text: #f5f5f7;
-    --adm-text-2: #a1a1aa;
-    --adm-text-3: #71717a;
-    --adm-accent-text: #4da3ff;
-    --adm-active-bg: #000;
-    --adm-shadow: 0 1px 2px rgba(0, 0, 0, .4);
-    --adm-success-text: #3ddc84;
-    --adm-warning-text: #ffc933;
-    --adm-danger-text: #ff5c85;
-    --adm-purple-text: #a78bfa;
-    --adm-cyan-text: #45d0e8;
-    --adm-dialog-shadow: 0 24px 64px rgba(0, 0, 0, .5);
-  --adm-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
-  --adm-magnifier: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+    --adm-bg: var(--adm-dark-bg);
+    --adm-panel: var(--adm-dark-panel);
+    --adm-card: var(--adm-dark-card);
+    --adm-input-bg: var(--adm-dark-input-bg);
+    --adm-muted-surface: var(--adm-dark-muted-surface);
+    --adm-hover: var(--adm-dark-hover);
+    --adm-border: var(--adm-dark-border);
+    --adm-border-subtle: var(--adm-dark-border-subtle);
+    --adm-input-border: var(--adm-dark-input-border);
+    --adm-input-border-hover: var(--adm-dark-input-border-hover);
+    --adm-field-border: var(--adm-dark-input-border);
+    --adm-field-border-hover: var(--adm-dark-input-border-hover);
+    --adm-text: var(--adm-dark-text);
+    --adm-text-2: var(--adm-dark-text-2);
+    --adm-text-3: var(--adm-dark-text-3);
+    --adm-shadow: var(--adm-dark-shadow);
+    --adm-shadow-sm: var(--adm-dark-shadow-sm);
+    --adm-shadow-lg: var(--adm-dark-shadow-lg);
+    --adm-dialog-shadow: var(--adm-dark-dialog-shadow);
+    --adm-scrim: var(--adm-dark-scrim);
+    --adm-card-highlight: var(--adm-dark-card-highlight);
+    --adm-chrome-top: var(--adm-dark-chrome-top);
+    --adm-accent: var(--adm-dark-accent);
+    --adm-accent-hover: var(--adm-dark-accent-hover);
+    --adm-accent-soft: var(--adm-dark-accent-soft);
+    --adm-accent-tint: var(--adm-dark-accent-tint);
+    --adm-on-accent: var(--adm-dark-on-accent);
+    --adm-accent-text: var(--adm-dark-accent-text);
+    --adm-accent-ink: var(--adm-dark-accent-ink);
+    --adm-accent-border: var(--adm-dark-accent-border);
+    --adm-success: var(--adm-dark-success);
+    --adm-warning: var(--adm-dark-warning);
+    --adm-danger: var(--adm-dark-danger);
+    --adm-purple: var(--adm-dark-purple);
+    --adm-cyan: var(--adm-dark-cyan);
+    --adm-blue: var(--adm-dark-blue);
+    --adm-success-text: var(--adm-dark-success-text);
+    --adm-warning-text: var(--adm-dark-warning-text);
+    --adm-danger-text: var(--adm-dark-danger-text);
+    --adm-purple-text: var(--adm-dark-purple-text);
+    --adm-cyan-text: var(--adm-dark-cyan-text);
+    --adm-blue-text: var(--adm-dark-blue-text);
+    --adm-grad-chrome: var(--adm-dark-grad-chrome);
+    --adm-grad-panel: var(--adm-dark-grad-panel);
+    --adm-grad-card: var(--adm-dark-grad-card);
+    --adm-grad-primary: var(--adm-dark-grad-primary);
+    --adm-grad-footer: var(--adm-dark-grad-footer);
+    --adm-grad-hairline: var(--adm-dark-grad-hairline);
+    --adm-accent-line: var(--adm-dark-accent-line);
+    --adm-glow: var(--adm-dark-glow);
+    --adm-shell-glow: var(--adm-dark-shell-glow);
+    --adm-chevron: var(--adm-dark-chevron);
+    --adm-magnifier: var(--adm-dark-magnifier);
   }
 }
 
@@ -256,9 +422,11 @@ html[data-theme="dark"] .admin-confirm-dialog,
    Shared shell affordances (§10, §11)
    ========================================================================== */
 
-/* §10.9 — selection colour. */
-.admin-shell ::selection {
-  background: rgba(27, 132, 255, .3);
+/* §10.9 — selection colour (orange accent, legible in both themes). */
+.admin-shell ::selection,
+.admin-confirm-dialog ::selection {
+  background: var(--adm-accent-soft);
+  color: var(--adm-text);
 }
 
 /* §10.11 — custom scrollbars, admin only. */
