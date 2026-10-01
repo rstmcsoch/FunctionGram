@@ -64,7 +64,7 @@ export async function bootstrapAdmin(pool: PoolLike, userId: string, verifiedSes
 
 export async function loadSettings(db: QueryExecutor): Promise<Settings> {
   const result: Record<string, unknown> = { ...SETTINGS_DEFAULTS };
-  const { rows } = await db.query('SELECT key,value FROM app_settings WHERE key = ANY($1::text[])', [Object.keys(SETTINGS_DEFAULTS)]);
+  const keys = Object.keys(SETTINGS_DEFAULTS);\n  const placeholders = keys.map(() => '?').join(',');\n  const { rows } = await db.query(`SELECT key,value FROM app_settings WHERE key IN (${placeholders})`, keys);
   for (const row of rows) {
     try { result[row.key] = validateSetting(row.key, JSON.parse(row.value)); }
     catch {
