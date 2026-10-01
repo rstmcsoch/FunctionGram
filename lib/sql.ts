@@ -3,24 +3,26 @@ function replacePostgresParameters(input: string): string {
 }
 
 export function postgresQuery(input: string) {
-  const ignore = /^INSERT OR IGNORE INTO /i.test(input);
-
   let result = input;
 
-  // FunctionGram historically used both ? and PostgreSQL $1-style placeholders.
-  // Turso/libSQL accepts ? placeholders.
   result = replacePostgresParameters(result);
 
-  // SQLite/libSQL uses INSERT ... ON CONFLICT instead of PostgreSQL's
-  // INSERT OR IGNORE translation path.
-  if (ignore) {
-    result = result.replace(/^INSERT OR IGNORE INTO /i, 'INSERT INTO ');
-    result = result.replace(/;\s*$/, '');
-    result += ' ON CONFLICT DO NOTHING';
-  }
+  // PostgreSQL transaction/advisory-lock syntax has no SQLite equivalent.
+  // Turso transactions already provide the required atomic write boundary.
+  result = result.replace(/\bSELECT\s+pg_advisory_xact_lock\s*\([^)]*\)\s*;?/gi, 'SELECT 1');
+  result = result.replace(/\s+FOR\s+(UPDATE|SHARE)\b/gi, '');
 
-  // PostgreSQL row-lock syntax has no SQLite equivalent.
-  result = result.replace(/\s+FOR\s+UPDATE\b/gi, '');
+  // PostgreSQL time helpers -> SQLite/libSQL equivalents.
+  result = result.replace(/extract\s*\(\s*epoch\s+FROM\s+now\(\)\s*\)/gi, 'unixepoch()');
+  result = result.replace(/\bnow\(\)/gi, '(unixepoch()*1000)');
+
+  // SQLite has dynamic typing; these PostgreSQL casts are unnecessary.
+  // Handle jsonb text extraction before removing the cast itself.
+  result = result.replace(/([A-Za-z_][\w.]*)\s*::jsonb\s*#>>\s*'\{\}'/gi, '$1');
+  result = result.replace(/::(?:bigint|integer|int|smallint|numeric|real|double\s+precision|text|jsonb|json)\b/gi, '');
+
+  // SQLite LIKE is case-insensitive for ordinary ASCII text.
+  result = result.replace(/\bILIKE\b/gi, 'LIKE');
 
   return result;
 }

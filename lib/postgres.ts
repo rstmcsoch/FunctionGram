@@ -184,7 +184,7 @@ class TursoConnection implements QueryExecutor {
 
     if (this.transaction) {
       result = await this.transaction.execute({
-        sql: text,
+        sql: postgresQuery(text),
         args: values as never,
       });
     } else {
@@ -221,7 +221,7 @@ class TursoPool implements PoolLike {
     values: unknown[] = [],
   ) {
     const result = await this.client.execute({
-      sql: text,
+      sql: postgresQuery(text),
       args: values as never,
     });
 

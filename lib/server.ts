@@ -115,13 +115,13 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   if(filter.author){conditions.push('p.author_id=?');filterArgs.push(filter.author);}
   if(filter.post){conditions.push('p.id=?');filterArgs.push(filter.post);}
   if(filter.saved){conditions.push("EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')");filterArgs.push(v);}
-  if(filter.tagged){conditions.push('p.tagged_users::jsonb @> ?::jsonb');filterArgs.push(JSON.stringify([filter.tagged]));}
+  if(filter.tagged){conditions.push("EXISTS(SELECT 1 FROM json_each(COALESCE(p.tagged_users,'[]')) WHERE value=?)");filterArgs.push(filter.tagged);}
   if(filter.search){const term=searchPattern(filter.search);conditions.push("(p.caption ILIKE ? ESCAPE '\\' OR p.location ILIKE ? ESCAPE '\\' OR a.username ILIKE ? ESCAPE '\\')");filterArgs.push(term,term,term);}
   if(filter.category&&filter.category!=='For you'){conditions.push('p.category=?');filterArgs.push(filter.category);}
   if(filter.discovery){conditions.push("p.kind!='story'");}
   if(filter.reels){conditions.push("p.kind='reel'");}
   if(filter.following){conditions.push('(p.author_id IN (SELECT followee_id FROM follows WHERE follower_id=?) OR p.author_id=?)');filterArgs.push(v,v);}
-  if(filter.hashtag){conditions.push("p.caption ~* ?");filterArgs.push("(^|[^a-z0-9_])#"+filter.hashtag+"($|[^a-z0-9_])");}
+  if(filter.hashtag){const hashtag=searchPattern('#'+filter.hashtag);conditions.push("LOWER(p.caption) LIKE LOWER(?) ESCAPE '\\\\'");filterArgs.push(hashtag);}
   const extra=conditions.length?' AND '+conditions.join(' AND '):'';
   // Placeholder order matches the SQL text: the viewer-reaction aggregate in
   // the FROM clause first, then the WHERE guards, then the extra conditions.
@@ -130,9 +130,9 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
     sql:
       'SELECT p.*,'+displayCounterColumns(counters)+',p.base_likes+COALESCE(lc.n,0) likes,COALESCE(vr.liked,0) liked,COALESCE(vr.saved,0) saved,COALESCE(vr.seen,0) seen,'+
       'COALESCE(cc.n,0) comment_count,'+
-      `(SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
+      `(SELECT json_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview,`+
       'EXISTS(SELECT 1 FROM story_highlights WHERE post_id=p.id) highlighted,'+
-      `COALESCE((SELECT value::jsonb #>> '{}' FROM app_settings WHERE key='content.reelCredit'),'') reel_credit,a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private `+
+      `COALESCE((SELECT value FROM app_settings WHERE key='content.reelCredit'),'') reel_credit,a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private `+
       'FROM posts p JOIN profiles a ON a.id=p.author_id '+
       'LEFT JOIN (SELECT post_id,COUNT(*) n FROM reactions WHERE kind=\'like\' GROUP BY post_id) lc ON lc.post_id=p.id '+
       `LEFT JOIN (SELECT c.post_id,COUNT(*) n FROM comments c WHERE ${visibleComment()} GROUP BY c.post_id) cc ON cc.post_id=p.id `+
@@ -151,7 +151,7 @@ export async function feed(viewer:string|null,limit=40,offset=0,filter:FeedFilte
 export async function highlights(viewer:string|null,owner:string):Promise<Post[]>{
   const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'stories');
   const v=viewer||'';
-  const r=await db().prepare(`SELECT p.*,${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_build_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} AND (NOT COALESCE((SELECT shadow_banned FROM profile_moderation m WHERE m.profile_id=p.author_id),false) OR p.author_id=?) ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v,v).all<Record<string,unknown>>();
+  const r=await db().prepare(`SELECT p.*,${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved, EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen, (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND ${visibleComment()}) comment_count, (SELECT json_object('body',c.body,'username',u.username) FROM comments c JOIN profiles u ON u.id=c.author_id WHERE c.post_id=p.id AND ${visibleComment()} ORDER BY c.created_at DESC,c.id DESC LIMIT 1) comment_preview, true highlighted, a.username,a.name,a.avatar,a.bio,a.website,a.is_demo,a.is_private FROM story_highlights h JOIN posts p ON p.id=h.post_id JOIN profiles a ON a.id=p.author_id WHERE h.owner_id=? AND ${activeGuard} AND ${privacyGuard} AND ${blockedGuard} AND (NOT COALESCE((SELECT shadow_banned FROM profile_moderation m WHERE m.profile_id=p.author_id),false) OR p.author_id=?) ORDER BY h.created_at DESC LIMIT 60`).bind(v,v,v,owner,Date.now(),v,v,v,v).all<Record<string,unknown>>();
   return publicPosts(parsePosts(r.results),policy.flags);
 }
 export async function availablePost(viewer:string|null,id:string) {
@@ -184,9 +184,23 @@ export async function storyViewers(viewer:string,storyId:string):Promise<StoryVi
 }
 export async function savedCollections(viewer:string):Promise<SavedCollection[]>{
   const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'saves');
-  const r=await db().prepare(`SELECT c.id,c.name,c.created_at,COALESCE(json_agg(i.post_id ORDER BY i.created_at)
-    FILTER (WHERE i.post_id IS NOT NULL AND EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=i.post_id AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${readablePost()})),'[]') post_ids
-    FROM saved_collections c LEFT JOIN saved_collection_items i ON i.collection_id=c.id WHERE c.owner_id=? GROUP BY c.id ORDER BY c.created_at,c.id LIMIT 100`).bind(viewer,viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
+  const r=await db().prepare(`SELECT c.id,c.name,c.created_at,
+    COALESCE((
+      SELECT json_group_array(i2.post_id)
+      FROM saved_collection_items i2
+      JOIN posts p2 ON p2.id=i2.post_id
+      JOIN profiles a2 ON a2.id=p2.author_id
+      WHERE i2.collection_id=c.id
+        AND ${policy.flags.reels?'1=1':"p2.kind!='reel'"}
+        AND ${policy.flags.stories?'1=1':"p2.kind!='story'"}
+        AND ${readablePost('p2','a2')}
+        AND i2.post_id IS NOT NULL
+      ORDER BY i2.created_at
+    ),'[]') post_ids
+    FROM saved_collections c
+    WHERE c.owner_id=?
+    ORDER BY c.created_at,c.id
+    LIMIT 100`).bind(viewer,viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
 }
 export async function messageSearch(viewer:string,term:string):Promise<Person[]>{
@@ -199,8 +213,8 @@ function publicPosts(posts:Post[],flags:Flags):Post[]{return posts.map(post=>({.
 export async function postCounters(viewer:string,id:string){
  const policy=await featurePolicy(viewer);
  const row=await db().prepare(`SELECT ${displayCounterColumns(policy.config.counters)},p.base_likes+(SELECT COUNT(*) FROM reactions WHERE post_id=p.id AND kind='like') likes,
- EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like')::int liked,
- EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')::int saved,
- EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen')::int seen FROM posts p WHERE p.id=?`).bind(viewer,viewer,viewer,id).first();
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='like') liked,
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save') saved,
+ EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='seen') seen FROM posts p WHERE p.id=?`).bind(viewer,viewer,viewer,id).first();
  return row?{...row,display_likes:policy.flags.likes?row.display_likes:null,display_comments:policy.flags.comments?row.display_comments:null,liked:policy.flags.likes?row.liked:0,saved:policy.flags.saves?row.saved:0}:{};
 }
