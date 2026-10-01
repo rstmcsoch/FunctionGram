@@ -50,6 +50,8 @@ export const LABEL_DEFAULTS = {
   "app.you_cannot_message_this_profile_while_it_is_blocked": "You cannot message this profile while it is blocked.",
   "app.your_own_corner_of_rstmc": "Your own corner of RSTMC",
   "app.sign_in_to_create_a_profile_and_share_your_world": "Sign in to create a profile and share your world.",
+  "app.profile_not_found": "Profile not found",
+  "app.this_profile_is_unavailable": "This profile is unavailable or the link is invalid.",
   "app.your_conversations_here": "Your conversations, here",
   "app.sign_in_to_send_messages_and_save_notes_to_yourself": "Sign in to send messages and save notes to yourself.",
   "app.make_yourself_at_home": "Make yourself at home",

@@ -39,7 +39,7 @@ test('SSR receives the same translator as hydration and escapes markup as plain 
  assert.match(html,/Clips/);assert.match(html,/&lt;img/);assert.ok(!html.includes('<img src=x'));assert.ok(!html.includes('aria-label="Loading"'));
 });
 test('migrated public surfaces contain no literal JSX copy, static text props or label templates',()=>{
- const paths=[...readdirSync('components/social').filter(n=>n.endsWith('.tsx')).map(n=>'components/social/'+n),'app/page.tsx','app/not-found.tsx','app/verify-email/page.tsx','app/reset-password/page.tsx','app/unauthorized.tsx','app/forbidden.tsx'];
+ const paths=[...readdirSync('components/social').filter(n=>n.endsWith('.tsx')).map(n=>'components/social/'+n),'app/page.tsx','app/social-home.tsx','app/[username]/page.tsx','app/not-found.tsx','app/verify-email/page.tsx','app/reset-password/page.tsx','app/unauthorized.tsx','app/forbidden.tsx'];
  const problems:string[]=[];
  for(const file of paths){const source=ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
   function visit(node:ts.Node){const at=file+':'+(source.getLineAndCharacterOfPosition(node.getStart(source)).line+1);
