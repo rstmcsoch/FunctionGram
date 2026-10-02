@@ -130,6 +130,20 @@ async function seed(sender: Account, recipient: Account, body: string) {
   return id;
 }
 
+test('direct message sending works through the Turso/libSQL social API', async () => {
+  const sent = await api(alice, { action: 'message', id: bob.id, body: 'cross-dialect message send' });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  assert.equal(sent.data.sender_id, alice.id);
+  assert.equal(sent.data.recipient_id, bob.id);
+  assert.equal(sent.data.body, 'cross-dialect message send');
+  const row = await message(sent.data.id as string);
+  assert.ok(row, 'the message row was persisted');
+  assert.equal(row?.sender_id, alice.id);
+  assert.equal(row?.recipient_id, bob.id);
+  assert.equal(row?.body, 'cross-dialect message send');
+  assert.equal((await api(alice, { action: 'delete_message', id: sent.data.id })).status, 200);
+});
+
 test('a message belongs to its sender: the sender can unsend it, the recipient cannot', async () => {
   const fromAlice = await seed(alice, bob, 'hello from alice');
   const fromBob = await seed(bob, alice, 'hi from bob');
