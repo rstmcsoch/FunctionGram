@@ -4,6 +4,7 @@ import { claimTransactionalEmail } from '../email';
 import { AdminError, validateSetting } from './validation';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
+import { inPlaceholders } from '../sql';
 import { DEFAULT_MESSAGING, type MessagingPolicy } from '../messaging-policy';
 
 export const NOTIFICATION_KINDS = ['like', 'comment', 'follow', 'tag', 'broadcast'] as const;
@@ -55,7 +56,12 @@ export async function listConversations(db: QueryExecutor, input: Record<string,
   const values: unknown[] = [];
   const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
   const where = q.trim() ? `WHERE (a.username ILIKE ${bind('%' + q.trim().replace(/[\\%_]/g, '\\$&') + '%')} OR b.username ILIKE ${bind('%' + q.trim().replace(/[\\%_]/g, '\\$&') + '%')} OR ua.email ILIKE ${bind('%' + q.trim().replace(/[\\%_]/g, '\\$&') + '%')} OR ub.email ILIKE ${bind('%' + q.trim().replace(/[\\%_]/g, '\\$&') + '%')})` : '';
-  const from = `FROM (SELECT LEAST(sender_id,recipient_id) AS first_id,GREATEST(sender_id,recipient_id) AS second_id,COUNT(*) FILTER (WHERE deleted_at IS NULL) AS message_count,MAX(created_at) AS last_at FROM messages GROUP BY LEAST(sender_id,recipient_id),GREATEST(sender_id,recipient_id)) c LEFT JOIN profiles a ON a.id=c.first_id LEFT JOIN profiles b ON b.id=c.second_id LEFT JOIN "user" ua ON ua.id=c.first_id LEFT JOIN "user" ub ON ub.id=c.second_id ${where}`;
+  // The unordered participant pair is spelled with CASE rather than
+  // PostgreSQL's LEAST/GREATEST, which libSQL does not implement (and whose
+  // min()/max() equivalents are aggregates only on PostgreSQL).
+  const first = 'CASE WHEN sender_id<recipient_id THEN sender_id ELSE recipient_id END';
+  const second = 'CASE WHEN sender_id<recipient_id THEN recipient_id ELSE sender_id END';
+  const from = `FROM (SELECT ${first} AS first_id,${second} AS second_id,COUNT(*) FILTER (WHERE deleted_at IS NULL) AS message_count,MAX(created_at) AS last_at FROM messages GROUP BY ${first},${second}) c LEFT JOIN profiles a ON a.id=c.first_id LEFT JOIN profiles b ON b.id=c.second_id LEFT JOIN "user" ua ON ua.id=c.first_id LEFT JOIN "user" ub ON ub.id=c.second_id ${where}`;
   const { rows: [count] } = await db.query('SELECT COUNT(*) AS total ' + from, values);
   const { rows } = await db.query(`SELECT c.first_id,c.second_id,COALESCE(a.username,ua.name,'Unavailable') AS first_name,ua.email AS first_email,COALESCE(b.username,ub.name,'Unavailable') AS second_name,ub.email AS second_email,c.message_count,c.last_at ${from} ORDER BY c.last_at DESC,c.first_id,c.second_id LIMIT ${bind(limit)} OFFSET ${bind((page - 1) * limit)}`, values);
   return { conversations: rows, total: Number(count.total), page, limit, q: q.trim() };
@@ -325,20 +331,22 @@ export async function sendInAppBroadcast(pool: PoolLike, actorId: string, input:
     const { rows: [actorProfile] } = await db.query('SELECT id FROM profiles WHERE id=$1 AND deleted_at IS NULL', [actor.userId]);
     if (!actorProfile) throw new AdminError('Administrator profile is unavailable.', 409);
     const where = `u.role='user' AND u."emailVerified"=true AND u.deleted_at IS NULL AND (u.banned=false OR (u."banExpires" IS NOT NULL AND u."banExpires"<=now())) AND p.deleted_at IS NULL AND p.is_demo=0`;
-    const selection = audience.audience === 'selected' ? ' AND p.id=ANY($1::text[])' : '';
+    // An exact audience is expanded into an `IN (…)` list instead of
+    // PostgreSQL's `= ANY($1::text[])`, which libSQL cannot parse.
+    const selection = audience.audience === 'selected' ? ` AND p.id IN (${inPlaceholders(audience.userIds.length)})` : '';
+    const selectionValues = audience.audience === 'selected' ? audience.userIds : [];
     if (audience.audience === 'selected') {
-      const { rows: [eligible] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${where} AND p.id=ANY($1::text[])`, [audience.userIds]);
+      const { rows: [eligible] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${where}${selection}`, selectionValues);
       if (Number(eligible.count) !== audience.userIds.length) throw new AdminError('Every selected account must be an active, verified, non-demo member.');
     }
-    const countValues = audience.audience === 'selected' ? [audience.userIds] : [];
-    const { rows: [countRow] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${where}${selection}`, countValues);
+    const { rows: [countRow] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${where}${selection}`, selectionValues);
     const count = Number(countRow.count);
     if (!count || count > 10000) throw new AdminError(count ? 'A broadcast is capped at 10,000 members; select a smaller exact audience.' : 'The selected audience is empty.');
     const confirmation = `SEND ${count} NOTIFICATIONS`;
     if (input.confirmation !== confirmation) throw new AdminError(`Type ${confirmation} to confirm this exact audience.`);
     const broadcastId = randomUUID(), now = Date.now();
-    const insertSelection = audience.audience === 'selected' ? ' AND p.id=ANY($5::text[])' : '';
-    const insertValues = audience.audience === 'selected' ? [actor.userId, broadcastId, message, now, audience.userIds] : [actor.userId, broadcastId, message, now];
+    const insertSelection = audience.audience === 'selected' ? ` AND p.id IN (${inPlaceholders(audience.userIds.length, 5)})` : '';
+    const insertValues = audience.audience === 'selected' ? [actor.userId, broadcastId, message, now, ...audience.userIds] : [actor.userId, broadcastId, message, now];
     const { rows } = await db.query(`INSERT INTO notifications(id,user_id,actor_id,kind,message_text,broadcast_id,created_at)
       SELECT 'broadcast:'||$2||':'||p.id,p.id,$1,'broadcast',$3,$2,$4 FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${where}${insertSelection}
       ON CONFLICT(id) DO NOTHING RETURNING id`, insertValues);
@@ -356,12 +364,13 @@ export async function previewInAppBroadcast(pool: PoolLike, actorId: string, inp
   const { rows: [template] } = await pool.query('SELECT enabled FROM admin_notification_templates WHERE kind=$1', ['broadcast']);
   if (!template?.enabled) throw new AdminError('In-app broadcasts are paused in notification settings.', 403);
   const base = `u.role='user' AND u."emailVerified"=true AND u.deleted_at IS NULL AND (u.banned=false OR (u."banExpires" IS NOT NULL AND u."banExpires"<=now())) AND p.deleted_at IS NULL AND p.is_demo=0`;
-  const filter = audience.audience === 'selected' ? ' AND p.id=ANY($1::text[])' : '';
+  const filter = audience.audience === 'selected' ? ` AND p.id IN (${inPlaceholders(audience.userIds.length)})` : '';
+  const filterValues = audience.audience === 'selected' ? audience.userIds : [];
   if (audience.audience === 'selected') {
-    const { rows: [eligible] } = await pool.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${base} AND p.id=ANY($1::text[])`, [audience.userIds]);
+    const { rows: [eligible] } = await pool.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${base}${filter}`, filterValues);
     if (Number(eligible.count) !== audience.userIds.length) throw new AdminError('Every selected account must be an active, verified, non-demo member.');
   }
-  const { rows: [row] } = await pool.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${base}${filter}`, audience.audience === 'selected' ? [audience.userIds] : []);
+  const { rows: [row] } = await pool.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE ${base}${filter}`, filterValues);
   const count = Number(row.count);
   if (!count || count > 10000) throw new AdminError(count ? 'Select no more than 10,000 members.' : 'The selected audience is empty.');
   return { dryRun: true, count, audience: audience.audience, messageLength: message.length, confirmation: `SEND ${count} NOTIFICATIONS` };
@@ -395,9 +404,10 @@ async function campaignRecipients(db: QueryExecutor, input: Record<string, unkno
   const values: unknown[] = [];
   if (audience.audience === 'selected') {
     const selected = audience.userIds;
-    const { rows: [eligible] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE p.id=ANY($1::text[]) AND u.role='user' AND u."emailVerified"=true AND u.deleted_at IS NULL AND (u.banned=false OR (u."banExpires" IS NOT NULL AND u."banExpires"<=now())) AND p.deleted_at IS NULL AND p.is_demo=0`, [selected]);
+    const list = ` AND p.id IN (${inPlaceholders(selected.length)})`;
+    const { rows: [eligible] } = await db.query(`SELECT COUNT(*) AS count FROM profiles p JOIN "user" u ON u.id=p.id WHERE p.id IN (${inPlaceholders(selected.length)}) AND u.role='user' AND u."emailVerified"=true AND u.deleted_at IS NULL AND (u.banned=false OR (u."banExpires" IS NOT NULL AND u."banExpires"<=now())) AND p.deleted_at IS NULL AND p.is_demo=0`, selected);
     if (Number(eligible.count) !== selected.length) throw new AdminError('Every selected email recipient must be an active, verified, non-demo member.');
-    sql += ' AND p.id=ANY($1::text[])'; values.push(selected);
+    sql += list; values.push(...selected);
   }
   sql += ' ORDER BY u.id LIMIT 10001';
   const { rows } = await db.query(sql, values);

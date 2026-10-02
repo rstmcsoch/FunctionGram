@@ -338,8 +338,9 @@ export async function getPool(): Promise<PoolLike> {
     return getTursoPool();
   }
 
-  // Temporary legacy path: Neon/PostgreSQL still works while migration
-  // development is in progress.
+  // The PostgreSQL/Neon runtime was removed with the migration to
+  // Turso/libSQL. Only the embedded local-dev driver and Turso are reachable;
+  // anything else is a misconfigured deployment and fails loudly.
   throw new Error(
     'PostgreSQL runtime has been disabled in this migration branch. Configure TURSO_DATABASE_URL.',
   );
