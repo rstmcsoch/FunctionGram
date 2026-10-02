@@ -1,10 +1,11 @@
 // Reads the live role/permission state, like the rest of lib/admin/core.ts.
 // Never expose these as actions or import into client UI: only the boolean
 // result of `adminPanelAuthority()` is passed to the browser.
-import { getPool } from '../postgres';
+import { getSessionSecurityContext } from '../auth';
+import { requestMemo } from '../request-context';
 import type { QueryExecutor } from '../postgres';
 import { authorizeAdmin } from './core';
-import type { AdminActor } from './config';
+import { ADMIN_ROLES, type AdminActor } from './config';
 import { hasPermission } from './permissions';
 import { AdminError } from './validation';
 
@@ -40,7 +41,21 @@ export async function accountHasAdminPanelAuthority(db: QueryExecutor, userId: s
   }
 }
 
-/** Request-scoped helper for server components that already resolved a viewer. */
+/**
+ * Request-scoped helper for server components that already resolved a viewer.
+ *
+ * Reuses the account row the session context already read in this request
+ * (role, verified email, ban/soft-delete state) instead of issuing a second
+ * identical query, and memoizes the boolean so the layout and the page cannot
+ * ask twice. A signed-in visitor who is not an administrator costs zero extra
+ * queries.
+ */
 export async function adminPanelAuthority(userId: string | null): Promise<boolean> {
-  return accountHasAdminPanelAuthority(await getPool(), userId);
+  if (!userId) return false;
+  return requestMemo('admin-panel-authority', async () => {
+    const session = await getSessionSecurityContext();
+    if (!session || session.userId !== userId || !session.accountEnabled || !session.role) return false;
+    if (!ADMIN_ROLES.includes(session.role as typeof ADMIN_ROLES[number])) return false;
+    return holdsAdminPanelAuthority({ userId: session.userId, email: session.email, role: session.role as AdminActor['role'] });
+  });
 }

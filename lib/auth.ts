@@ -4,11 +4,12 @@ import { betterAuth } from 'better-auth';
 import { twoFactor } from 'better-auth/plugins';
 import { headers } from 'next/headers';
 import { after } from 'next/server';
-import { ensureSchema, getPool } from './postgres';
+import { getPool } from './postgres';
 import { getTursoDb } from './turso';
 import { bootstrapAdmin } from './admin/core';
 import { ADMIN_BOOTSTRAP_ENV } from './admin/config';
-import { accountCanSignIn, accountSessionHooks, flagIsTrue, recordNewAdminDevice } from './account-policy';
+import { accountEnabled, accountSessionHooks, adminDeviceFingerprint, flagIsTrue, recordNewAdminDevice } from './account-policy';
+import { requestMemo } from './request-context';
 import { authConfiguration } from './auth-config';
 import {
   claimTransactionalEmail, claimVerificationEmail, createVerificationEmailSender,
@@ -110,46 +111,84 @@ export type SessionSecurityContext = {
   sessionId: string;
   sessionCreatedAt: number;
   twoFactorEnabled: boolean;
+  /** Role from the same row read, so callers never re-query the account. */
+  role: string | null;
+  /** Ban/soft-delete state from the same row read. */
+  accountEnabled: boolean;
 };
 
-// `requestHeaders` lets callers (API route handlers) hand in their own
-// request headers. When absent the Next request context is used, including in
-// server components. Security metadata stays server-only and is never returned
-// through the public app's identity helper.
+// Fingerprints already handled in this isolate. Recording an already-known
+// device is a no-op in the database, so skipping the repeat here removes a
+// write transaction from every subsequent admin request without changing what
+// gets recorded. A fresh isolate (or a genuinely new device) still records.
+const knownAdminDevices = new Set<string>();
+
+/**
+ * `requestHeaders` lets callers (API route handlers) hand in their own
+ * request headers. When absent the Next request context is used, including in
+ * server components. Security metadata stays server-only and is never returned
+ * through the public app's identity helper.
+ *
+ * Resolved once per request: the session lookup, the account row and the
+ * administrator device check are memoized, so the layout, the page and the API
+ * helpers share one resolution.
+ */
 export async function getSessionSecurityContext(requestHeaders?: Headers): Promise<SessionSecurityContext | null> {
-  await ensureSchema();
-  const session=await (await getAuth()).api.getSession({headers:requestHeaders??await headers()});
-  if(!session?.user.emailVerified) return null;
-  const pool=await getPool();
-  await bootstrapAdmin(pool, session.user.id, session.user.email, process.env[ADMIN_BOOTSTRAP_ENV]);
-  const {rows:[account]}=await pool.query('SELECT role,"twoFactorEnabled" FROM "user" WHERE id=$1',[session.user.id]);
-  if(account && ['owner','admin','moderator'].includes(account.role)) {
-    try {
-      const device=await recordNewAdminDevice(pool,{userId:session.user.id,ipAddress:session.session.ipAddress,userAgent:session.session.userAgent});
-      const sendNotice=sendAdminDeviceNotice;
-      if(device&&sendNotice) inBackground(async()=>{
-        if(await claimTransactionalEmail(pool,'admin-new-device',device.email)) await sendNotice({user:{email:device.email},ipAddress:device.ipAddress,userAgent:device.userAgent,at:new Date().toISOString()});
-      });
-    } catch {
-      // A failed notice must not block the account owner from reaching recovery/setup.
-      console.error('Admin device security event could not be recorded');
+  return requestMemo('session-context', async () => {
+    const session=await (await getAuth()).api.getSession({headers:requestHeaders??await headers()});
+    if(!session?.user.emailVerified) return null;
+    const pool=await getPool();
+    const bootstrapEmail=process.env[ADMIN_BOOTSTRAP_ENV]?.trim().toLowerCase();
+    // Bootstrap applies to exactly one configured address; checking the
+    // address first keeps the promotion transaction off every other request.
+    if(bootstrapEmail && session.user.email.toLowerCase()===bootstrapEmail) {
+      await bootstrapAdmin(pool, session.user.id, session.user.email, bootstrapEmail);
     }
-  }
-  return {
-    userId:session.user.id,email:session.user.email,fullName:session.user.name,
-    sessionId:session.session.id,sessionCreatedAt:new Date(session.session.createdAt).getTime(),
-    twoFactorEnabled:flagIsTrue(account?.twoFactorEnabled),
-  };
+    // One row read supplies the role, the two-factor state and the account
+    // state used by `getAppUser` — previously two separate queries.
+    const {rows:[account]}=await pool.query('SELECT role,"twoFactorEnabled",banned,"banExpires",deleted_at,"emailVerified" FROM "user" WHERE id=$1',[session.user.id]);
+    const role=typeof account?.role==='string'?account.role:null;
+    if(role && ['owner','admin','moderator'].includes(role)) {
+      // Device security recording is preserved, but it is not part of the
+      // response path: the user's page renders first, then the (idempotent)
+      // device check and its notification email run in the background.
+      const fingerprint=adminDeviceFingerprint({userId:session.user.id,ipAddress:session.session.ipAddress,userAgent:session.session.userAgent});
+      if(fingerprint && !knownAdminDevices.has(fingerprint)) {
+        knownAdminDevices.add(fingerprint);
+        inBackground(async()=>{
+          try {
+            const device=await recordNewAdminDevice(pool,{userId:session.user.id,ipAddress:session.session.ipAddress,userAgent:session.session.userAgent});
+            const sendNotice=sendAdminDeviceNotice;
+            if(device&&sendNotice&&await claimTransactionalEmail(pool,'admin-new-device',device.email)) {
+              await sendNotice({user:{email:device.email},ipAddress:device.ipAddress,userAgent:device.userAgent,at:new Date().toISOString()});
+            }
+          } catch {
+            // A failed notice must not block the account owner from reaching recovery/setup.
+            console.error('Admin device security event could not be recorded');
+          }
+        });
+      }
+    }
+    return {
+      userId:session.user.id,email:session.user.email,fullName:session.user.name,
+      sessionId:session.session.id,sessionCreatedAt:new Date(session.session.createdAt).getTime(),
+      twoFactorEnabled:flagIsTrue(account?.twoFactorEnabled),
+      role,
+      accountEnabled:account?accountEnabled(account):true,
+    };
+  });
 }
 
 export async function getSessionIdentity(requestHeaders?: Headers) {
-  const session=await getSessionSecurityContext(requestHeaders);
-  return session?{userId:session.userId,email:session.email,fullName:session.fullName,displayName:session.fullName}:null;
+  const user = await getAppUser(requestHeaders);
+  return user?{userId:user.userId,email:user.email,fullName:user.fullName,displayName:user.fullName}:null;
 }
 
 // Block existing sessions as well as new sign-ins, including a session issued
-// concurrently with a suspension. Public mutations already use this helper.
+// concurrently with a suspension. The account state comes from the same row
+// read as the session context, so this adds no query of its own.
 export async function getAppUser(requestHeaders?: Headers) {
-  const user = await getSessionIdentity(requestHeaders);
-  return user && await accountCanSignIn(await getPool(), user.userId) ? user : null;
+  const session = await getSessionSecurityContext(requestHeaders);
+  if (!session || !session.accountEnabled) return null;
+  return {userId:session.userId,email:session.email,fullName:session.fullName,displayName:session.fullName};
 }

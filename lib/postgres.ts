@@ -7,8 +7,9 @@ import type { QueryResultRow as PgQueryResultRow } from 'pg';
 
 import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
+import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -47,6 +48,12 @@ export const DATABASE_MIGRATIONS = [
   {
     version: 1,
     statements: tursoSchemaStatements,
+  },
+  {
+    // Index-only migration. Statement-level, idempotent, and applied in one
+    // batch, so an existing deployment pays one request once per environment.
+    version: 2,
+    statements: tursoIndexStatements,
   },
 ];
 
@@ -134,6 +141,7 @@ async function createLocalPool(): Promise<PoolLike> {
   const instance = new PGlite(localDataDir());
 
   const query = async (text: string, values?: unknown[]) => {
+    countDbTrip('local');
     const result = await instance.query(text, values);
 
     const numeric = (result.fields ?? [])
@@ -211,6 +219,7 @@ class TursoConnection implements QueryExecutor {
     const sql = postgresQuery(text);
     const args = sanitizeArgs(values) as never;
 
+    countDbTrip(sql.slice(0, 40));
     const result = await runTurso(sql, () =>
       this.client.execute({ sql, args }),
     );
@@ -242,6 +251,7 @@ export class TursoPool implements PoolLike {
     const sql = postgresQuery(text);
     const args = sanitizeArgs(values) as never;
 
+    countDbTrip(sql.slice(0, 40));
     const result = await runTurso(sql, () =>
       this.client.execute({ sql, args }),
     );
@@ -264,6 +274,8 @@ export class TursoPool implements PoolLike {
 
     const label = `BATCH(${prepared.length}) first: ${prepared[0].sql}`;
 
+    // One HTTP request for every statement in the batch.
+    countDbTrip(`batch:${prepared.length}`);
     const results = await runTurso(label, () =>
       this.client.batch(prepared, 'write'),
     );
@@ -326,6 +338,48 @@ export async function getPool(): Promise<PoolLike> {
   );
 }
 
+/**
+ * True once this isolate has confirmed the schema. Lets the hot query path
+ * skip an `await` for every statement while keeping the lazy initialization
+ * for a brand-new environment (first request, tests, and cold isolates that
+ * started serving before instrumentation ran).
+ */
+export function schemaReady() {
+  return ready !== undefined;
+}
+
+/** Runs schema initialization exactly once per isolate. */
+/**
+ * Account columns the application reads on every authenticated request
+ * (role, ban state, soft delete). Better Auth's own migration creates the
+ * core `user` table with only the columns its enabled plugins declare, so a
+ * database created from this repository's migration path does not have them
+ * and every session lookup fails with "no such column: banned".
+ *
+ * Startup-only and idempotent: missing columns are added with the same
+ * defaults the application already assumes (no role, not banned, not
+ * deleted). Existing databases are untouched.
+ */
+async function alignAuthSchema(database: PoolLike) {
+  if (database.storageDialect === 'postgres') return;
+  const table = await database.query(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='user'`,
+  );
+  if (!table.rowCount) return;
+  const info = await database.query('PRAGMA table_info("user")');
+  const existing = new Set(info.rows.map(row => String(row.name)));
+  const additions: [string, string][] = [
+    ['role', "TEXT NOT NULL DEFAULT 'user'"],
+    ['banned', 'INTEGER NOT NULL DEFAULT 0'],
+    ['banExpires', 'INTEGER'],
+    ['deleted_at', 'INTEGER'],
+  ];
+  for (const [column, ddl] of additions) {
+    if (existing.has(column)) continue;
+    await database.query(`ALTER TABLE "user" ADD COLUMN ${column} ${ddl}`);
+  }
+}
+
 export async function ensureSchema() {
   if (!ready) {
     ready = (async () => {
@@ -356,6 +410,8 @@ export async function ensureSchema() {
             ]);
           }
         }
+
+        await alignAuthSchema(database);
 
         return;
       }
@@ -397,6 +453,8 @@ export async function ensureSchema() {
       } finally {
         client.release();
       }
+
+      await alignAuthSchema(database);
     })().catch(error => {
       ready = undefined;
       throw error;
@@ -419,7 +477,10 @@ export class Statement {
   }
 
   async execute(client?: Executor) {
-    if (!client) {
+    // The schema check is a one-time startup concern: after the first success
+    // in this isolate it is synchronous, so it does not sit between a request
+    // and its query.
+    if (!client && !schemaReady()) {
       await ensureSchema();
     }
 
@@ -454,12 +515,23 @@ export class Statement {
   }
 }
 
+/**
+ * One-time database startup: schema and (optionally) demo seeding.
+ *
+ * Called from the Next.js instrumentation hook so schemas are created when
+ * the server starts rather than on the first user request. Safe to call more
+ * than once: the underlying promises are memoized per isolate.
+ */
+export async function initializeDatabase() {
+  await ensureSchema();
+}
+
 export function database() {
   return {
     prepare: (query: string) => new Statement(query),
 
     async batch(statements: Statement[]) {
-      await ensureSchema();
+      if (!schemaReady()) await ensureSchema();
 
       const pool = await getPool();
 

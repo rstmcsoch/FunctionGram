@@ -9,7 +9,11 @@ export function counterSql(real:string,base:string,metric:string,c:FeatureConfig
   const jitter=c.jitter
     ? `(abs(length(${alias}.id || ':${metric}') * 1103515245) % ${2*c.jitter+1} - ${c.jitter})`
     : '0';
-  return `CAST(MIN(1000000000000,MAX(0,(${real}+${alias}.${base})*${c.multiplier}+${jitter})) AS INTEGER)`;
+  // `real` is a scalar subquery (or an expression) and MUST stay parenthesized:
+  // without the parentheses libSQL parses `kind='like'+p.base_likes` as part of
+  // the subquery, so the counts silently became 0 and the base counts were
+  // discarded. This restores the intended (count + base) * multiplier.
+  return `CAST(MIN(1000000000000,MAX(0,((${real})+${alias}.${base})*${c.multiplier}+${jitter})) AS INTEGER)`;
 }
 
 export function displayCounterColumns(c:FeatureConfig['counters'],alias='p'){

@@ -3,15 +3,22 @@ import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature
 import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
 import {displayCounterColumns} from './counters';
 import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
-import { database } from './postgres';
+import { database, getPool } from './postgres';
+import { ensureDemoSeed, publishReady } from './publish';
+import { ensureProfileRow } from './profiles';
 import { getAppUser } from '@/lib/auth';
-import { seed } from './seed';
 import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialData } from './types';
 
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
 export function db(){return database();}
 export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError||error instanceof AdminError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
-export function json(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
+// Personalised payloads stay private and uncached by default. Genuinely
+// public configuration (appearance, labels, media policy) opts into a shared
+// cache with a short browser TTL and a long stale-while-revalidate window, so
+// the client never waits on a round trip it does not need.
+const NO_STORE={'Cache-Control':'private, no-store'};
+export function json(data:unknown){return Response.json(data,{headers:NO_STORE});}
+export function jsonPublic(data:unknown,maxAge=60){return Response.json(data,{headers:{'Cache-Control':`public, max-age=${maxAge}, s-maxage=${maxAge}, stale-while-revalidate=600`}});}
 
 // Origins the deployment explicitly trusts (custom domains, preview domains).
 // Read from the same environment variables the auth configuration uses, but
@@ -66,14 +73,27 @@ export function requestHeadersWithHost(request:Request):Headers{
 }
 export function clean(value:unknown,max:number,required=false){if(value===undefined||value===null){if(required)throw new AppError('Please complete the required fields.');return '';}if(typeof value!=='string'||value.trim().length>max||(required&&!value.trim()))throw new AppError(required?'Please complete the required fields.':'Please check the length of your text.');return value.trim();}
 export async function readBody(request:Request){if(Number(request.headers.get('content-length')||0)>20000)throw new AppError('This request is too large.',413);try{const body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw new Error();return body as Record<string,unknown>;}catch{throw new AppError('Please check your input.');}}
+// Profiles already verified in this isolate. Recording a device/profile is an
+// idempotent write, so remembering it here keeps every later request read-only.
+const ensuredProfiles = new Set<string>();
+
 // Accepts legacy `identity(required)` and `identity(requestHeaders, required)`.
+//
+// Effectively read-oriented. The profile row is created when the account is
+// created (Better Auth `user.create` hook in `lib/account-policy.ts`); only an
+// account whose row is missing — one that predates that hook — triggers a
+// single idempotent insert, at most once per isolate per account. Ordinary
+// authenticated requests therefore perform no writes at all, and the session
+// lookup itself is memoized per request by `getAppUser`.
 export async function identity(requiredOrHeaders?:boolean|Headers,requiredIfHeaders=false){
   const requestHeaders=requiredOrHeaders instanceof Headers?requiredOrHeaders:undefined;
   const required=requiredOrHeaders instanceof Headers?requiredIfHeaders:Boolean(requiredOrHeaders);
   const user=await getAppUser(requestHeaders);
   if(!user){if(required)throw new AppError('Sign in to join the conversation.',401);return null;}
-  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(user.userId)))).map(n=>n.toString(16).padStart(2,'0')).join('').slice(0,10);
-  await db().prepare('INSERT OR IGNORE INTO profiles (id,username,name,bio,avatar,is_demo,created_at) VALUES (?,?,?,?,?,0,?)').bind(user.userId,'rstmc_'+hash,user.fullName?.slice(0,60)||'RSTMC','','',Date.now()).run();
+  if(!ensuredProfiles.has(user.userId)){
+    ensuredProfiles.add(user.userId);
+    await ensureProfileRow(await getPool(),user.userId,user.fullName);
+  }
   return user.userId;
 }
 
@@ -86,16 +106,34 @@ const blockedGuard=`NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=
 // Expired (or deleted) posts behave as if they no longer exist, everywhere.
 const activeGuard=`(p.expires_at IS NULL OR p.expires_at>?) AND ${visiblePost()}`;
 
-export async function people(viewer:string|null):Promise<Person[]>{const {sql,args}=buildPeopleQuery(viewer);const r=await db().prepare(sql).bind(...args).all<Person>();return r.results;}
-export function buildPeopleQuery(viewer:string|null):{sql:string;args:unknown[]}{
+/**
+ * The people directory is a secondary surface: the first screen only needs the
+ * viewer, the demo accounts and the first few suggestions. `limit` keeps the
+ * per-row follower/following/post counts bounded, and paging through the rest
+ * is a separate, explicit request (`peopleDirectory`).
+ */
+export async function people(viewer:string|null,limit=12,offset=0):Promise<Person[]>{const {sql,args}=buildPeopleQuery(viewer,limit,offset);const r=await db().prepare(sql).bind(...args).all<Person>();return r.results;}
+export function buildPeopleQuery(viewer:string|null,limit=12,offset=0):{sql:string;args:unknown[]}{
   const v=viewer||'';
   return {
-    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p WHERE p.deleted_at IS NULL ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo ASC,p.created_at ASC LIMIT 300`,
-    args:[v,v,v],
+    sql:`SELECT p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked FROM profiles p WHERE p.deleted_at IS NULL ORDER BY CASE WHEN p.id=? THEN 0 ELSE 1 END,p.is_demo DESC,p.created_at ASC LIMIT ? OFFSET ?`,
+    args:[v,v,v,limit,offset],
   };
 }
+/** One page of the people directory, capped at 60 rows per request. */
+export async function peopleDirectory(viewer:string|null,limit=24,offset=0):Promise<Person[]>{
+  const bounded=Math.max(1,Math.min(60,Number(limit)||24));
+  const boundedOffset=Math.max(0,Math.min(100000,Number(offset)||0));
+  return people(viewer,bounded,boundedOffset);
+}
 const personColumns=`p.*, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.follower_id WHERE f.followee_id=p.id AND fp.deleted_at IS NULL) followers, (SELECT COUNT(*) FROM follows f JOIN profiles fp ON fp.id=f.followee_id WHERE f.follower_id=p.id AND fp.deleted_at IS NULL) following, (SELECT COUNT(*) FROM posts pc WHERE pc.author_id=p.id AND pc.kind!='story' AND ${livePost('pc')}) post_count, EXISTS(SELECT 1 FROM follows WHERE follower_id=? AND followee_id=p.id) followed, EXISTS(SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=p.id) blocked`;
-export async function person(viewer:string|null,id:string):Promise<Person|null>{return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND p.id=?`).bind(viewer||'',viewer||'',id).first<Person>();}
+// Accepts an account id or a username: the client resolves any profile route
+// with one request instead of holding every profile in the initial payload.
+export async function person(viewer:string|null,idOrUsername:string):Promise<Person|null>{
+  const byId=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND p.id=?`).bind(viewer||'',viewer||'',idOrUsername).first<Person>();
+  if(byId)return byId;
+  return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND LOWER(p.username)=LOWER(?)`).bind(viewer||'',viewer||'',idOrUsername).first<Person>();
+}
 function searchPattern(value:string){return '%'+value.replace(/[\\%_]/g,'\\$&')+'%';}
 export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
 export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
@@ -161,20 +199,115 @@ export async function availablePost(viewer:string|null,id:string) {
   if(!row||(row.kind==='reel'&&!policy.flags.reels)||(row.kind==='story'&&!policy.flags.stories))throw new AppError('This post is no longer available.',404);
   return row;
 }
-export async function notifications(viewer:string) {
+// `limit` is clamped so the activity poll and the notification view can ask for
+// exactly what they render instead of always pulling 100 rows with a join.
+export async function notifications(viewer:string,limit=100) {
   const policy=await featurePolicy(viewer);if(!policy.flags.notifications)return {results:[]};
+  const bounded=Math.max(1,Math.min(100,Number(limit)||100));
   return db().prepare(`SELECT n.*,nt.template_text,actor.username,actor.avatar,p.media,p.media_type FROM notifications n
     JOIN admin_notification_templates nt ON nt.kind=n.kind AND nt.enabled=true
     JOIN profiles actor ON actor.id=n.actor_id LEFT JOIN posts p ON p.id=n.post_id LEFT JOIN profiles a ON a.id=p.author_id
     WHERE ${policy.flags.stories?'TRUE':"(p.kind IS NULL OR p.kind!='story')"} AND ${policy.flags.reels?'TRUE':"(p.kind IS NULL OR p.kind!='reel')"} AND ${policy.flags.comments?'TRUE':"n.kind!='comment'"} AND ${policy.flags.likes?'TRUE':"n.kind!='like'"} AND ${policy.flags.follow?'TRUE':"n.kind!='follow'"} AND ${policy.flags.tagging?'TRUE':"n.kind!='tag'"} AND n.user_id=? AND actor.deleted_at IS NULL AND (n.post_id IS NULL OR (${readablePost()}))
     AND (n.kind!='comment' OR EXISTS(SELECT 1 FROM comments c WHERE c.id=n.id AND ${visibleComment()}))
-    ORDER BY n.created_at DESC LIMIT 100`).bind(viewer,viewer,viewer,viewer,viewer).all();
+    ORDER BY n.created_at DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,viewer,bounded).all();
 }
+/**
+ * The first screen's data. Deliberately smaller than the whole application:
+ *
+ *  - 20 feed posts (the previous 40 doubled the heaviest query and the RSC
+ *    payload for content that is below the fold);
+ *  - 12 people (the viewer, the sample accounts and the first suggestions)
+ *    instead of all 300 profiles with their per-row count subqueries;
+ *  - 25 notifications instead of 100;
+ *  - one round trip for "is there anything new", not a list and a count.
+ *
+ * Everything else (more people, more posts, saved content, relations,
+ * collections, the full inbox) is loaded by the view that needs it.
+ */
 export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
-  await seed();const viewer=await identity(requestHeaders);const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
-  const [users,posts,notifs,unread]=await Promise.all([people(viewer),feed(viewer),viewer?notifications(viewer):Promise.resolve({results:[]}),viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);
-  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===40};
+  // The demo-content check is an isolate-level concern, not per request.
+  if(!publishReady()) await ensureDemoSeed();
+  const viewer=await identity(requestHeaders);const policy=await featurePolicy(viewer);requirePublic(policy,viewer);
+  const [users,posts,notifs,unread]=await Promise.all([
+    people(viewer,12),
+    feed(viewer,20),
+    viewer?notifications(viewer,25):Promise.resolve({results:[]}),
+    viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+  ]);
+  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
 }
+
+/* ------------------------------ lightweight activity ------------------------------ */
+
+/** Compact activity state for polling: newest notifications and the unread
+ * message count in one response, never the full notification join. */
+export async function activity(viewer:string){
+  const policy=await featurePolicy(viewer);
+  if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags};
+  const [notifs,unread]=await Promise.all([
+    policy.flags.notifications?notifications(viewer,10):Promise.resolve({results:[]}),
+    policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+  ]);
+  return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags};
+}
+
+/* ---------------------------- conversation (messages) ---------------------------- */
+
+type MessageRow=Record<string,unknown>;
+
+/**
+ * Conversation history (and older pages) for one thread.
+ *
+ * The previous API path issued two requests for the message view plus a third
+ * write to mark the thread read; this is the single rows query it needs, with
+ * the "is the shared post still readable" check evaluated only for messages
+ * that reference a post.
+ */
+export async function conversation(viewer:string,other:string,limit=50,cursor:[number,string]|null=null){
+  const policy=await featurePolicy(viewer);
+  const flags=policy.flags;
+  const boundedLimit=Math.max(1,Math.min(100,limit||50));
+  // Placeholder order matches the text: the 4 visibility values from
+  // `readablePost()` inside the CASE, then the two participants (each used
+  // twice), then the optional cursor and the limit.
+  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END`;
+  const args:unknown[]=[viewer,viewer,viewer,viewer,viewer,other,other,viewer];
+  let sql=`SELECT m.*,${readable} AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?))`;
+  if(cursor){sql+=' AND (m.created_at<? OR (m.created_at=? AND m.id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
+  sql+=' ORDER BY m.created_at DESC,m.id DESC LIMIT ?';args.push(boundedLimit+1);
+  const rows=(await db().prepare(sql).bind(...args).all()).results as MessageRow[];
+  const items=rows.slice(0,boundedLimit);
+  const next_cursor=rows.length>boundedLimit?`${items[items.length-1].created_at},${items[items.length-1].id}`:null;
+  return {items,next_cursor};
+}
+
+/** Inbox previews for the message view: one statement, newest first. */
+export async function inboxPreview(viewer:string,limit=200){
+  const policy=await featurePolicy(viewer);
+  const flags=policy.flags;
+  const bounded=Math.max(1,Math.min(300,limit||200));
+  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END`;
+  const r=await db().prepare(`SELECT m.*,${readable} AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,viewer,viewer,bounded).all();
+  return r.results;
+}
+
+/* ------------------------------- post comments ------------------------------- */
+
+/** One page of a post's comments, with the same visibility rules as before. */
+export async function postComments(viewer:string|null,postId:string,limit=30,cursor:[number,string]|null=null){
+  const policy=await featurePolicy(viewer);requirePublic(policy,viewer);requireFeature(policy,'comments');
+  await availablePost(viewer,postId);
+  const bounded=Math.max(1,Math.min(100,Number(limit)||30));
+  let sql=`SELECT c.*,p.username,p.avatar FROM comments c JOIN profiles p ON p.id=c.author_id WHERE c.post_id=? AND ${visibleComment()}`;
+  const args:unknown[]=[postId];
+  if(cursor){sql+=' AND (c.created_at>? OR (c.created_at=? AND c.id>?))';args.push(cursor[0],cursor[0],cursor[1]);}
+  sql+=' ORDER BY c.created_at,c.id LIMIT ?';args.push(bounded+1);
+  const rows=(await db().prepare(sql).bind(...args).all()).results;
+  const items=rows.slice(0,bounded);
+  const next_cursor=rows.length>bounded?`${items[items.length-1].created_at},${items[items.length-1].id}`:null;
+  return {items,next_cursor};
+}
+
 /* ------------------------------ account features ------------------------------ */
 
 export async function storyViewers(viewer:string,storyId:string):Promise<StoryViewer[]>{

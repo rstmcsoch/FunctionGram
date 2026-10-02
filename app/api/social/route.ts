@@ -1,15 +1,17 @@
 import {requireAllowedText,requireCommentPermission} from '@/lib/moderation-policy';
 import {checkAssets,readMediaConfig,commitMediaUse} from '@/lib/media-policy';
+import {runWithRequestContext} from '@/lib/request-context';
+import {flushPerf} from '@/lib/perf';
 import {MIB} from '@/lib/media-config';
 import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
 import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
 import { checkReelDuration } from '@/lib/reel-duration';
 import { AdminError } from '@/lib/admin/validation';
-import { visibleComment, visiblePost, readablePost } from '@/lib/content-visibility';
+import { visibleComment, visiblePost } from '@/lib/content-visibility';
 import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
-import { AppError,postCounters,availablePost,notifications,bootstrap,db,identity,clean,fail,json,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
 export const maxDuration=60;
 export const dynamic='force-dynamic';
@@ -27,40 +29,30 @@ function parseCursor(value:string|null):[number,string]|null{
   return [createdAt,id];
 }
 
-export async function GET(request:Request){try{
+// Every query branch that carries the viewer's own rows also carries the
+// viewer's own authorization; nothing here is shared between requests.
+function noStore(data:unknown){return Response.json(data,{headers:{'Cache-Control':'private, no-store'}});}
+
+export async function GET(request:Request){
+ return runWithRequestContext(async()=>{try{
   const query=new URL(request.url).searchParams;
   const headers=requestHeadersWithHost(request);
   const policyViewer=await identity(headers);const policy=await featurePolicy(policyViewer);requirePublic(policy,policyViewer);
   for(const [key,feature]of Object.entries(QUERY_FEATURES))if(query.has(key))requireFeature(policy,feature);
-  if(query.has('upload-policy')){requireFeature(policy,'uploads');return json(await readMediaConfig(await getPool()));}
-  if(query.has('activity')){const viewer=await identity(headers,true);const [notifs,unread]=await Promise.all([notifications(viewer!),policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0})]);return json({features:policy.flags,notifications:notifs.results,unreadMessages:unread?.count||0});}
-  if(query.has('comments')){
-    const postId=clean(query.get('comments'),100,true);
-    const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
-    const cursor=parseCursor(query.get('cursor'));
-    const post=await availablePost(await identity(headers),postId);
-    if(!post)throw new AppError('Post not found.',404);
-    let sql=`SELECT c.*,p.username,p.avatar FROM comments c JOIN profiles p ON p.id=c.author_id WHERE c.post_id=? AND ${visibleComment()}`;
-    const args:unknown[]=[postId];
-    if(cursor){sql+=' AND (c.created_at>? OR (c.created_at=? AND c.id>?))';args.push(cursor[0],cursor[0],cursor[1]);}
-    sql+=' ORDER BY c.created_at,c.id LIMIT ?';args.push(limit+1);
-    const rows=(await db().prepare(sql).bind(...args).all()).results;
-    const items=rows.slice(0,limit);
-    const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
-    return json({items,next_cursor});
-  }
-  if(query.has('messages')){const user=await identity(headers,true);const other=clean(query.get('messages'),100,true);
-    const limit=Math.max(1,Math.min(100,Number(query.get('limit'))||30));
-    const cursor=parseCursor(query.get('cursor'));
-    let sql=`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`;
-    const args:unknown[]=[user,user,user,user,user,other,other,user];
-    if(cursor){sql+=' AND (created_at<? OR (created_at=? AND id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
-    sql+=' ORDER BY created_at DESC,id DESC LIMIT ?';args.push(limit+1);
-    const rows=(await db().prepare(sql).bind(...args).all()).results;
-    const items=rows.slice(0,limit);
-    const next_cursor=rows.length>limit?items[items.length-1].created_at+','+items[items.length-1].id:null;
-    return json({items,next_cursor});}
-  if(query.has('inbox')){const user=await identity(headers,true);const r=await db().prepare(`SELECT m.*,CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${policy.flags.stories?'TRUE':"p.kind!='story'"} AND ${policy.flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${policy.flags.shares?'m.post_id':'NULL'} ELSE NULL END AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (sender_id=? OR recipient_id=?) ORDER BY created_at DESC,id DESC LIMIT 500`).bind(user,user,user,user,user,user).all();return json(r.results);}
+  // Public application configuration is identical for every visitor: it can be
+  // cached by the browser and the CDN for a minute and revalidate in the
+  // background. It contains no account data.
+  if(query.has('upload-policy')){requireFeature(policy,'uploads');return jsonPublic(await readMediaConfig(await getPool()));}
+  // Activity polling: a small, purpose-built payload (recent notifications and
+  // the unread count) resolved in parallel.
+  if(query.has('activity')){const viewer=await identity(headers,true);return noStore(await activity(viewer!));}
+  if(query.has('comments')){const postId=clean(query.get('comments'),100,true);return noStore(await postComments(await identity(headers),postId,Number(query.get('limit'))||30,parseCursor(query.get('cursor'))));}
+  if(query.has('messages')){const user=await identity(headers,true);return noStore(await conversation(user!,clean(query.get('messages'),100,true),Number(query.get('limit'))||50,parseCursor(query.get('cursor'))));}
+  if(query.has('inbox')){const user=await identity(headers,true);return noStore(await inboxPreview(user!));}
+  // The notification view asks for the full recent list when it opens; the
+  // bootstrap payload and the activity poll only carry what the badge needs.
+  if(query.has('notifications')){const viewer=await identity(headers,true);return noStore(await notifications(viewer!,100));}
+  if(query.has('people')){const offset=Math.max(0,Math.min(100000,Number(query.get('offset'))||0));return json(await peopleDirectory(await identity(headers),Number(query.get('limit'))||24,offset));}
   if(query.has('person'))return json(await person(await identity(headers),clean(query.get('person'),100,true)));
   if(query.has('highlights'))return json(await highlights(await identity(headers),clean(query.get('highlights'),100,true)));
   if(query.has('tagged'))return json(await feed(await identity(headers),300,0,{tagged:clean(query.get('tagged'),100,true)}));
@@ -97,7 +89,8 @@ export async function GET(request:Request){try{
     if(term.length<2)throw new AppError('Type at least two characters.');
     return json(await messageSearch(user!,term));}
   return json(await bootstrap(headers));
-}catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}}
+ }catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}
+ finally{flushPerf('GET '+new URL(request.url).pathname+new URL(request.url).search);}});}
 
 const categories=['For you','Travel','Nature','Photography','Architecture','Lifestyle'];
 const reportReasons=['spam','harassment','false_information','misleading','inappropriate','other'];
@@ -122,7 +115,9 @@ function taggedUsers(value:unknown,database:ReturnType<typeof db>):Promise<strin
   if(!Array.isArray(tags)||tags.length>10||tags.some(tag=>typeof tag!=='string'||tag.length>100)||new Set(tags).size!==tags.length)throw new AppError('Tag up to 10 people.');
   return Promise.all(tags.map(async tagged=>{if(!await database.prepare('SELECT id FROM profiles WHERE deleted_at IS NULL AND id=?').bind(tagged).first())throw new AppError('A tagged account is no longer available.');return tagged;}));
 }
-export async function POST(request:Request){try{
+export async function POST(request:Request){
+ const label='POST /api/social';
+ return runWithRequestContext(async()=>{try{
   sameOrigin(request);const user=(await identity(requestHeadersWithHost(request),true))!;const input=await readBody(request);const action=clean(input.action,40,true);const database=db();
   const policy=await featurePolicy(user);requirePublic(policy,user);
   if(ACTION_FEATURES[action])requireFeature(policy,ACTION_FEATURES[action]);
@@ -153,7 +148,11 @@ export async function POST(request:Request){try{
     const body=clean(input.body,1000,true);await requireAllowedText(body);await requireCommentPermission(await getPool(),user);const post=await availablePost(user,id);if(!post)throw new AppError('Post not found.',404);
     const commentId=crypto.randomUUID();const stmts=[database.prepare('INSERT INTO comments (id,post_id,author_id,body,created_at) VALUES (?,?,?,?,?)').bind(commentId,id,user,body,now)];
     if(policy.flags.notifications&&user!==post.author_id)stmts.push(database.prepare('INSERT OR IGNORE INTO notifications (id,user_id,actor_id,kind,post_id,created_at) VALUES (?,?,?,?,?,?)').bind(commentId,post.author_id,user,'comment',id,now));
-    await database.batch(stmts);const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
+    // The response carries everything the comment row needs (validator name and
+    // avatar, canonical timestamp), so the client can render it without a
+    // follow-up GET /api/social?post=... round trip.
+    await database.batch(stmts);
+    const author=await database.prepare('SELECT username,avatar FROM profiles WHERE id=?').bind(user).first<{username:string;avatar:string}>();
     return json({id:commentId,post_id:id,author_id:user,body,created_at:now,username:author?.username||'',avatar:author?.avatar||''});
   }
   if(action==='delete_comment'){
@@ -324,4 +323,5 @@ export async function POST(request:Request){try{
     return json({ok:true});
   }
   throw new AppError('Unknown action.');
-}catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}}
+ }catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}
+ finally{flushPerf(label);}});}
