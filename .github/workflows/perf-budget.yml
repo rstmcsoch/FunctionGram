@@ -1,0 +1,58 @@
+name: Perf budget (manual)
+
+# Manual only, so it can never block a PR. Runs the audit harness (Appendix B of
+# docs/PERFORMANCE_AUDIT_REPORT.md) and fails if any request used more DB round
+# trips than the budget. Untested on first push: if a step fails, read the log.
+# Note: if the "user" table lacks role/banned/banExpires/deleted_at/twoFactorEnabled
+# after migration, ALTER TABLE them in (see scripts/migrate-better-auth.ts).
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_trips:
+        description: Max DB round trips allowed per request
+        default: '6'
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TURSO_DATABASE_URL: file:/tmp/fg-run.db
+      DATABASE_URL: postgres://placeholder
+      BETTER_AUTH_SECRET: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      BETTER_AUTH_URL: http://127.0.0.1:3100
+      BREVO_API_KEY: perf-key
+      BREVO_SENDER_EMAIL: perf@example.test
+      FUNCTIONGRAM_PERF_LOG: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Seed database
+        run: |
+          rm -f /tmp/fg-perf.db
+          TURSO_DATABASE_URL=file:/tmp/fg-perf.db node --import tsx scripts/perf-seed.mts
+          cp /tmp/fg-perf.db /tmp/fg-base2.db
+          TURSO_DATABASE_URL=file:/tmp/fg-base2.db node --import tsx scripts/migrate-better-auth.ts
+          cp /tmp/fg-base2.db /tmp/fg-run.db
+      - name: Build
+        run: npm run build
+      - name: Run harness
+        run: PERF_ROUNDS=3 PERF_SERVER_LOG=/tmp/perf-after.log node scripts/perf-http.mjs
+      - name: Enforce trip budget
+        run: |
+          LOG=/tmp/perf-after.log
+          MAX='${{ inputs.max_trips }}'
+          test -s "$LOG" || { echo "No perf log found at $LOG"; exit 1; }
+          BAD=$(awk -v max="$MAX" '{ if (match($0,/db_trips=[0-9]+/)) { n=substr($0,RSTART+9,RLENGTH-9)+0; if (n>max) print } }' "$LOG")
+          if [ -n "$BAD" ]; then
+            echo "Over budget (max $MAX trips):"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "All requests within $MAX DB trips."
