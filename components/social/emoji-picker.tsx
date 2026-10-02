@@ -59,7 +59,7 @@ export function EmojiPicker({ open, onSelect, onClose }: {
   if (!open) return null;
 
   return (
-    <div ref={panel} className="emoji-picker-popover" role="dialog" aria-label="Emoji picker">
+    <div ref={panel} className="emoji-picker-popover" id="functiongram-emoji-picker" role="dialog" aria-label="Emoji picker">
       <div className="emoji-picker-top">
         <input
           className="emoji-picker-search"
