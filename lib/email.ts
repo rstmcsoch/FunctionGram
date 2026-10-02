@@ -3,7 +3,51 @@ import { createHash } from 'node:crypto';
 type Environment = Record<string, string | undefined>;
 type VerificationEmail = { user: { email: string }; url: string };
 // Structural subset of pg's Pool (and of the local dev driver) used here.
-type Queryable = { query(text: string, values: unknown[]): Promise<{ rows: unknown[] }> };
+// `batch` is the deployed libSQL/Turso executor: one atomic request for both
+// reservations.
+type Queryable = {
+  query(text: string, values: unknown[]): Promise<{ rows: unknown[]; rowCount?: number | null }>;
+  batch?(statements: { text: string; values?: unknown[] }[]): Promise<{ rows: unknown[]; rowCount?: number | null }[]>;
+};
+
+/**
+ * Reserves one send for `recipientKey` (at most one per minute) and one slot
+ * in the UTC-day pool, both through the existing `rateLimit` table.
+ *
+ * SQLite/libSQL does not allow data-modifying statements inside a CTE, so the
+ * reservation is two plain upserts. On the deployed runtime they travel in one
+ * atomic batch request; the local single-connection driver runs them in order.
+ * `rowsAffected` 0 on either statement means the reservation was refused.
+ */
+async function reserveSend(pool: Queryable, recipientKey: string, dailyKey: string, now: number, dayStart: number) {
+  // $N placeholders: the deployed libSQL executor translates them (see
+  // lib/sql.ts), and the PostgreSQL test double binds them directly.
+  const recipient = {
+    text: `INSERT INTO "rateLimit" (id, key, count, "lastRequest") VALUES ($1, $1, 1, $2)
+      ON CONFLICT (key) DO UPDATE SET "lastRequest" = EXCLUDED."lastRequest", count = 1
+      WHERE "rateLimit"."lastRequest" <= $2 - 60000`,
+    values: [recipientKey, now],
+  };
+  const daily = {
+    text: `INSERT INTO "rateLimit" (id, key, count, "lastRequest") VALUES ($1, $1, 1, $2)
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN "rateLimit"."lastRequest" < $2 THEN 1 ELSE "rateLimit".count + 1 END,
+        "lastRequest" = $2
+      WHERE ("rateLimit"."lastRequest" < $2 OR "rateLimit".count < 300)
+        AND EXISTS (SELECT 1 FROM "rateLimit" reserved WHERE reserved.key = $3 AND reserved."lastRequest" >= $4)`,
+    values: [dailyKey, dayStart, recipientKey, now],
+  };
+  if (pool.batch) {
+    // One atomic request on the deployed runtime. The daily statement only
+    // consumes a slot when the recipient statement just reserved one.
+    const [recipientResult, dailyResult] = await pool.batch([recipient, daily]);
+    return (recipientResult.rowCount ?? 0) > 0 && (dailyResult.rowCount ?? 0) > 0;
+  }
+  const recipientResult = await pool.query(recipient.text, recipient.values);
+  if ((recipientResult.rowCount ?? 0) === 0) return false;
+  const dailyResult = await pool.query(daily.text, daily.values);
+  return (dailyResult.rowCount ?? 0) > 0;
+}
 
 export function brevoConfiguration(env: Environment = process.env) {
   const apiKey = env.BREVO_API_KEY?.trim();
@@ -19,22 +63,7 @@ export function brevoConfiguration(env: Environment = process.env) {
 export async function claimVerificationEmail(pool: Queryable, email: string, now = Date.now()) {
   const key = `verification-email:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex')}`;
   const dayStart = Math.floor(now / 86400000) * 86400000;
-  const result = await pool.query(`
-    WITH recipient AS (
-      INSERT INTO "rateLimit" (id, key, count, "lastRequest") VALUES ($1, $1, 1, $2)
-      ON CONFLICT (key) DO UPDATE SET "lastRequest" = EXCLUDED."lastRequest", count = 1
-      WHERE "rateLimit"."lastRequest" <= $2 - 60000
-      RETURNING id
-    )
-    INSERT INTO "rateLimit" (id, key, count, "lastRequest")
-    SELECT 'verification-email:daily', 'verification-email:daily', 1, $3 WHERE EXISTS (SELECT 1 FROM recipient)
-    ON CONFLICT (key) DO UPDATE SET
-      count = CASE WHEN "rateLimit"."lastRequest" < $3 THEN 1 ELSE "rateLimit".count + 1 END,
-      "lastRequest" = $3
-    WHERE "rateLimit"."lastRequest" < $3 OR "rateLimit".count < 300
-    RETURNING count
-  `, [key, now, dayStart]);
-  return result.rows.length > 0;
+  return reserveSend(pool, key, 'verification-email:daily', now, dayStart);
 }
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -46,22 +75,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp
 export async function claimTransactionalEmail(pool: Queryable, purpose: string, email: string, now = Date.now()) {
   const key = `${purpose}:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex')}`;
   const dayStart = Math.floor(now / 86400000) * 86400000;
-  const result = await pool.query(`
-    WITH recipient AS (
-      INSERT INTO "rateLimit" (id, key, count, "lastRequest") VALUES ($1, $1, 1, $2)
-      ON CONFLICT (key) DO UPDATE SET "lastRequest" = EXCLUDED."lastRequest", count = 1
-      WHERE "rateLimit"."lastRequest" <= $2 - 60000
-      RETURNING id
-    )
-    INSERT INTO "rateLimit" (id, key, count, "lastRequest")
-    SELECT $3, $3, 1, $4 WHERE EXISTS (SELECT 1 FROM recipient)
-    ON CONFLICT (key) DO UPDATE SET
-      count = CASE WHEN "rateLimit"."lastRequest" < $4 THEN 1 ELSE "rateLimit".count + 1 END,
-      "lastRequest" = $4
-    WHERE "rateLimit"."lastRequest" < $4 OR "rateLimit".count < 300
-    RETURNING count
-  `, [key, now, `${purpose}:daily`, dayStart]);
-  return result.rows.length > 0;
+  return reserveSend(pool, key, `${purpose}:daily`, now, dayStart);
 }
 
 function assertSafeLink(url: string) {

@@ -129,7 +129,7 @@ export function CommentForm({ onSubmit, placeholder, autoFocus = false }: { onSu
   );
 }
 
-export function PostMedia({ post, onDoubleClick, className = "" }: { post: Post; onDoubleClick?: () => void; className?: string }) {
+export function PostMedia({ post, onDoubleClick, className = "", priority = false }: { post: Post; onDoubleClick?: () => void; className?: string; priority?: boolean }) {
   const t=useLabels();
   // Per-media options (author-set) win over the feed defaults so crops,
   // fits, and screen-reader descriptions survive into the feed and viewer.
@@ -142,23 +142,25 @@ export function PostMedia({ post, onDoubleClick, className = "" }: { post: Post;
         <Carousel items={post.media} aspects={post.aspects} ariaLabel={t("post_card.photos_by") + post.author.username} onDoubleClick={onDoubleClick}
           render={(item, index, eager) => (
             <MediaFrame src={item} mediaType="image" aspect={post.aspects ? post.aspects[index] ?? null : null}
-              fit={fitFor(index)} alt={altFor(index)} eager={eager} />
+              fit={fitFor(index)} alt={altFor(index)} eager={eager && priority} />
           )} />
       </div>
     );
   }
   return (
     <div className={"post-media " + className}>
+      {/* Only the first card of the viewport is fetched eagerly; everything
+          else decodes lazily so the initial load is not a burst of images. */}
       <MediaFrame src={post.media[0]} mediaType={post.media_type} aspect={post.aspects ? post.aspects[0] : null}
         fit={fitFor(0)} alt={altFor(0)}
-        eager onDoubleClick={onDoubleClick} videoProps={post.media_type === "video" ? { controls: true, preload: "metadata" } : undefined} />
+        eager={priority} onDoubleClick={onDoubleClick} videoProps={post.media_type === "video" ? { controls: true, preload: "metadata" } : undefined} />
     </div>
   );
 }
 
 /* ---------------------------------- post card ---------------------------------- */
 
-export function PostCard({ post: p, actions }: { post: Post; actions: PostActions }) {
+export function PostCard({ post: p, actions, priority = false }: { post: Post; actions: PostActions; priority?: boolean }) {
   const t=useLabels();
   const [mine, setMine] = useState<Comment[]>([]);
   const [burst, setBurst] = useState(false);
@@ -186,7 +188,7 @@ export function PostCard({ post: p, actions }: { post: Post; actions: PostAction
         </div>
         <PostMenu post={p} actions={actions} />
       </header>
-      <PostMedia post={p} onDoubleClick={doubleTapLike} className="post-media-feed" />
+      <PostMedia post={p} onDoubleClick={doubleTapLike} className="post-media-feed" priority={priority} />
       <div className="post-body">
         <PostActionsRow post={p} actions={actions} />
         <PostCaption post={p} actions={actions} />

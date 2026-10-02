@@ -43,6 +43,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
     const asset = await db().prepare("SELECT blob_url FROM assets WHERE key=? AND status='ready' AND verified=true").bind(key).first<{ blob_url: string }>();
     if (!asset?.blob_url) throw new AppError('Media not found.', 404);
     // Blob's CDN serves the media, including byte ranges for video seeking.
-    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'private, no-store' } });
+    // Content-addressed by an immutable key: the redirect can be cached for a
+    // day (and revalidated in the background) so repeat feed views do not make
+    // the browser hit this endpoint again for the same image.
+    return new Response(null, { status: 307, headers: { Location: asset.blob_url, 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' } });
   } catch (error) { return fail(error); }
 }

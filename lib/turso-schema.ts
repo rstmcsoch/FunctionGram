@@ -709,3 +709,39 @@ export const tursoSchemaStatements: string[] = [
   END
   `,
 ];
+
+/**
+ * Index-only migration (version 2).
+ *
+ * Every entry below was checked with `EXPLAIN QUERY PLAN` against the seeded
+ * production-shaped database (`scripts/perf-seed.mts`, 68 profiles / 840 posts
+ * / 24 000 reactions / 5 000 comments) and is reported as used by the planner:
+ *
+ *  - saved_collections(owner_id, created_at): `savedCollections()` reads one
+ *    owner's collections in `created_at` order (SEARCH ... USING INDEX
+ *    idx_saved_collections_owner).
+ *  - comments(author_id): the admin user-detail count
+ *    (`SELECT COUNT(*) FROM comments WHERE author_id=$1`) becomes a covering
+ *    search instead of a full scan.
+ *  - profiles(created_at) WHERE deleted_at IS NULL: the people directory and
+ *    account search scan live profiles in `created_at` order (SCAN p USING
+ *    INDEX idx_profiles_created).
+ *
+ * Deliberately NOT added, because the planner already serves those queries and
+ * an extra index would only slow down writes:
+ *  - saved_collection_items(collection_id, post_id): identical to the existing
+ *    composite PRIMARY KEY, which the join already uses as a covering index.
+ *  - reactions(user_id, kind, post_id): the feed's viewer aggregate
+ *    (`WHERE user_id=? GROUP BY post_id`) uses the reactions primary key
+ *    (user_id, post_id, kind); the per-post counters use idx_reactions_post_kind.
+ *    Reactions are the hottest write path, so a third index is a net loss.
+ *  - posts(pinned_at DESC) WHERE pinned_at IS NOT NULL: the feed's
+ *    `ORDER BY p.pinned_at DESC NULLS LAST, p.created_at DESC` cannot use a
+ *    partial index (the query does not guarantee `pinned_at IS NOT NULL`), so
+ *    the planner keeps the posts scan + temp b-tree.
+ */
+export const tursoIndexStatements: string[] = [
+  `CREATE INDEX IF NOT EXISTS idx_saved_collections_owner ON saved_collections(owner_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_profiles_created ON profiles(created_at) WHERE deleted_at IS NULL`,
+];

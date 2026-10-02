@@ -106,7 +106,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
         </Tabs>
         <Feature name="stories"><Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} /></Feature>
         <div className="feed-posts">
-          {visiblePosts.map(post => <PostCard key={post.id} post={post} actions={actions} />)}
+          {visiblePosts.map((post, index) => <PostCard key={post.id} post={post} actions={actions} priority={index < 2} />)}
           {!visiblePosts.length && (isFollowing && !following.loading
             ? <Empty icon={<Users />} heading={t("views.your_following_feed")} body={t("views.their_latest_moments_will_appear_here")}
                 action={<Feature name="search"><button className="primary-button" onClick={() => navigate("search")}>{t("views.find_people")}</button></Feature>} />
@@ -177,6 +177,17 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
   const [results, setResults] = useState<{ people: Person[]; posts: Post[] } | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
+  // The bootstrap payload carries the viewer and the sample accounts; the
+  // discovery list needs the wider directory, which is one request on the
+  // search screen instead of part of every page load.
+  const [directory, setDirectory] = useState<Person[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    void request<Person[]>("/api/social?people=1&limit=40", undefined, t)
+      .then(items => { if (active) setDirectory(items); })
+      .catch(() => { /* the suggestion list falls back to the bootstrap people */ });
+    return () => { active = false; };
+  }, [t]);
   useEffect(() => {
     // Recent searches live in localStorage; read them just after mount (and
     // after each committed search) without blocking the first paint.
@@ -296,7 +307,7 @@ export function SearchView({ query, setQuery, data, onProfile, openPost, follow,
           <>
             <h2 className="list-title">{t("views.discover_people")}</h2>
             <div className="people-results">
-              {data.people.filter(p => p.id !== data.me?.id && !p.is_demo).slice(0, 10).map(person => (
+              {(directory || data.people).filter(p => p.id !== data.me?.id && !p.is_demo).slice(0, 10).map(person => (
                 <div className="person-result" key={person.id}>
                   <Avatar person={person} size={46} onClick={() => onProfile(person.id)} />
                   <button className="person-detail" onClick={() => onProfile(person.id)}>

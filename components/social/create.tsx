@@ -3,7 +3,7 @@ import {useMediaPolicy} from "./media-policy";
 import {useLabels} from "./labels";
 
 import {Feature} from "./features";
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { ImagePlus, Plus, X, Film, Camera, MapPin, ChevronLeft, ChevronRight, Upload, TrendingUp } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -212,8 +212,26 @@ function TagPicker({ people, me, tags, onChange, tagQuery, setTagQuery }: {
 }) {
   const t=useLabels();
   const needle = tagQuery.trim().toLowerCase().replace(/^@/, "");
+  // Tagging searches the server directory as the user types (the bootstrap
+  // payload no longer carries hundreds of profiles), with the locally known
+  // people shown immediately while that request is in flight.
+  const [remote, setRemote] = useState<Person[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    // Clearing through a 0 ms timer keeps the effect body free of synchronous
+    // setState (the empty query needs no request, and `candidates` is empty
+    // whenever the needle is empty, so the stale list is never rendered).
+    const timer = setTimeout(() => {
+      if (needle.length < 1) { if (active) setRemote(null); return; }
+      void request<Person[]>("/api/social?accounts=" + encodeURIComponent(needle), undefined, t)
+        .then(items => { if (active) setRemote(items); })
+        .catch(() => { if (active) setRemote(null); });
+    }, needle.length < 1 ? 0 : 200);
+    return () => { active = false; clearTimeout(timer); };
+  }, [needle, t]);
+  const source = remote && remote.length ? remote : people;
   const candidates = needle
-    ? people.filter(p => p.id !== me.id && !tags.some(t => t.id === p.id) && (p.username + " " + p.name).toLowerCase().includes(needle)).slice(0, 6)
+    ? source.filter(p => p.id !== me.id && !tags.some(t => t.id === p.id) && (p.username + " " + p.name).toLowerCase().includes(needle)).slice(0, 6)
     : [];
   const add = (person: Person) => {
     if (tags.length >= 10) { toast.error(t("create.tag_up_to_10_people")); return; }

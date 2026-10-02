@@ -17,18 +17,39 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Avatar, IconButton, Modal, Empty, Busy, request, subscribeTheme, readTheme, toggleStoredTheme } from "./common";
-import { AuthForm, SignOutButton } from "./auth-form";
-import { AuthorityChooser } from "./authority-chooser";
+import { SignOutButton } from "./auth-form";
+import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
+import { IconSpinner } from "./lazy-surfaces";
 import type { PostActions } from "./post-card";
-import { PostViewer, Relations } from "./post-viewer";
-import { CreateDialog, EditProfile, EditPostDialog } from "./create";
-import { SettingsDialog } from "./settings";
-import { Messages } from "./messages";
-import { FloatingDock } from "./floating-dock";
-import { Reels } from "./reels";
-import { StoryViewer } from "./stories";
 import { HomeView, SearchView, ExploreView, NotificationsView, ProfileView, SavedView, TagView } from "./views";
-import type { SocialData, Post, Person, Comment } from "@/lib/types";
+
+/**
+ * Secondary surfaces are code-split out of the first screen.
+ *
+ * The home view, the navigation shell and the feed stay in the initial bundle;
+ * everything the user has to open (settings, messages, the post viewer, the
+ * create/edit dialogs, the story viewer, reels, relations, the authority
+ * chooser) is loaded on demand. `loading` renders a lightweight inline
+ * spinner, and because each chunk is fetched when the control that needs it
+ * mounts (the dock, the shared card menu), the first tap still feels instant.
+ */
+function loadSurface<P extends object>(loader: () => Promise<ComponentType<P>>): ComponentType<P> {
+  return dynamic(loader as never, { ssr: false, loading: IconSpinner }) as unknown as ComponentType<P>;
+}
+const AuthFormDialog = dynamic(() => import("./auth-form").then(m => m.AuthForm), { ssr: false, loading: IconSpinner });
+const AuthorityChooser = loadSurface(() => import("./authority-chooser").then(m => m.AuthorityChooser));
+const PostViewer = loadSurface(() => import("./post-viewer").then(m => m.PostViewer));
+const Relations = loadSurface(() => import("./post-viewer").then(m => m.Relations));
+const CreateDialog = loadSurface(() => import("./create").then(m => m.CreateDialog));
+const EditProfile = loadSurface(() => import("./create").then(m => m.EditProfile));
+const EditPostDialog = loadSurface(() => import("./create").then(m => m.EditPostDialog));
+const SettingsDialog = loadSurface(() => import("./settings").then(m => m.SettingsDialog));
+const Messages = loadSurface(() => import("./messages").then(m => m.Messages));
+const FloatingDock = loadSurface(() => import("./floating-dock").then(m => m.FloatingDock));
+const Reels = loadSurface(() => import("./reels").then(m => m.Reels));
+const StoryViewer = loadSurface(() => import("./stories").then(m => m.StoryViewer));
+import type { SocialData, Post, Person, Comment, Notification } from "@/lib/types";
 import { parseLocation, profileShareLink, resolvePerson, viewLocation } from "@/lib/profile-url";
 
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
@@ -87,6 +108,20 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const scrollMemory = useRef<Record<string, number>>({});
 
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
+
+  // Warm the two most likely next interactions (opening a post, creating one)
+  // on idle, so code-splitting never shows up as a delay on the first tap.
+  useEffect(() => {
+    const warm = () => {
+      void import("./post-viewer");
+      void import("./create");
+      void import("./messages");
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback;
+    if (ric) { const id = ric(warm, { timeout: 2500 }); return () => { (window as unknown as { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(id); }; }
+    const timer = setTimeout(warm, 1800);
+    return () => clearTimeout(timer);
+  }, []);
 
   // After a successful sign-in, an account with Admin Panel authority is asked
   // where to go instead of being pushed into the panel. `adminAccess` comes from
@@ -180,6 +215,26 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     return () => { window.removeEventListener("hashchange", update); window.removeEventListener("popstate", update); };
   }, [loadPost]);
 
+  // Profiles outside the bootstrap page (the payload only carries the viewer,
+  // the sample accounts and the first suggestions) are resolved on demand:
+  // this is the usual deep-link and shared-URL path.
+  const profileLookup = useRef<string | null>(null);
+  useEffect(() => {
+    if (view !== "profile" || invalidProfile || !profileId) return;
+    if (resolvePerson(data.people, data.me, profileId)) return;
+    if (profileLookup.current === profileId) return;
+    profileLookup.current = profileId;
+    let active = true;
+    void request<Person | null>("/api/social?person=" + encodeURIComponent(profileId), undefined, t)
+      .then(person => {
+        if (!active) return;
+        if (person) setData(current => current.people.some(entry => entry.id === person.id) ? current : { ...current, people: [...current.people, person] });
+        else setInvalidProfile(true);
+      })
+      .catch(() => { if (active) setInvalidProfile(true); });
+    return () => { active = false; };
+  }, [view, invalidProfile, profileId, data.people, data.me, t]);
+
   useEffect(() => {
     if (view !== "profile" || invalidProfile) return;
     const parsed = parseLocation(window.location.pathname, window.location.hash);
@@ -198,6 +253,11 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       void request("/api/social", { action: "read_notifications" }, t)
         .then(() => setData(current => ({ ...current, notifications: current.notifications.map(n => ({ ...n, read_at: n.read_at || Date.now() })) })))
         .catch(() => {});
+      // Secondary view: the full recent list is fetched when it is opened, not
+      // carried by every page load.
+      void request<{ results: Notification[] }>("/api/social?notifications=1", undefined, t)
+        .then(page => { if (page.results?.length) setData(current => ({ ...current, notifications: page.results })); })
+        .catch(() => { /* the bootstrap rows stay on screen */ });
     }
   }, [view, viewerId, t]);
 
@@ -218,7 +278,18 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
         const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
         latestNotification = Math.max(latestNotification, newest);
         quietPolls.current = changed ? 0 : quietPolls.current + 1;
-        setData(current => ({ ...current, ...activity }));
+        // The poll returns only the newest few rows: merge them into whatever
+        // the view already holds instead of replacing a longer list.
+        setData(current => {
+          const seen = new Set(current.notifications.map(item => item.id));
+          const incoming = activity.notifications.filter(item => !seen.has(item.id));
+          return {
+            ...current,
+            unreadMessages: activity.unreadMessages,
+            features: activity.features ?? current.features,
+            notifications: incoming.length ? [...incoming, ...current.notifications].sort((a, b) => b.created_at - a.created_at).slice(0, 100) : current.notifications,
+          };
+        });
       } catch {
         /* transient network issues: retry sooner on the next tick */
         quietPolls.current = 0;
@@ -306,12 +377,18 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     }
   };
 
+  // One round trip. The POST response is the canonical comment row, so the
+  // previous follow-up GET /api/social?post=... (a full feed query for a single
+  // post) is gone; the displayed count is updated optimistically from it.
   const submitComment = async (post: Post, body: string): Promise<Comment> => {
     if(!flags.comments)throw new Error(t("app.comments_are_unavailable"));
     if (needsLogin()) throw new Error(t("app.sign_in_required"));
-    const created = await request<{ id: string }>("/api/social", { action: "comment", id: post.id, body }, t);
-    const fresh=await request<Post[]>("/api/social?post="+encodeURIComponent(post.id), undefined, t);if(fresh[0])patchPost(post.id,()=>fresh[0]);
-    return { id: created.id, post_id: post.id, author_id: data.me!.id, body, created_at: Date.now(), username: data.me!.username, avatar: data.me!.avatar };
+    const created = await request<Comment>("/api/social", { action: "comment", id: post.id, body }, t);
+    patchPost(post.id, current => ({ ...current, comment_count: current.comment_count + 1 }));
+    return {
+      id: created.id, post_id: post.id, author_id: created.author_id || data.me!.id, body: created.body ?? body,
+      created_at: created.created_at ?? Date.now(), username: created.username || data.me!.username, avatar: created.avatar || data.me!.avatar,
+    };
   };
 
   const deletePost = async () => {
@@ -320,8 +397,11 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
     setSelectedPost(null); setDeleteTarget(null);
     try {
+      // The post is gone locally the moment the user confirms; the server call
+      // is the only remaining work. A full feed refresh would re-download the
+      // whole dataset to reflect one removed row, so it is not part of this
+      // path — the next navigation reconciles naturally.
       await request("/api/social", { action: "delete_post", id: post.id }, t);
-      void refresh();
     } catch (e) {
       setData(current => ({ ...current, posts: [post, ...current.posts] }));
       toast.error((e as Error).message);
@@ -387,16 +467,25 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   // Blocking removes the follow in both directions on the server; the local
   // copy just reflects it for instant feedback.
+  // Blocking also removes follows in both directions server-side. The local
+  // copy reflects exactly that (the button state and the follow state), without
+  // reloading the whole social dataset to show it.
   const toggleBlock = async (person: Person) => {
     if (needsLogin()) return;
     const blocking = !person.blocked;
-    setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 1 : 0 } : user) }));
+    const wasFollowed = person.followed;
+    setData(current => ({
+      ...current,
+      people: current.people.map(user => user.id === person.id
+        ? { ...user, blocked: blocking ? 1 : 0, followed: blocking ? 0 : user.followed, followers: blocking && user.followed ? Math.max(0, user.followers - 1) : user.followers }
+        : user),
+      me: current.me && blocking && wasFollowed ? { ...current.me, following: Math.max(0, current.me.following - 1) } : current.me,
+    }));
     try {
       await request("/api/social", { action: blocking ? "block" : "unblock", id: person.id }, t);
       toast(blocking ? t("app.you_no_longer_see") + person.username + t("app.s_content_and_they_can_t_message_you") : t("app.unblocked") + person.username + ".");
-      await refresh();
     } catch (e) {
-      setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 0 : 1 } : user) }));
+      setData(current => ({ ...current, people: current.people.map(user => user.id === person.id ? { ...user, blocked: blocking ? 0 : 1, followed: wasFollowed } : user) }));
       toast.error((e as Error).message);
     }
   };
@@ -562,12 +651,12 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       {selectedPost && (
         <PostViewer key={selectedPost.id} post={selectedPost} actions={actions}
           onClose={() => { ++postRequest.current; setSelectedPost(null); window.history.replaceState(null, "", viewLocation(view, profileId || undefined, data.people, data.me)); }}
-          onCommentCountChange={() => {const id=selectedPost.id;void request<Post[]>("/api/social?post="+encodeURIComponent(id), undefined, t).then(items=>{if(items[0])patchPost(id,()=>items[0]);}).catch(()=>{});}} />
+          onCommentCountChange={delta => patchPost(selectedPost.id, current => ({ ...current, comment_count: Math.max(0, current.comment_count + delta) }))} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
       {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
       <Modal open={login} onClose={() => setLogin(false)} title={t("app.make_yourself_at_home")} description={t("app.sign_in_to_share_your_moments_follow_people_and_join_the_conversa")}>
-        <div className="sign-in-content"><AuthForm key={authMode} initialMode={authMode} /></div>
+        <div className="sign-in-content"><AuthFormDialog key={authMode} initialMode={authMode} /></div>
       </Modal>
       {chooser && data.me && <AuthorityChooser username={data.me.username} onClose={() => setChooser(false)} />}
       <AlertDialog open={!!deleteTarget} onOpenChange={value => { if (!value) setDeleteTarget(null); }}>

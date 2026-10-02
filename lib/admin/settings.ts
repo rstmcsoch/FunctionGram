@@ -1,14 +1,14 @@
 import 'server-only';
-import { unstable_cache, revalidateTag } from 'next/cache';
-import { ensureSchema, getPool } from '../postgres';
-import { loadSettings, saveSetting } from './core';
+import { revalidateTag } from 'next/cache';
+import { getPool } from '../postgres';
+import { saveSetting } from './core';
+import { readAppSettings } from '../settings-cache';
 import { sameOrigin } from '../server';
 import { requireAdmin } from './guard';
 
-export const readSettings = unstable_cache(async () => {
-  await ensureSchema();
-  return loadSettings(await getPool());
-}, ['admin-settings-v1'], { tags: ['settings'] });
+// One shared cached reader for the Admin Panel and the public site, so both
+// observe the same snapshot and the same `settings` invalidation.
+export const readSettings = readAppSettings;
 
 // Server internal helper only: no public write endpoint in Phase 1.
 // Require the originating request so callers cannot accidentally omit CSRF.
