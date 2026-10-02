@@ -6,14 +6,19 @@ import { Send, Search, SquarePen, ArrowLeft, Bookmark, Trash2 } from "lucide-rea
 import { toast } from "sonner";
 import { Avatar, Empty, IconButton, Busy, request, timeAgo, count } from "./common";
 import { EmojiPicker, EmojiTrigger } from "./emoji-picker";
+import { useFeatures } from "./features";
 import type { Person, Message } from "@/lib/types";
 
 type OutgoingMessage = Message & { pending?: boolean };
 
-export function Messages({ me, people, initialRecipient, onProfile }: {
-  me: Person; people: Person[]; initialRecipient: string | null; onProfile: (id: string) => void;
+export function Messages({ me, people, initialRecipient, maxLength, onProfile }: {
+  me: Person; people: Person[]; initialRecipient: string | null; maxLength?: number; onProfile: (id: string) => void;
 }) {
   const t=useLabels();
+  const flags=useFeatures();
+  // The server is the authority; this only stops the composer early and keeps
+  // the character counter honest when an administrator lowers the limit.
+  const bodyLimit=maxLength&&maxLength>0?maxLength:2000;
   const [recipient, setRecipient] = useState(initialRecipient || me.id);
   const [query, setQuery] = useState("");
   const [body, setBody] = useState("");
@@ -157,11 +162,11 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           </span>
           <IconButton label={t("messages.find_someone_to_message")} onClick={() => queryInput.current?.focus()}><SquarePen size={22} /></IconButton>
         </header>
-        <label className="search-field">
+        {flags.messageSearch && <label className="search-field">
           <Search size={18} />
           <input ref={queryInput} placeholder={t("messages.search_people")} aria-label={t("messages.search_conversations")} value={query} onChange={e => setQuery(e.target.value)} />
-        </label>
-        {query.trim().length >= 2 && serverHits.length > 0 && (<>
+        </label>}
+        {flags.messageSearch && query.trim().length >= 2 && serverHits.length > 0 && (<>
           <h3>{t("messages.in_conversations")}</h3>
           {serverHits.map(p => (
             <button key={"hit:" + p.id} className={"conversation " + (recipient === p.id ? "selected" : "")}
@@ -225,7 +230,8 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
                   /^https?:\/\//.test(text) ? <a key={index} href={text} target="_blank" rel="noreferrer" className="message-link">{text}</a> : text)}</p>
                 <span className="message-row-foot">
                   <time title={new Date(m.created_at).toLocaleString()}>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                  {!m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
+                  {flags.readReceipts && !m.pending && m.sender_id === me.id && m.read_at && <span className="message-seen" title={new Date(m.read_at).toLocaleString()}>{t("messages.seen")}</span>}
+                  {flags.messageDeletion && !m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
                 </span>
               </div>
             ))}
@@ -238,7 +244,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           <div ref={bottom} />
         </div>
         <form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
-          <span
+          {flags.emojiPicker && <span
             className="emoji-anchor"
             onMouseDown={event => event.stopPropagation()}
             onTouchStart={event => event.stopPropagation()}
@@ -273,13 +279,13 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
                 onClose={() => { setEmojiOpen(false); input.current?.focus(); }}
               />
             )}
-          </span>
+          </span>}
           <input
             ref={input}
             aria-label={t("messages.write_a_message")}
             placeholder={t("messages.message")}
             value={body}
-            maxLength={2000}
+            maxLength={bodyLimit}
             onChange={e => { setBody(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
             onKeyUp={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onClick={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}

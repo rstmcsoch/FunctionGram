@@ -272,7 +272,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     const poll = async () => {
       if (active && timer) { clearTimeout(timer); timer = undefined; }
       try {
-        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1", undefined, t);
+        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features" | "messaging">>("/api/social?activity=1", undefined, t);
         if (!active) return;
         const newest = activity.notifications[0]?.created_at || 0;
         const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
@@ -287,6 +287,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
             ...current,
             unreadMessages: activity.unreadMessages,
             features: activity.features ?? current.features,
+            messaging: activity.messaging ?? current.messaging,
             notifications: incoming.length ? [...incoming, ...current.notifications].sort((a, b) => b.created_at - a.created_at).slice(0, 100) : current.notifications,
           };
         });
@@ -627,7 +628,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
             {view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
             {view === "tag" && profileId && <TagView tag={profileId} openPost={actions.openPost} />}
             {view === "messages" && (data.me
-              ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} onProfile={id => navigate("profile", id)} />
+              ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} maxLength={data.messaging?.maxLength} onProfile={id => navigate("profile", id)} />
               : <Empty icon={<Send />} heading={t("app.your_conversations_here")} body={t("app.sign_in_to_send_messages_and_save_notes_to_yourself")}
                   action={<button className="primary-button" onClick={() => openAuth()}>{t("auth.signIn")}</button>} />)}
             {view === "notifications" && (

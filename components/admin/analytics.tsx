@@ -52,6 +52,14 @@ export function AnalyticsDashboard({ initial }: { initial: AnalyticsSnapshot }) 
       <section className="admin-card"><h2>Category usage</h2><div className="analytics-ranked-list">{data.categories.map((row,index) => <p key={row.category}><span>{index+1}. {row.category}</span><strong>{number(row.creations)}</strong></p>)}{!data.categories.length && <p>No categories in this window.</p>}</div></section>
       <section className="admin-card"><h2>Hashtag usage</h2><div className="analytics-ranked-list">{data.hashtags.map((row,index) => <p key={row.hashtag}><span>{index+1}. #{row.hashtag}</span><strong>{number(row.uses)}</strong></p>)}{!data.hashtags.length && <p>No hashtags in this window.</p>}</div></section>
     </div>
+    <section className="admin-card"><h2>Messaging</h2><p>Messages sent by live, non-demo members inside the selected window, and the participant pairs that exchanged at least one. Restriction counts are the current state, not the window: they read the same rows the Communications panel writes.</p><div className="analytics-ranked-list">
+      <p><span>Messages sent in window</span><strong>{number(data.messaging.sent)}</strong></p>
+      <p><span>Active conversations in window</span><strong>{number(data.messaging.activeConversations)}</strong></p>
+      <p><span>Accounts with direct messages restricted</span><strong>{number(data.messaging.restrictions.dmDisabled)}</strong></p>
+      <p><span>Accounts blocked from sending</span><strong>{number(data.messaging.restrictions.sendDisabled)}</strong></p>
+      <p><span>Accounts blocked from receiving</span><strong>{number(data.messaging.restrictions.receiveDisabled)}</strong></p>
+      <p><span>Accounts with an active messaging suspension</span><strong>{number(data.messaging.restrictions.suspended)}</strong></p>
+    </div><p className="admin-note">There are no message-specific reports yet: the report action only covers posts and profiles, so nothing is counted here.</p></section>
     <section className="admin-card analytics-funnel"><h2>Signup → first-post funnel</h2><p>Lifetime real member accounts with at least one non-deleted post (`kind=post`); demo profiles and reels/stories are excluded.</p><div className="analytics-funnel-bar" role="img" aria-label={`${number(data.funnel.firstPostMembers)} of ${number(data.funnel.members)} members made a first post`}><span style={{ width: `${conversion}%` }}/></div><strong>{number(data.funnel.firstPostMembers)} / {number(data.funnel.members)} members · {data.funnel.conversionRate}%</strong></section>
   </div>;
 }

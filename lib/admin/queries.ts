@@ -51,7 +51,32 @@ export async function userDetail(db: QueryExecutor, id: string) {
     (SELECT COUNT(*) FROM session WHERE "userId"=$1 AND "expiresAt">now()) AS sessions`, [id]);
   // NEVER return session tokens, account password hashes or OAuth credentials.
   const { rows: sessions } = await db.query('SELECT id,"createdAt","expiresAt","ipAddress","userAgent" FROM session WHERE "userId"=$1 AND "expiresAt">now() ORDER BY "createdAt" DESC LIMIT 50', [id]);
-  return { user, counts, sessions };
+  return { user, counts, sessions, messaging: await userMessagingState(db, id) };
+}
+/**
+ * An account's messaging restrictions, read-only: changing them belongs to the
+ * Communications panel, which owns the confirmation and audit flow.
+ *
+ * libSQL returns a boolean column as 1/0 while PostgreSQL returns true/false,
+ * so every flag is normalised here. A strict `=== true` would report a
+ * restricted account as "Allowed" on the deployed libSQL runtime.
+ */
+export async function userMessagingState(db: QueryExecutor, id: string) {
+  const { rows: [row] } = await db.query(`SELECT
+    COALESCE((SELECT dm_disabled FROM admin_message_controls WHERE profile_id=$1),false) AS dm_disabled,
+    COALESCE((SELECT send_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS send_disabled,
+    COALESCE((SELECT receive_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS receive_disabled,
+    COALESCE((SELECT suspended_until FROM admin_message_restrictions WHERE profile_id=$1),0) AS suspended_until`, [id]);
+  const on = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
+  const suspendedUntil = Number(row?.suspended_until || 0);
+  return {
+    dm_disabled: on(row?.dm_disabled),
+    send_disabled: on(row?.send_disabled),
+    receive_disabled: on(row?.receive_disabled),
+    suspended_until: suspendedUntil,
+    // Resolved on the server so the page never compares clock values while rendering.
+    suspended: suspendedUntil > Date.now(),
+  };
 }
 export async function dashboard(db: QueryExecutor) {
   // Turso/libSQL stores these Better Auth timestamps as Unix milliseconds and

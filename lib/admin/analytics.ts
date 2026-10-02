@@ -11,6 +11,14 @@ export type AnalyticsDay = {
   reports: number;
   storageBytes: number;
 };
+export type MessagingInsight = {
+  /** Messages sent inside the window, excluding demo and deleted senders. */
+  sent: number;
+  /** Distinct participant pairs that exchanged at least one message. */
+  activeConversations: number;
+  /** Accounts currently carrying a messaging restriction. */
+  restrictions: { dmDisabled: number; sendDisabled: number; receiveDisabled: number; suspended: number };
+};
 export type AnalyticsSnapshot = {
   days: number;
   daily: AnalyticsDay[];
@@ -19,6 +27,7 @@ export type AnalyticsSnapshot = {
   categories: { category: string; creations: number }[];
   hashtags: { hashtag: string; uses: number }[];
   funnel: { members: number; firstPostMembers: number; conversionRate: number };
+  messaging: MessagingInsight;
 };
 
 const DAY_MS = 86_400_000;
@@ -115,9 +124,29 @@ export async function dashboardAnalytics(db: QueryExecutor, inputDays: unknown =
     .sort((left,right) => right.uses-left.uses || left.hashtag.localeCompare(right.hashtag))
     .slice(0,20);
 
+  const [{ rows: [messagingWindow] }, { rows: [restrictions] }] = await Promise.all([
+    db.query(`SELECT COUNT(*) AS sent,COUNT(DISTINCT CASE WHEN m.sender_id<m.recipient_id THEN m.sender_id||':'||m.recipient_id ELSE m.recipient_id||':'||m.sender_id END) AS active_conversations
+      FROM messages m JOIN profiles sender ON sender.id=m.sender_id
+      WHERE m.created_at>=$1 AND m.deleted_at IS NULL AND sender.deleted_at IS NULL AND COALESCE(sender.is_demo,0)=0`, [start]),
+    db.query(`SELECT
+      (SELECT COUNT(*) FROM admin_message_controls WHERE dm_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS dm_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE send_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS send_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE receive_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS receive_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>${dialect === 'sqlite' ? '(unixepoch()*1000)' : '(extract(epoch from now())*1000)'}) AS suspended`),
+  ]);
   const members = asNumber(funnel.members), firstPostMembers = asNumber(funnel.first_post_members);
   return {
     days, daily,
+    messaging: {
+      sent: asNumber(messagingWindow.sent),
+      activeConversations: asNumber(messagingWindow.active_conversations),
+      restrictions: {
+        dmDisabled: asNumber(restrictions.dm_disabled),
+        sendDisabled: asNumber(restrictions.send_disabled),
+        receiveDisabled: asNumber(restrictions.receive_disabled),
+        suspended: asNumber(restrictions.suspended),
+      },
+    },
     topPosts: topPosts.map(row => ({ ...row, id: String(row.id), created_at: asNumber(row.created_at), likes: asNumber(row.likes), comments: asNumber(row.comments), views: asNumber(row.views) })) as AnalyticsSnapshot['topPosts'],
     topCreators: topCreators.map(row => ({ ...row, id: String(row.id), creations: asNumber(row.creations), likes: asNumber(row.likes), comments: asNumber(row.comments) })) as AnalyticsSnapshot['topCreators'],
     categories: categories.map(row => ({ category: String(row.category), creations: asNumber(row.creations) })),

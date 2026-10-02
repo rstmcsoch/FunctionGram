@@ -12,6 +12,7 @@ import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
 import { unsendMessage } from '@/lib/server';
+import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota,requirePrivateRecipientAllowed } from '@/lib/messaging-policy';
 import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
 export const maxDuration=60;
@@ -218,7 +219,13 @@ export async function POST(request:Request){
   }
   if(action==='delete_post'){await availablePost(user,id);const result=await database.prepare('UPDATE posts SET deleted_at=? WHERE id=? AND author_id=?').bind(now,id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
   if(action==='message'){
-    const body=clean(input.body,2000,true);await requireAllowedText(body);
+    // The absolute ceiling is the largest value an administrator may store;
+    // the configured limit is enforced immediately after, with its own message.
+    const body=clean(input.body,4000,true);
+    const messaging=await readMessagingPolicy();
+    requireMessageBody(body,messaging);
+    await requireAllowedText(body);
+    await requireMessageQuota(database,user,messaging);
     // Story replies address the story's author through its post id.
     let recipientId=id;
     const storyPostId=typeof input.post_id==='string'?clean(input.post_id,100):'';
@@ -230,8 +237,14 @@ export async function POST(request:Request){
     const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(recipientId).first<{id:string;is_demo:number}>();
     if(!recipient)throw new AppError('Profile not found.',404);
     if(recipient.is_demo)throw new AppError('This is a sample profile. You can message real members or save a note to yourself.');
-    const restricted=await database.prepare('SELECT profile_id FROM admin_message_controls WHERE dm_disabled=1 AND profile_id IN (?,?)').bind(user,recipientId).all<{profile_id:string}>();
-    if(restricted.results.length)throw new AppError('Direct messages are unavailable for one of these accounts.',403);
+    // Per-account restrictions (global DM switch plus send/receive/suspension)
+    // are read from the database on every send: the Admin Panel writes policy,
+    // this is the enforcement.
+    const restrictions=await inspectMessageRestrictions(database,user,recipientId);
+    if(restrictions.blocked)throw new AppError(restrictions.reason,403);
+    // Optional follower gate for private accounts, reusing the existing
+    // follow graph rather than a second relationship model.
+    if(messaging.privateFollowersOnly)await requirePrivateRecipientAllowed(database,user,recipientId);
     // A block cuts off the blocked person's messages to the blocker.
     if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
     const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
