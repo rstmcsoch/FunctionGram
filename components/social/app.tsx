@@ -237,15 +237,22 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   useEffect(() => {
     if (view !== "profile" || invalidProfile) return;
-    const parsed = parseLocation(window.location.pathname, window.location.hash);
-    if (parsed.ignored || parsed.view === "post") return;
-    const person = resolvePerson(data.people, data.me, parsed.view === "profile" ? parsed.routeValue : profileId);
-    if (!person?.username) return;
-    if (profileId !== person.id) setProfileId(person.id);
-    const canonical = viewLocation("profile", person.id, data.people, data.me);
-    if (window.location.pathname + window.location.hash !== canonical) {
-      window.history.replaceState(null, "", canonical);
-    }
+    // Deferred by a microtask: the canonicalisation still happens before the
+    // browser paints, without a synchronous state write inside the effect body.
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const parsed = parseLocation(window.location.pathname, window.location.hash);
+      if (parsed.ignored || parsed.view === "post") return;
+      const person = resolvePerson(data.people, data.me, parsed.view === "profile" ? parsed.routeValue : profileId);
+      if (!person?.username) return;
+      if (profileId !== person.id) setProfileId(person.id);
+      const canonical = viewLocation("profile", person.id, data.people, data.me);
+      if (window.location.pathname + window.location.hash !== canonical) {
+        window.history.replaceState(null, "", canonical);
+      }
+    });
+    return () => { cancelled = true; };
   }, [view, invalidProfile, profileId, data.people, data.me]);
 
   useEffect(() => {
@@ -655,7 +662,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
           onCommentCountChange={delta => patchPost(selectedPost.id, current => ({ ...current, comment_count: Math.max(0, current.comment_count + delta) }))} />
       )}
       {sharePost && <ShareDialog post={sharePost} me={data.me} people={data.people} onClose={() => setSharePost(null)} />}
-      {shareProfile && <ShareProfileDialog profile={shareProfile} onClose={() => setShareProfile(null)} />}
+      {shareProfile && <ShareProfileDialog profile={shareProfile} me={data.me} people={data.people} onClose={() => setShareProfile(null)} />}
       <Modal open={login} onClose={() => setLogin(false)} title={t("app.make_yourself_at_home")} description={t("app.sign_in_to_share_your_moments_follow_people_and_join_the_conversa")}>
         <div className="sign-in-content"><AuthFormDialog key={authMode} initialMode={authMode} /></div>
       </Modal>
@@ -711,7 +718,7 @@ function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | n
               <button className="follow-button" disabled={!!busy || sent === person.id}
                 onClick={async () => {
                   setBusy(person.id);
-                  try { await request("/api/social", { action: "message", id: person.id, body: link }, t); setSent(person.id); }
+                  try { await request("/api/social", { action: "message", id: person.id, message_type: "post", post_id: post.id }, t); setSent(person.id); }
                   catch (e) { toast.error((e as Error).message); }
                   finally { setBusy(""); }
                 }}>
@@ -725,8 +732,10 @@ function ShareDialog({ post, me, people, onClose }: { post: Post; me: Person | n
   );
 }
 
-function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: () => void }) {
+function ShareProfileDialog({ profile, me, people, onClose }: { profile: Person; me: Person | null; people: Person[]; onClose: () => void }) {
   const t=useLabels();
+  const [sent, setSent] = useState("");
+  const [busy, setBusy] = useState("");
   const link = typeof window !== "undefined" ? profileShareLink(window.location.origin, profile.username) : "";
   return (
     <Modal open onClose={onClose} title={t("app.share") + profile.username + t("app.s_profile")}>
@@ -740,6 +749,29 @@ function ShareProfileDialog({ profile, onClose }: { profile: Person; onClose: ()
       {typeof navigator !== "undefined" && !!navigator.share && (
         <button className="secondary-button wide" onClick={() => void navigator.share({ title: profile.name + t("app.on_rstmc"), url: link }).catch(() => {})}>
           <Send size={17} />{t("app.share_to_another_app")}</button>
+      )}
+      {me && (
+        <div className="share-people">
+          <h3>{t("app.send_in_a_message")}</h3>
+          {people.filter(person => person.id !== me.id && person.id !== profile.id && !person.is_demo).map(person => (
+            <div className="suggestion" key={person.id}>
+              <Avatar person={person} size={40} />
+              <span className="person-detail"><strong>{person.username}</strong></span>
+              <button className="follow-button" disabled={!!busy || sent === person.id}
+                onClick={async () => {
+                  setBusy(person.id);
+                  // A profile share is its own message type: the recipient gets a
+                  // live preview card, and a deleted profile says so instead of
+                  // pointing at nothing.
+                  try { await request("/api/social", { action: "message", id: person.id, message_type: "profile", shared_profile_id: profile.id }, t); setSent(person.id); }
+                  catch (e) { toast.error((e as Error).message); }
+                  finally { setBusy(""); }
+                }}>
+                {sent === person.id ? t("app.sent") : busy === person.id ? <Busy size={14} /> : t("app.send")}
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </Modal>
   );
