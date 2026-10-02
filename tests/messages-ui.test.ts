@@ -21,3 +21,16 @@ test("message avatars have fixed square geometry and crop images without distort
   assert.match(css, /\.avatar img\{[^}]*max-width:none/);
   assert.match(css, /\.avatar img\{[^}]*max-height:none/);
 });
+
+test("message emoji control opens a local full picker without an external emoji package", async () => {
+  const messages = await readFile(new URL("../components/social/messages.tsx", import.meta.url), "utf8");
+  const picker = await readFile(new URL("../components/social/emoji-picker.tsx", import.meta.url), "utf8");
+
+  assert.match(messages, /useState\(false\)/);
+  assert.match(messages, /<EmojiPicker open=\{emojiOpen\}/);
+  assert.match(messages, /type="button"/);
+  assert.match(messages, /setEmojiOpen\(value => !value\)/);
+  assert.match(picker, /const EMOJI_CATEGORIES/);
+  assert.match(picker, /role="dialog"/);
+  assert.doesNotMatch(picker, /from ["']emoji-(mart|picker)/);
+});
