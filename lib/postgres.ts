@@ -102,6 +102,15 @@ export const DATABASE_MIGRATIONS: Migration[] = [
       'DELETE FROM profiles WHERE is_demo=1',
     ],
   },
+  {
+    // Follow-up cleanup for any demo rows recreated by an already-running
+    // legacy seed isolate while migration 14 was executing.
+    version: 15,
+    statements: [
+      'UPDATE admin_demo_seed_control SET enabled=0 WHERE id=1',
+      'DELETE FROM profiles WHERE is_demo=1',
+    ],
+  },
 ];
 
 /** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not
