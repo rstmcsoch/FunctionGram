@@ -16,6 +16,10 @@ export function publishReady() {
 }
 
 export function ensureDemoSeed(): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    seedPromise ??= Promise.resolve();
+    return seedPromise;
+  }
   seedPromise ??= seed().catch(error => {
     // Keep the started marker: a failed seed must not turn every later request
     // into another attempt. The Admin Panel switch and the next deployment
