@@ -8,6 +8,7 @@ import { referencedAsset } from './media';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
 import { AdminError } from './validation';
+import { inPlaceholders } from '../sql';
 
 const DAY_MS = 86_400_000;
 export const SYSTEM_PRUNE_BATCH_LIMIT = 100;
@@ -222,7 +223,7 @@ export async function pruneExpiredStories(pool: PoolLike, actorId: string, input
     const preview = await previewStoryIds(db, now), confirmation = `PRUNE ${preview.ids.length} EXPIRED STORIES`;
     exact(input.confirmation, confirmation);
     if (!preview.ids.length) return { ok: true, removed: 0, remaining: preview.total };
-    const { rows: removed } = await db.query('DELETE FROM posts WHERE id=ANY($1::text[]) RETURNING id', [preview.ids]);
+    const { rows: removed } = await db.query(`DELETE FROM posts WHERE id IN (${inPlaceholders(preview.ids.length)}) RETURNING id`, preview.ids);
     for (const row of removed) await insertAudit(db, actor, { action: 'system.expiredStory.prune', targetType: 'post', targetId: String(row.id), before: { expiredForAtLeastDays: EXPIRED_STORY_GRACE_DAYS }, after: null, reason });
     await insertAudit(db, actor, { action: 'system.prune.expiredStories', targetType: 'posts', targetId: 'expired-stories', before: { candidates: preview.total }, after: { removed: removed.length, remaining: Math.max(0, preview.total - removed.length) }, reason });
     return { ok: true, removed: removed.length, remaining: Math.max(0, preview.total - removed.length) };

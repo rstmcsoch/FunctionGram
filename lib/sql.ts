@@ -21,6 +21,17 @@ function replacePostgresParameters(input: string): string {
   return input.replace(/\$(\d+)/g, '?$1');
 }
 
+/**
+ * PostgreSQL's `= ANY($1::text[])` has no SQLite/libSQL equivalent: libSQL has
+ * no `ANY` aggregate and the translated `ANY(?1[])` is a parse error — this is
+ * exactly how the message-send path failed in production. Both dialects accept
+ * a plain `IN` list, so callers expand the array into positional placeholders
+ * instead of passing it as a single argument.
+ */
+export function inPlaceholders(count: number, start = 1): string {
+  return Array.from({ length: Math.max(0, count) }, (_, index) => `$${start + index}`).join(',');
+}
+
 export function postgresQuery(input: string) {
   let result = input;
 
@@ -29,7 +40,10 @@ export function postgresQuery(input: string) {
   // PostgreSQL transaction/advisory-lock syntax has no SQLite equivalent.
   // Turso transactions already provide the required atomic write boundary.
   result = result.replace(/\bSELECT\s+pg_advisory_xact_lock\s*\([^)]*\)\s*;?/gi, 'SELECT 1');
-  result = result.replace(/\s+FOR\s+(UPDATE|SHARE)\b/gi, '');
+  // `FOR UPDATE OF a,b` is PostgreSQL row-locking syntax. SQLite has no row
+  // locks, so the whole clause — including the optional table list — is
+  // dropped; leaving `OF a,b` behind is a parse error.
+  result = result.replace(/\s+FOR\s+(?:UPDATE|SHARE)\b(?:\s+OF\s+[A-Za-z_][\w$]*(?:\s*,\s*[A-Za-z_][\w$]*)*)?/gi, '');
 
   // PostgreSQL time helpers -> SQLite/libSQL equivalents.
   result = result.replace(/extract\s*\(\s*epoch\s+FROM\s+now\(\)\s*\)/gi, 'unixepoch()');

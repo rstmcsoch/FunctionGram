@@ -136,6 +136,12 @@ export async function person(viewer:string|null,idOrUsername:string):Promise<Per
   return db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND LOWER(p.username)=LOWER(?)`).bind(viewer||'',viewer||'',idOrUsername).first<Person>();
 }
 function searchPattern(value:string){return '%'+value.replace(/[\\%_]/g,'\\$&')+'%';}
+/** SQLite's JSON aggregates return text, so an id list arrives as a JSON string. */
+function parseIdList(value:unknown):string[]{
+  if(Array.isArray(value))return value.map(String);
+  if(typeof value!=='string'||!value)return [];
+  try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map(String):[];}catch{return [];}
+}
 export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
 export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
 
@@ -160,7 +166,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   if(filter.discovery){conditions.push("p.kind!='story'");}
   if(filter.reels){conditions.push("p.kind='reel'");}
   if(filter.following){conditions.push('(p.author_id IN (SELECT followee_id FROM follows WHERE follower_id=?) OR p.author_id=?)');filterArgs.push(v,v);}
-  if(filter.hashtag){const hashtag=searchPattern('#'+filter.hashtag);conditions.push("LOWER(p.caption) LIKE LOWER(?) ESCAPE '\\\\'");filterArgs.push(hashtag);}
+  if(filter.hashtag){const hashtag=searchPattern('#'+filter.hashtag);conditions.push("LOWER(p.caption) LIKE LOWER(?) ESCAPE '\\'");filterArgs.push(hashtag);}
   const extra=conditions.length?' AND '+conditions.join(' AND '):'';
   // Placeholder order matches the SQL text: the viewer-reaction aggregate in
   // the FROM clause first, then the WHERE guards, then the extra conditions.
@@ -272,13 +278,16 @@ export async function conversation(viewer:string,other:string,limit=50,cursor:[n
   // Placeholder order matches the text: the 4 visibility values from
   // `readablePost()` inside the CASE, then the two participants (each used
   // twice), then the optional cursor and the limit.
-  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END`;
+  // The visibility CASE is selected under its own name: `SELECT m.*` already
+  // yields a `post_id` column, and libSQL keeps the FIRST of two same-named
+  // result columns, so reusing the name would silently return the raw value.
+  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
   const args:unknown[]=[viewer,viewer,viewer,viewer,viewer,other,other,viewer];
-  let sql=`SELECT m.*,${readable} AS post_id FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?))`;
+  let sql=`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?))`;
   if(cursor){sql+=' AND (m.created_at<? OR (m.created_at=? AND m.id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
   sql+=' ORDER BY m.created_at DESC,m.id DESC LIMIT ?';args.push(boundedLimit+1);
   const rows=(await db().prepare(sql).bind(...args).all()).results as MessageRow[];
-  const items=rows.slice(0,boundedLimit);
+  const items=rows.slice(0,boundedLimit).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...message,post_id:visible??null};});
   const next_cursor=rows.length>boundedLimit?`${items[items.length-1].created_at},${items[items.length-1].id}`:null;
   return {items,next_cursor};
 }
@@ -288,9 +297,11 @@ export async function inboxPreview(viewer:string,limit=200){
   const policy=await featurePolicy(viewer);
   const flags=policy.flags;
   const bounded=Math.max(1,Math.min(300,limit||200));
-  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END`;
-  const r=await db().prepare(`SELECT m.*,${readable} AS post_id FROM messages m WHERE m.deleted_at IS NULL AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,viewer,viewer,bounded).all();
-  return r.results;
+  // See `conversation`: the computed visibility column must not reuse the
+  // `post_id` name that `m.*` already produces.
+  const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
+  const r=await db().prepare(`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,viewer,viewer,bounded).all();
+  return (r.results as MessageRow[]).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...message,post_id:visible??null};});
 }
 
 /* ------------------------------- post comments ------------------------------- */
@@ -336,7 +347,9 @@ export async function savedCollections(viewer:string):Promise<SavedCollection[]>
     WHERE c.owner_id=?
     ORDER BY c.created_at,c.id
     LIMIT 100`).bind(viewer,viewer,viewer,viewer,viewer).all<Record<string,unknown>>();
-  return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:(row.post_ids as string[])||[]}));
+  // json_group_array() returns JSON *text* in SQLite/libSQL, so the aggregate
+  // is parsed here instead of being handed to the client as a string.
+  return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:parseIdList(row.post_ids)}));
 }
 export async function messageSearch(viewer:string,term:string):Promise<Person[]>{
   const pattern=searchPattern(term);

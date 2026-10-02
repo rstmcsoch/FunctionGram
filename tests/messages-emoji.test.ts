@@ -22,6 +22,18 @@ const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'ut
   devDependencies: Record<string, string>;
 };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  smileys: 'Smileys',
+  people: 'People',
+  // The rendered markup escapes `&`, so the expected text matches the DOM.
+  animals: 'Animals &amp; Nature',
+  food: 'Food',
+  travel: 'Travel &amp; Places',
+  activities: 'Activities',
+  objects: 'Objects',
+  symbols: 'Symbols',
+};
+
 const t = createTranslator();
 
 test('the emoji catalogue is local Unicode data with every category the picker browses', () => {
@@ -59,6 +71,49 @@ test('selecting an emoji preserves the existing message text', () => {
   // Repeated selection keeps appending rather than replacing.
   const first = insertEmoji('a', '😀');
   assert.deepEqual(insertEmoji(first.value, '😁', first.cursor), { value: 'a😀😁', cursor: 5 });
+});
+
+/** Emoji rendered inside the picker's option buttons, in document order. */
+function renderedEmoji(html: string): string[] {
+  const pattern = /class="emoji-option"[^>]*>([^<]+)<\/button>/g;
+  const found: string[] = [];
+  for (const match of html.matchAll(pattern)) found.push(match[1]);
+  return found;
+}
+
+function renderPicker(value = 'hi', cursor = value.length) {
+  return renderToStaticMarkup(
+    React.createElement(LabelsProvider, { labels: {} },
+      React.createElement(EmojiPicker, { value, cursor, onInsert: () => {}, onClose: () => {} })),
+  );
+}
+
+test('the picker renders exactly the active category and no other category', () => {
+  const panel = renderPicker();
+  const shown = renderedEmoji(panel);
+  assert.ok(shown.length > 20, 'a full grid is rendered');
+  // The visible grid is the first category, in its catalogue order.
+  assert.deepEqual(shown, EMOJI_CATEGORIES[0].emoji, 'only the selected category is rendered');
+  // Nothing that belongs exclusively to another category leaks into the DOM.
+  const others = new Set(EMOJI_CATEGORIES.slice(1).flatMap(category => category.emoji));
+  const active = new Set(EMOJI_CATEGORIES[0].emoji);
+  for (const emoji of shown) assert.ok(active.has(emoji), emoji + ' belongs to the active category');
+  assert.ok([...others].some(emoji => !active.has(emoji) && !shown.includes(emoji)), 'another category\'s emoji is not rendered');
+  // The panel announces which category is on screen.
+  assert.match(panel, /data-emoji-category="smileys"/, 'the active category is marked in the DOM');
+  assert.match(panel, /aria-label="Smileys"/, 'the grid is labelled with the active category');
+});
+
+test('every category is offered as its own individually labelled tab', () => {
+  const panel = renderPicker();
+  const tabs = panel.match(/<button[^>]*role="tab"[^>]*>[^<]*<\/button>/g) ?? [];
+  assert.equal(tabs.length, EMOJI_CATEGORIES.length, 'one tab per category');
+  for (const [index, category] of EMOJI_CATEGORIES.entries()) {
+    assert.ok(tabs.some(tab => tab.includes('>' + CATEGORY_LABELS[category.id] + '<')), category.id + ' has a labelled tab');
+    assert.ok(tabs[index].includes('type="button"'), category.id + ' tab cannot submit the form');
+  }
+  assert.equal((panel.match(/aria-selected="true"/g) ?? []).length, 1, 'exactly one tab is selected');
+  assert.match(panel, /aria-selected="true"[^>]*>Smileys</, 'the first category starts selected');
 });
 
 test('the emoji control is a real button that can never submit the message form', () => {

@@ -4,7 +4,8 @@ import { localDevDatabase } from '@/lib/postgres';
 
 // Development-only helper for the local preview: signs the browser in as a
 // local "Preview" account backed by the embedded PGlite database. Production
-// (and any deployment with a real DATABASE_URL) always answers 404.
+// always configures TURSO_DATABASE_URL, so localDevDatabase() is false there
+// and this route answers 404 on every deployment.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

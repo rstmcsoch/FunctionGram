@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Avatar } from '../components/social/common';
+import { LabelsProvider } from '../components/social/labels';
 
 // Regression coverage for Messages bug #1: profile pictures rendering
 // stretched / squashed / rectangular because the source image's dimensions
@@ -50,6 +54,13 @@ function declarations(selector: string) {
     .flatMap(rule => rule.declarations);
 }
 
+function renderAvatar(person: Record<string, unknown> | null, size = 48) {
+  return renderToStaticMarkup(
+    React.createElement(LabelsProvider, { labels: {} },
+      React.createElement(Avatar, { person, size })),
+  );
+}
+
 const avatarRules = declarations('.avatar');
 const imageRules = declarations('.avatar img');
 const initialRules = declarations('.avatar-initial');
@@ -94,6 +105,41 @@ test('the avatar wrapper/button cannot distort the avatar', () => {
   assert.match(joined, /overflow\s*:\s*hidden/, 'the wrapper clips to the circle');
   assert.match(joined, /border-radius\s*:\s*50%/, 'the wrapper is round too');
   assert.match(joined, /(^|;|\s)flex\s*:\s*0\s+0\s+auto/, 'the wrapper keeps its size in flex rows');
+});
+
+test('the rendered Avatar lets the source image control nothing but its own pixels', () => {
+  // Square, portrait, landscape, very wide and very tall sources all render the
+  // exact same markup: the component never reads or copies the image's
+  // dimensions, so a portrait picture cannot make the box taller.
+  const sources = [
+    { avatar: '/media/square.jpg', name: 'Square' },
+    { avatar: '/media/portrait.jpg', name: 'Portrait' },
+    { avatar: '/media/landscape.jpg', name: 'Landscape' },
+    { avatar: '/media/very-wide.jpg', name: 'Very wide' },
+    { avatar: '/media/very-tall.jpg', name: 'Very tall' },
+  ];
+  // The only thing that differs between sources is the URL itself.
+  const markup = sources.map(person => renderAvatar(person, 48).replace(/src="[^"]*"/g, 'src="…"'));
+  assert.equal(new Set(markup).size, 1, 'every source image produces identical markup');
+
+  const html = renderAvatar(sources[0], 48);
+  assert.match(html, /<span class="avatar ?" style="--avatar-size:48px">/, 'one container publishes the size');
+  assert.match(html, /<img src="\/media\/square\.jpg"/, 'the image is rendered');
+  // No sizing attributes and no inline geometry: the stylesheet owns both.
+  assert.doesNotMatch(html, /<img[^>]*\swidth=/, 'no width attribute');
+  assert.doesNotMatch(html, /<img[^>]*\sheight=/, 'no height attribute');
+  assert.doesNotMatch(html, /style="(?!\s*--avatar-size)/, 'no inline geometry anywhere in the avatar');
+  assert.doesNotMatch(html, /object-fit|width:|height:/, 'the component leaves cropping to CSS');
+
+  // The fallback renders inside the very same container, so it stays circular.
+  const fallback = renderAvatar({ name: 'Grace Hopper' }, 48);
+  assert.match(fallback, /<span class="avatar ?" style="--avatar-size:48px"><span class="avatar-initial">G<\/span><\/span>/, 'initials fill the same circle');
+  assert.doesNotMatch(fallback, /<img/, 'a broken or missing avatar renders no image');
+
+  // Sizes are container-owned too.
+  for (const size of [20, 40, 86]) {
+    assert.match(renderAvatar(sources[0], size), new RegExp('style="--avatar-size:' + size + 'px"'), size + 'px is published as one variable');
+  }
 });
 
 test('the shared Avatar component takes its size from one container variable', () => {

@@ -6,6 +6,7 @@ import { AdminError } from './validation';
 import { requirePermission } from './permissions';
 import { contentConfirmationName } from './content-label';
 import { checkReelDuration } from '../reel-duration';
+import { inPlaceholders } from '../sql';
 
 export type ContentResource = 'posts' | 'comments';
 export function contentResource(value: unknown): ContentResource {
@@ -78,7 +79,9 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
   if(video&&media.length!==1||kind==='reel'&&!video||kind==='story'&&media.length!==1)throw new AdminError('Reels need one video; stories one file; photo posts only images.');
   const tags=input.tagged_users??JSON.parse(String(row.tagged_users));
   if(!Array.isArray(tags)||tags.length>10||new Set(tags).size!==tags.length||tags.some(id=>typeof id!=='string'||id.length>100))throw new AdminError('Tag up to 10 accounts.');
-  if(tags.length&&(await db.query('SELECT id FROM profiles WHERE id=ANY($1::text[]) AND deleted_at IS NULL',[tags])).rows.length!==tags.length)throw new AdminError('A tagged profile is unavailable.');
+  // `IN (…)` rather than PostgreSQL's `= ANY($1::text[])`: libSQL has no ANY
+  // aggregate, and the translated form is a parse error on the production path.
+  if(tags.length&&(await db.query(`SELECT id FROM profiles WHERE id IN (${inPlaceholders(tags.length)}) AND deleted_at IS NULL`,tags)).rows.length!==tags.length)throw new AdminError('A tagged profile is unavailable.');
   const oldOptions=JSON.parse(String(row.media_options||'[]'));const oldAspects=row.aspects?JSON.parse(String(row.aspects)):null;
   const options=media.map(url=>oldOptions[original.indexOf(url)]??{ratio:'original',fit:'contain',alt:''});
   let aspects=input.aspects===undefined?(oldAspects&&media.every(url=>original.includes(url))?media.map(url=>oldAspects[original.indexOf(url)]):null):input.aspects;
@@ -119,7 +122,7 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
     if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
     if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
     // Always lock in ID order to avoid deadlocks between overlapping bulk selections.
-    const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[ids]);
+    const {rows}=await db.query(`SELECT * FROM ${resource} WHERE id IN (${inPlaceholders(ids.length)}) ORDER BY id FOR UPDATE`,ids);
     if(rows.length!==ids.length)throw new AdminError('An item no longer exists. Nothing was changed.',404);
     for(const row of rows) {
       if(['delete','purge'].includes(action)&&body.confirmation!==contentConfirmationName(row))throw new AdminError('Type the exact content name shown above to confirm.');
