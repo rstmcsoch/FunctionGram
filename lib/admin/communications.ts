@@ -237,7 +237,7 @@ export async function countMessageRestrictions(db: QueryExecutor) {
       (SELECT COUNT(*) FROM admin_message_controls WHERE dm_disabled=true) AS dm_disabled,
       (SELECT COUNT(*) FROM admin_message_restrictions WHERE send_disabled=true) AS send_disabled,
       (SELECT COUNT(*) FROM admin_message_restrictions WHERE receive_disabled=true) AS receive_disabled,
-      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>$1) AS suspended`);
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>$1) AS suspended`, [Date.now()]);
   return {
     dmDisabled: Number(row?.dm_disabled || 0),
     sendDisabled: Number(row?.send_disabled || 0),

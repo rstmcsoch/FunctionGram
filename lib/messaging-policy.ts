@@ -115,14 +115,6 @@ export type MessageRestrictions = {
   reason: string;
 };
 
-/**
- * Per-account messaging restrictions for one send.
- *
- * Reads the long-standing global DM switch (`admin_message_controls`) and the
- * granular send/receive/suspension rows (`admin_message_restrictions`) in the
- * same pass. The check always runs on the server: the Admin Panel only decides
- * *what* the policy is, never whether it applies.
- */
 export interface MessageRecipientDb {
   prepare(sql: string): {
     bind(...values: unknown[]): { first<T>(): Promise<T | null> };
@@ -151,9 +143,17 @@ export async function requirePrivateRecipientAllowed(
     .prepare('SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?')
     .bind(senderId, recipientId)
     .first();
-  if (!follows) throw new AdminError('This account only accepts messages from accounts it follows.', 403);
+  if (!follows) throw new AdminError('This account only accepts messages from its followers.', 403);
 }
 
+/**
+ * Per-account messaging restrictions for one send.
+ *
+ * Reads the long-standing global DM switch (`admin_message_controls`) and the
+ * granular send/receive/suspension rows (`admin_message_restrictions`) in the
+ * same pass. The check always runs on the server: the Admin Panel only decides
+ * *what* the policy is, never whether it applies.
+ */
 export async function inspectMessageRestrictions(
   db: { prepare(sql: string): { bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> } } },
   senderId: string,

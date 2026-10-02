@@ -32,7 +32,7 @@ import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy, require
 import { saveSetting } from '../lib/admin/core';
 import {
   MESSAGING_SETTING_KEYS, countMessageRestrictions,
-  listMessageRestrictions, readMessagingLimits, saveMessagingLimits, setMessageRestriction,
+  listMessageRestrictions, readMessagingLimits, saveMessagingLimits, setDirectMessageControl, setMessageRestriction,
 } from '../lib/admin/communications';
 import { AdminError } from '../lib/admin/validation';
 import { POST, GET } from '../app/api/social/route';
@@ -326,7 +326,7 @@ test('private accounts can be limited to their existing followers', async () => 
   await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
   const gated = await api(alice, { action: 'message', id: bob.id, body: 'must be refused' });
   assert.equal(gated.status, 403, 'a non-follower is refused');
-  assert.match(String(gated.data.error), /only accepts messages from accounts it follows/i);
+  assert.match(String(gated.data.error), /only accepts messages from its followers/i);
   const stored = await pool.query('SELECT id FROM messages WHERE sender_id=? AND body=?', [alice.id, 'must be refused']);
   assert.equal(stored.rows.length, 0, 'nothing was written');
 
@@ -347,7 +347,7 @@ test('private accounts can be limited to their existing followers', async () => 
   await pool.query('DELETE FROM app_settings WHERE key=?', ['messages.privateFollowersOnly']);
   // The gate itself, called directly with a private recipient and no follow row.
   await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
-  await assert.rejects(() => requirePrivateRecipientAllowed(db(), alice.id, bob.id), /only accepts messages from accounts it follows/i);
+  await assert.rejects(() => requirePrivateRecipientAllowed(db(), alice.id, bob.id), /only accepts messages from its followers/i);
   await assert.doesNotReject(() => requirePrivateRecipientAllowed(db(), bob.id, bob.id), 'a saved note to oneself is never gated');
   await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
 });
@@ -426,7 +426,7 @@ test('the messaging surface of the client mirrors the switches instead of hiding
   const messages = readFileSync(path.join(process.cwd(), 'components/social/messages.tsx'), 'utf8');
   assert.match(messages, /flags\.messageDeletion && !m\.pending && m\.sender_id === me\.id/, 'the delete control is removed from the DOM');
   assert.match(messages, /flags\.messageSearch && <label className="search-field"/, 'the conversation search is removed from the DOM');
-  assert.match(messages, /flags\.emojiPicker && <span className="emoji-anchor"/, 'the emoji control is removed from the DOM');
+  assert.match(messages, /flags\.emojiPicker && <span\s+className="emoji-anchor"/, 'the emoji control is removed from the DOM');
   assert.match(messages, /flags\.readReceipts && !m\.pending && m\.sender_id === me\.id && m\.read_at/, 'the seen marker follows the read-receipt switch');
   assert.match(messages, /maxLength=\{bodyLimit\}/, 'the composer honours the configured limit');
 
@@ -494,4 +494,34 @@ test('analytics reports messaging volume and the current restriction counts', as
   assert.ok(snapshot.messaging.sent >= 1, 'messages sent are counted');
   assert.ok(snapshot.messaging.activeConversations >= 1, 'participant pairs are counted');
   assert.deepEqual(Object.keys(snapshot.messaging.restrictions).sort(), ['dmDisabled', 'receiveDisabled', 'sendDisabled', 'suspended']);
+});
+
+test('the account detail reports messaging restrictions on libSQL, where booleans come back as 1/0', async () => {
+  const { userMessagingState } = await import('../lib/admin/queries');
+  assert.deepEqual(
+    await userMessagingState(pool, bob.id),
+    { dm_disabled: false, send_disabled: false, receive_disabled: false, suspended_until: 0, suspended: false },
+    'an unrestricted account reads as fully allowed',
+  );
+
+  const until = Date.now() + 3_600_000;
+  await setMessageRestriction(pool, owner.id, { profileId: bob.id, send: true, receive: true, suspendedUntil: until, reason: 'detail page', confirmation: bob.id });
+  await setDirectMessageControl(pool, owner.id, { profileId: bob.id, disabled: true, reason: 'detail page', confirmation: bob.id });
+
+  // The stored flags are integers on libSQL; a strict `=== true` would have
+  // shown every one of these accounts as "Allowed".
+  const raw = await pool.query('SELECT dm_disabled FROM admin_message_controls WHERE profile_id=?', [bob.id]);
+  assert.equal(typeof raw.rows[0].dm_disabled, 'number', 'the runtime under test really returns integers');
+  assert.deepEqual(
+    await userMessagingState(pool, bob.id),
+    { dm_disabled: true, send_disabled: true, receive_disabled: true, suspended_until: until, suspended: true },
+  );
+
+  // The analytics counter must see the same live suspension: its clock
+  // comparison needs a bound timestamp, or it silently reports zero.
+  const counts = await countMessageRestrictions(pool);
+  assert.equal(counts.suspended, 1, 'an unexpired suspension is counted');
+  assert.equal(counts.dmDisabled, 1);
+  assert.equal(counts.sendDisabled, 1);
+  assert.equal(counts.receiveDisabled, 1);
 });
