@@ -111,6 +111,15 @@ export const DATABASE_MIGRATIONS: Migration[] = [
       'DELETE FROM profiles WHERE is_demo=1',
     ],
   },
+  {
+    // The control row itself may be absent on an older database. Create it
+    // disabled (or force the existing row disabled) before the final purge.
+    version: 16,
+    statements: [
+      'INSERT INTO admin_demo_seed_control(id,enabled) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET enabled=0',
+      'DELETE FROM profiles WHERE is_demo=1',
+    ],
+  },
 ];
 
 /** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not
