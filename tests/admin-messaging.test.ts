@@ -457,10 +457,10 @@ test('the admin write path requires the messaging permission and the API rejects
 
 test('the migration that adds the restriction table is registered and replayable', async () => {
   const { DATABASE_MIGRATIONS } = await import('../lib/postgres');
-  const latest = DATABASE_MIGRATIONS.at(-1)!;
-  assert.equal(latest.version, 3);
+  const restrictionMigration = DATABASE_MIGRATIONS.find(m => m.version === 3)!;
+  assert.ok(restrictionMigration, 'migration 3 exists');
   const beforeReplay = await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions');
-  for (const statement of latest.statements) { await pool.query(statement); await pool.query(statement); }
+  for (const statement of restrictionMigration.statements) { await pool.query(statement); await pool.query(statement); }
   const afterReplay = await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions');
   assert.equal(afterReplay.rows[0].n, beforeReplay.rows[0].n, 'replaying the migration is harmless');
 });

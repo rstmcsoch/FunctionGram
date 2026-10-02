@@ -724,6 +724,161 @@ export const tursoSchemaStatements: string[] = [
     SELECT RAISE(IGNORE);
   END
   `,
+
+  // ---- Complete messaging system tables (migration 4) ----
+
+  // Message reactions: separate from post reactions to avoid mixing concerns.
+  `
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, user_id, emoji)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_message
+  ON message_reactions(message_id)
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_user
+  ON message_reactions(user_id)
+  `,
+
+  // Message pins: conversation-scoped, max 5 per conversation.
+  `
+  CREATE TABLE IF NOT EXISTS message_pins (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    conversation_key TEXT NOT NULL,
+    pinned_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (pinned_by) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_pins_conversation
+  ON message_pins(conversation_key, created_at DESC)
+  `,
+
+  // Saved messages: private to user.
+  `
+  CREATE TABLE IF NOT EXISTS saved_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, user_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_saved_messages_user
+  ON saved_messages(user_id, created_at DESC)
+  `,
+
+  // Conversation state: per-user metadata for each 1:1 conversation.
+  `
+  CREATE TABLE IF NOT EXISTS conversation_state (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    other_user_id TEXT NOT NULL,
+    is_pinned INTEGER NOT NULL DEFAULT 0,
+    is_muted INTEGER NOT NULL DEFAULT 0,
+    mute_until INTEGER,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    is_favorite INTEGER NOT NULL DEFAULT 0,
+    marked_unread INTEGER NOT NULL DEFAULT 0,
+    theme TEXT NOT NULL DEFAULT 'default',
+    disappearing_duration INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(user_id, other_user_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_conversation_state_user
+  ON conversation_state(user_id, is_pinned DESC, updated_at DESC)
+  `,
+
+  // Typing state: ephemeral, for realtime typing indicators.
+  `
+  CREATE TABLE IF NOT EXISTS typing_state (
+    user_id TEXT NOT NULL,
+    other_user_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+
+    PRIMARY KEY(user_id, other_user_id),
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE
+  )
+  `,
+
+  // User presence: lightweight heartbeat for online/last-seen.
+  `
+  CREATE TABLE IF NOT EXISTS user_presence (
+    user_id TEXT PRIMARY KEY NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    is_online INTEGER NOT NULL DEFAULT 0,
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+  )
+  `,
+
+  // View-once media tracking.
+  `
+  CREATE TABLE IF NOT EXISTS view_once_state (
+    message_id TEXT PRIMARY KEY NOT NULL,
+    consumed_at INTEGER,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+  )
+  `,
+
+  // Reports for messages (separate from post/profile reports).
+  `
+  CREATE TABLE IF NOT EXISTS message_reports (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    reporter_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (reporter_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, reporter_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reports_status
+  ON message_reports(status, created_at DESC)
+  `,
 ];
 
 /**
@@ -786,4 +941,36 @@ export const tursoMessagingUpgradeStatements: string[] = [
   )`,
   // `profile_id` is the primary key, so every lookup the messaging policy
   // performs is already served by that index and no second one is added.
+];
+
+/**
+ * Migration 4: complete messaging system extension.
+ *
+ * Adds columns to the existing `messages` table (reply references, edit
+ * timestamps, message types, media references, forward metadata, delivery
+ * state) and creates new tables for reactions, pins, saves, conversation
+ * state, typing, presence, view-once tracking and message reports.
+ *
+ * Every statement is `CREATE ... IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN`
+ * guarded, so replaying on a database that already received these is a no-op.
+ *
+ * SQLite's `ALTER TABLE ... ADD COLUMN` is a no-op (error) if the column
+ * already exists, so we catch and ignore those errors at the migration level.
+ */
+export const tursoMessagingV4Statements: string[] = [
+  // New columns on the existing messages table.
+  `ALTER TABLE messages ADD COLUMN reply_to_id TEXT`,
+  `ALTER TABLE messages ADD COLUMN edited_at INTEGER`,
+  `ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text'`,
+  `ALTER TABLE messages ADD COLUMN media_url TEXT`,
+  `ALTER TABLE messages ADD COLUMN media_mime TEXT`,
+  `ALTER TABLE messages ADD COLUMN media_size INTEGER`,
+  `ALTER TABLE messages ADD COLUMN media_duration REAL`,
+  `ALTER TABLE messages ADD COLUMN media_width INTEGER`,
+  `ALTER TABLE messages ADD COLUMN media_height INTEGER`,
+  `ALTER TABLE messages ADD COLUMN forward_from_id TEXT`,
+  `ALTER TABLE messages ADD COLUMN forward_from_sender TEXT`,
+  `ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE messages ADD COLUMN view_once_consumed INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE messages ADD COLUMN delivered_at INTEGER`,
 ];

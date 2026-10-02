@@ -90,6 +90,68 @@ export async function GET(request:Request){
   if(query.has('messages_search')){const user=await identity(headers,true);const term=clean(query.get('messages_search'),80,true);
     if(term.length<2)throw new AppError('Type at least two characters.');
     return json(await messageSearch(user!,term));}
+  if(query.has('message_reactions')){
+    const user=await identity(headers,true);
+    const messageId=clean(query.get('message_reactions')!,100,true);
+    const msg=await db().prepare('SELECT id,sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(messageId).first<{id:string;sender_id:string;recipient_id:string}>();
+    if(!msg||(msg.sender_id!==user&&msg.recipient_id!==user))return json([]);
+    const r=await db().prepare('SELECT mr.*,p.username FROM message_reactions mr JOIN profiles p ON p.id=mr.user_id WHERE mr.message_id=?').bind(messageId).all();
+    return noStore(r.results);
+  }
+  if(query.has('message_pins')){
+    const user=await identity(headers,true);
+    const otherId=clean(query.get('message_pins')!,100,true);
+    const convKey=[user!,otherId].sort().join(':');
+    const r=await db().prepare('SELECT * FROM message_pins WHERE conversation_key=? ORDER BY created_at DESC LIMIT 5').bind(convKey).all();
+    return noStore(r.results);
+  }
+  if(query.has('conversation_state')){
+    const user=await identity(headers,true);
+    const otherId=clean(query.get('conversation_state')!,100,true);
+    const r=await db().prepare('SELECT * FROM conversation_state WHERE user_id=? AND other_user_id=?').bind(user,otherId).first();
+    return noStore(r||{user_id:user,other_user_id:otherId,is_pinned:0,is_muted:0,mute_until:null,is_archived:0,is_favorite:0,marked_unread:0,theme:'default',disappearing_duration:0});
+  }
+  if(query.has('typing')){
+    const user=await identity(headers,true);
+    const otherId=clean(query.get('typing')!,100,true);
+    // Only show typing if started within last 5 seconds.
+    const cutoff=Date.now()-5000;
+    const r=await db().prepare('SELECT user_id,started_at FROM typing_state WHERE user_id=? AND other_user_id=? AND started_at>?').bind(otherId,user!,cutoff).first();
+    return noStore(r?{typing:true,started_at:r.started_at}:{typing:false});
+  }
+  if(query.has('presence')){
+    const user=await identity(headers,true);
+    const otherId=clean(query.get('presence')!,100,true);
+    const r=await db().prepare('SELECT * FROM user_presence WHERE user_id=?').bind(otherId).first<{user_id:string;last_seen_at:number;is_online:number}>();
+    // Consider online if last seen within 2 minutes.
+    const isOnline=r&&r.is_online&&(Date.now()-r.last_seen_at<120000);
+    return noStore({user_id:otherId,is_online:!!isOnline,last_seen_at:r?.last_seen_at||null});
+  }
+  if(query.has('saved_messages')){
+    const user=await identity(headers,true);
+    const r=await db().prepare('SELECT sm.*,m.body,m.sender_id,m.recipient_id,m.created_at message_created_at,p.username sender_username FROM saved_messages sm JOIN messages m ON m.id=sm.message_id JOIN profiles p ON p.id=m.sender_id WHERE sm.user_id=? AND m.deleted_at IS NULL ORDER BY sm.created_at DESC LIMIT 100').bind(user).all();
+    return noStore(r.results);
+  }
+  if(query.has('inbox')){
+    // Enhanced inbox: supports filter by state (all, unread, archived, favorites).
+    const user=await identity(headers,true);
+    const filter=query.get('inbox');
+    if(filter==='archived'){
+      const r=await db().prepare(`SELECT m.*,cs.is_archived FROM messages m
+        JOIN conversation_state cs ON cs.user_id=? AND ((m.sender_id=? AND cs.other_user_id=m.recipient_id) OR (m.recipient_id=? AND cs.other_user_id=m.sender_id))
+        WHERE (m.sender_id=? OR m.recipient_id=?) AND m.deleted_at IS NULL AND cs.is_archived=1
+        ORDER BY m.created_at DESC LIMIT 200`).bind(user,user,user,user,user).all();
+      return noStore(r.results);
+    }
+    if(filter==='favorites'){
+      const r=await db().prepare(`SELECT m.*,cs.is_favorite FROM messages m
+        JOIN conversation_state cs ON cs.user_id=? AND ((m.sender_id=? AND cs.other_user_id=m.recipient_id) OR (m.recipient_id=? AND cs.other_user_id=m.sender_id))
+        WHERE (m.sender_id=? OR m.recipient_id=?) AND m.deleted_at IS NULL AND cs.is_favorite=1
+        ORDER BY m.created_at DESC LIMIT 200`).bind(user,user,user,user,user).all();
+      return noStore(r.results);
+    }
+    return noStore(await inboxPreview(user!));
+  }
   return json(await bootstrap(headers));
  }catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}
  finally{flushPerf('GET '+new URL(request.url).pathname+new URL(request.url).search);}});}
@@ -247,7 +309,13 @@ export async function POST(request:Request){
     if(messaging.privateFollowersOnly)await requirePrivateRecipientAllowed(database,user,recipientId);
     // A block cuts off the blocked person's messages to the blocker.
     if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
-    const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
+    const messageId=crypto.randomUUID();
+    const messageType=clean(input.message_type||'text',20);
+    const mediaUrl=typeof input.media_url==='string'?clean(input.media_url,400):null;
+    const mediaMime=typeof input.media_mime==='string'?clean(input.media_mime,100):null;
+    const viewOnce=typeof input.view_once==='boolean'&&input.view_once?1:0;
+    await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id,message_type,media_url,media_mime,view_once,delivered_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null,messageType,mediaUrl,mediaMime,viewOnce,user===recipientId?null:now).run();
+    return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null,delivered_at:user===recipientId?null:now});
   }
   if(action==='delete_message'){
     // Ownership is enforced inside the statement (sender_id = the
@@ -334,6 +402,198 @@ export async function POST(request:Request){
     }
     return json({ok:true});
   }
+  // ---- Complete messaging actions ----
+
+  if(action==='reply_message'){
+    // Reply to a message in the same conversation.
+    const replyToId=clean(input.reply_to_id,100,true);
+    const body=clean(input.body,4000,true);
+    const messaging=await readMessagingPolicy();
+    requireMessageBody(body,messaging);
+    await requireAllowedText(body);
+    await requireMessageQuota(database,user,messaging);
+    const recipientId=id;
+    const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(recipientId).first<{id:string;is_demo:number}>();
+    if(!recipient)throw new AppError('Profile not found.',404);
+    if(recipient.is_demo)throw new AppError('This is a sample profile.');
+    const restrictions=await inspectMessageRestrictions(database,user,recipientId);
+    if(restrictions.blocked)throw new AppError(restrictions.reason,403);
+    // Verify the original message exists in this conversation.
+    const original=await database.prepare(`SELECT id,sender_id,body FROM messages WHERE id=? AND deleted_at IS NULL AND ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?))`).bind(replyToId,user,recipientId,recipientId,user).first<{id:string;sender_id:string;body:string}>();
+    if(!original)throw new AppError('Original message not found.',404);
+    const messageId=crypto.randomUUID();
+    await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,reply_to_id,message_type) VALUES (?,?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,replyToId,'text').run();
+    return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,reply_to_id:replyToId});
+  }
+
+  if(action==='react_message'){
+    // Add or remove a reaction on a message.
+    const emoji=clean(input.emoji,10,true);
+    const active=input.active===undefined?true:input.active;
+    if(typeof active!=='boolean')throw new AppError('Invalid action.');
+    if(!['❤️','😂','👍','😮','😢','😡'].includes(emoji))throw new AppError('Choose a supported reaction.');
+    // Verify the message is in a conversation the user participates in.
+    const msg=await database.prepare('SELECT id,sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;recipient_id:string}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user&&msg.recipient_id!==user)throw new AppError('Message not found.',404);
+    if(active){
+      const reactionId='mr:'+user+':'+id+':'+emoji;
+      await database.prepare('INSERT OR IGNORE INTO message_reactions (id,message_id,user_id,emoji,created_at) VALUES (?,?,?,?,?)').bind(reactionId,id,user,emoji,now).run();
+    }else{
+      await database.prepare('DELETE FROM message_reactions WHERE message_id=? AND user_id=? AND emoji=?').bind(id,user,emoji).run();
+    }
+    // Return all reactions for this message.
+    const reactions=await database.prepare('SELECT mr.*,p.username FROM message_reactions mr JOIN profiles p ON p.id=mr.user_id WHERE mr.message_id=?').bind(id).all();
+    return json({ok:true,reactions:reactions.results});
+  }
+
+  if(action==='edit_message'){
+    // Edit a message within 15 minutes.
+    const body=clean(input.body,4000,true);
+    const messaging=await readMessagingPolicy();
+    requireMessageBody(body,messaging);
+    await requireAllowedText(body);
+    const msg=await database.prepare('SELECT id,sender_id,created_at FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;created_at:number}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user)throw new AppError('You can only edit your own messages.',403);
+    const EDIT_WINDOW=15*60*1000; // 15 minutes
+    if(now-msg.created_at>EDIT_WINDOW)throw new AppError('The edit window has expired.',403);
+    await database.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND sender_id=?').bind(body,now,id,user).run();
+    return json({ok:true,body,edited_at:now});
+  }
+
+  if(action==='forward_message'){
+    // Forward a message to another conversation.
+    const targetRecipient=clean(input.target_recipient,100,true);
+    const msg=await database.prepare('SELECT id,sender_id,recipient_id,body,message_type,media_url,media_mime,post_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;recipient_id:string;body:string;message_type:string;media_url:string|null;media_mime:string|null;post_id:string|null}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user&&msg.recipient_id!==user)throw new AppError('Message not found.',404);
+    const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(targetRecipient).first<{id:string;is_demo:number}>();
+    if(!recipient)throw new AppError('Profile not found.',404);
+    if(recipient.is_demo)throw new AppError('This is a sample profile.');
+    const restrictions=await inspectMessageRestrictions(database,user,targetRecipient);
+    if(restrictions.blocked)throw new AppError(restrictions.reason,403);
+    if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(targetRecipient,user).first())throw new AppError('You cannot message this profile.',403);
+    const messageId=crypto.randomUUID();
+    await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,message_type,media_url,media_mime,forward_from_id,forward_from_sender,post_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').bind(messageId,user,targetRecipient,msg.body,now,null,msg.message_type,msg.media_url,msg.media_mime,id,msg.sender_id,msg.post_id).run();
+    return json({id:messageId});
+  }
+
+  if(action==='pin_message'){
+    // Pin/unpin a message (max 5 per conversation).
+    const active=input.active===undefined?true:input.active;
+    if(typeof active!=='boolean')throw new AppError('Invalid action.');
+    const msg=await database.prepare('SELECT id,sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;recipient_id:string}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user&&msg.recipient_id!==user)throw new AppError('Message not found.',404);
+    const convKey=[msg.sender_id,msg.recipient_id].sort().join(':');
+    if(active){
+      const count=await database.prepare('SELECT COUNT(*) AS n FROM message_pins WHERE conversation_key=?').bind(convKey).first<{n:number}>();
+      if(Number(count?.n||0)>=5)throw new AppError('Maximum 5 pinned messages per conversation.',422);
+      const pinId='pin:'+id;
+      await database.prepare('INSERT OR IGNORE INTO message_pins (id,message_id,conversation_key,pinned_by,created_at) VALUES (?,?,?,?,?)').bind(pinId,id,convKey,user,now).run();
+    }else{
+      await database.prepare('DELETE FROM message_pins WHERE message_id=? AND conversation_key=?').bind(id,convKey).run();
+    }
+    const pins=await database.prepare('SELECT * FROM message_pins WHERE conversation_key=? ORDER BY created_at DESC').bind(convKey).all();
+    return json({ok:true,pins:pins.results});
+  }
+
+  if(action==='save_message'){
+    // Save/unsave a message privately.
+    const active=input.active===undefined?true:input.active;
+    if(typeof active!=='boolean')throw new AppError('Invalid action.');
+    const msg=await database.prepare('SELECT id,sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;recipient_id:string}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user&&msg.recipient_id!==user)throw new AppError('Message not found.',404);
+    if(active){
+      const saveId='save:'+user+':'+id;
+      await database.prepare('INSERT OR IGNORE INTO saved_messages (id,message_id,user_id,created_at) VALUES (?,?,?,?)').bind(saveId,id,user,now).run();
+    }else{
+      await database.prepare('DELETE FROM saved_messages WHERE message_id=? AND user_id=?').bind(id,user).run();
+    }
+    return json({ok:true});
+  }
+
+  if(action==='set_conversation_state'){
+    // Update conversation-level state (pin chat, mute, archive, favorite, theme, disappearing).
+    const otherUserId=clean(input.other_user_id||id,100,true);
+    if(!otherUserId)throw new AppError('Specify a conversation partner.');
+    const stateId='cs:'+user+':'+otherUserId;
+    const existing=await database.prepare('SELECT * FROM conversation_state WHERE user_id=? AND other_user_id=?').bind(user,otherUserId).first<Record<string,unknown>>();
+    const isPinned=input.is_pinned!==undefined?(input.is_pinned?1:0):(existing?.is_pinned??0);
+    const isMuted=input.is_muted!==undefined?(input.is_muted?1:0):(existing?.is_muted??0);
+    const muteUntil=input.mute_until!==undefined?input.mute_until:(existing?.mute_until??null);
+    const isArchived=input.is_archived!==undefined?(input.is_archived?1:0):(existing?.is_archived??0);
+    const isFavorite=input.is_favorite!==undefined?(input.is_favorite?1:0):(existing?.is_favorite??0);
+    const markedUnread=input.marked_unread!==undefined?(input.marked_unread?1:0):(existing?.marked_unread??0);
+    const theme=typeof input.theme==='string'?clean(input.theme,30):(existing?.theme??'default');
+    const disappearingDuration=typeof input.disappearing_duration==='number'?input.disappearing_duration:(existing?.disappearing_duration??0);
+    await database.prepare(`INSERT INTO conversation_state (id,user_id,other_user_id,is_pinned,is_muted,mute_until,is_archived,is_favorite,marked_unread,theme,disappearing_duration,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(user_id,other_user_id) DO UPDATE SET is_pinned=excluded.is_pinned,is_muted=excluded.is_muted,mute_until=excluded.mute_until,is_archived=excluded.is_archived,is_favorite=excluded.is_favorite,marked_unread=excluded.marked_unread,theme=excluded.theme,disappearing_duration=excluded.disappearing_duration,updated_at=excluded.updated_at`).bind(stateId,user,otherUserId,isPinned,isMuted,muteUntil,isArchived,isFavorite,markedUnread,theme,disappearingDuration,now).run();
+    return json({ok:true,is_pinned:isPinned,is_muted:isMuted,mute_until:muteUntil,is_archived:isArchived,is_favorite:isFavorite,marked_unread:markedUnread,theme,disappearing_duration:disappearingDuration});
+  }
+
+  if(action==='mark_unread'){
+    // Mark a conversation as unread.
+    const otherUserId=clean(input.other_user_id||id,100,true);
+    const stateId='cs:'+user+':'+otherUserId;
+    await database.prepare(`INSERT INTO conversation_state (id,user_id,other_user_id,is_pinned,is_muted,mute_until,is_archived,is_favorite,marked_unread,theme,disappearing_duration,updated_at) VALUES (?, ?, ?, 0, 0, NULL, 0, 0, 1, 'default', 0, ?)
+      ON CONFLICT(user_id,other_user_id) DO UPDATE SET marked_unread=1,updated_at=excluded.updated_at`).bind(stateId,user,otherUserId,now).run();
+    return json({ok:true});
+  }
+
+  if(action==='update_presence'){
+    // Update heartbeat / online status.
+    await database.prepare(`INSERT INTO user_presence (user_id,last_seen_at,is_online) VALUES (?,?,1)
+      ON CONFLICT(user_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,is_online=1`).bind(user,now).run();
+    return json({ok:true});
+  }
+
+  if(action==='set_typing'){
+    // Set typing indicator. Expires after 5 seconds.
+    const otherUserId=clean(input.other_user_id||id,100,true);
+    await database.prepare(`INSERT INTO typing_state (user_id,other_user_id,started_at) VALUES (?,?,?)
+      ON CONFLICT(user_id,other_user_id) DO UPDATE SET started_at=excluded.started_at`).bind(user,otherUserId,now).run();
+    return json({ok:true});
+  }
+
+  if(action==='report_message'){
+    // Report a message.
+    const reason=clean(input.reason,30,true);
+    if(!['spam','harassment','inappropriate','other'].includes(reason))throw new AppError('Choose a reason.');
+    const details=clean(input.details||'',1000);
+    const msg=await database.prepare('SELECT id,sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;sender_id:string;recipient_id:string}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.sender_id!==user&&msg.recipient_id!==user)throw new AppError('Message not found.',404);
+    const reportId='mreport:'+user+':'+id;
+    await database.prepare('INSERT OR IGNORE INTO message_reports (id,message_id,reporter_id,reason,details,created_at) VALUES (?,?,?,?,?,?)').bind(reportId,id,user,reason,details,now).run();
+    return json({ok:true});
+  }
+
+  if(action==='update_disappearing'){
+    // Set disappearing message duration for a conversation.
+    const duration=Number(input.duration);
+    if(![0,86400,604800,2592000,7776000].includes(duration))throw new AppError('Choose a valid duration.');
+    const otherUserId=clean(input.other_user_id||id,100,true);
+    const stateId='cs:'+user+':'+otherUserId;
+    await database.prepare(`INSERT INTO conversation_state (id,user_id,other_user_id,is_pinned,is_muted,mute_until,is_archived,is_favorite,marked_unread,theme,disappearing_duration,updated_at) VALUES (?,?,?,0,0,NULL,0,0,0,'default',?,?)
+      ON CONFLICT(user_id,other_user_id) DO UPDATE SET disappearing_duration=excluded.disappearing_duration,updated_at=excluded.updated_at`).bind(stateId,user,otherUserId,duration,now).run();
+    return json({ok:true,duration});
+  }
+
+  if(action==='consume_view_once'){
+    // Mark a view-once message as consumed.
+    const msg=await database.prepare('SELECT id,recipient_id,view_once,view_once_consumed FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{id:string;recipient_id:string;view_once:number;view_once_consumed:number}>();
+    if(!msg)throw new AppError('Message not found.',404);
+    if(msg.recipient_id!==user)throw new AppError('Only the recipient can view this.',403);
+    if(!msg.view_once)throw new AppError('This is not a view-once message.',422);
+    if(msg.view_once_consumed)throw new AppError('This message has already been viewed.',410);
+    await database.prepare('UPDATE messages SET view_once_consumed=1 WHERE id=?').bind(id).run();
+    await database.prepare('INSERT OR IGNORE INTO view_once_state (message_id,consumed_at) VALUES (?,?)').bind(id,now).run();
+    return json({ok:true,consumed_at:now});
+  }
+
   throw new AppError('Unknown action.');
  }catch(error){return fail(error instanceof AdminError?new AppError(error.message,error.status):error);}
  finally{flushPerf(label);}});}

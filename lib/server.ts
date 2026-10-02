@@ -289,6 +289,31 @@ export async function conversation(viewer:string,other:string,limit=50,cursor:[n
   const rows=(await db().prepare(sql).bind(...args).all()).results as MessageRow[];
   const items=rows.slice(0,boundedLimit).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...message,post_id:visible??null};});
   const next_cursor=rows.length>boundedLimit?`${items[items.length-1].created_at},${items[items.length-1].id}`:null;
+
+  // Batch-load reactions for all visible messages to avoid N+1 queries.
+  if(items.length){
+    const messageIds=items.map(m=>String((m as Record<string,unknown>).id));
+    const placeholders=messageIds.map(()=>'?').join(',');
+    const reactionRows=(await db().prepare(
+      `SELECT mr.*,p.username FROM message_reactions mr JOIN profiles p ON p.id=mr.user_id WHERE mr.message_id IN (${placeholders})`
+    ).bind(...messageIds).all()).results as Record<string,unknown>[];
+    const reactionMap=new Map<string,Record<string,unknown>[]>();
+    for(const r of reactionRows){
+      const mid=String(r.message_id);
+      if(!reactionMap.has(mid))reactionMap.set(mid,[]);
+      reactionMap.get(mid)!.push(r);
+    }
+    for(const item of items){
+      const rec=item as Record<string,unknown>;
+      rec.reactions=reactionMap.get(String(rec.id))||[];
+      // Attach reply preview if this message is a reply.
+      if(rec.reply_to_id){
+        const replyTo=await db().prepare('SELECT m.body,m.sender_id,p.username FROM messages m JOIN profiles p ON p.id=m.sender_id WHERE m.id=?').bind(rec.reply_to_id).first<{body:string;sender_id:string;username:string}>();
+        rec.reply_preview=replyTo||null;
+      }
+    }
+  }
+
   return {items,next_cursor};
 }
 
