@@ -34,3 +34,15 @@ test("message emoji control opens a local full picker without an external emoji 
   assert.match(picker, /role="dialog"/);
   assert.doesNotMatch(picker, /from ["']emoji-(mart|picker)/);
 });
+
+test("message deletion is sender-owned in both UI and API", async () => {
+  const messages = await readFile(new URL("../components/social/messages.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/social/route.ts", import.meta.url), "utf8");
+  const server = await readFile(new URL("../lib/server.ts", import.meta.url), "utf8");
+
+  assert.match(messages, /m\.sender_id === me\.id && <button className="message-delete"/);
+  assert.match(messages, /if \(message\.sender_id !== me\.id\) return/);
+  assert.match(route, /deleteMessage\(user,id\)/);
+  assert.match(server, /DELETE FROM messages WHERE id=\? AND sender_id=\?/);
+  assert.doesNotMatch(route, /DELETE FROM messages WHERE id=\?'/);
+});
