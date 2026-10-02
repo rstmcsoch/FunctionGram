@@ -57,10 +57,12 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
       // The API pages newest-first; flip to chronological order for display.
       request<{ items: Message[]; next_cursor: string | null }>("/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50", undefined, t),
       request<Message[]>("/api/social?inbox=1", undefined, t),
-    ]).then(async ([page, all]) => {
+    ]).then(([page, all]) => {
       if (version !== sequence.current) return;
       setMessages([...page.items].reverse()); setOlderCursor(page.next_cursor); setInbox(all); setError(""); setLoading(false);
-      await request("/api/social", { action: "read_messages", id: recipient }, t);
+      // Read-state is secondary to loading the conversation. A transient
+      // failure here must not turn a successfully loaded chat into an error.
+      void request("/api/social", { action: "read_messages", id: recipient }, t).catch(() => {});
     }).catch(e => { if (version === sequence.current) { setError((e as Error).message); setLoading(false); } })
   }, [recipient, t]);
 
@@ -116,14 +118,18 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const send = async () => {
     const text = body.trim();
     if (!text || busy) return;
-    const optimistic: OutgoingMessage = { id: "pending:" + crypto.randomUUID(), sender_id: me.id, recipient_id: recipient, body: text, created_at: Date.now(), read_at: null, pending: true };
+    const targetRecipient = recipient;
+    const version = sequence.current;
+    const optimistic: OutgoingMessage = { id: "pending:" + crypto.randomUUID(), sender_id: me.id, recipient_id: targetRecipient, body: text, created_at: Date.now(), read_at: null, pending: true };
     setMessages(value => [...value, optimistic]);
     setBody(""); setBusy(true);
     try {
-      const created = await request<{ id: string }>("/api/social", { action: "message", id: recipient, body: text }, t);
+      const created = await request<{ id: string }>("/api/social", { action: "message", id: targetRecipient, body: text }, t);
+      if (version !== sequence.current) return;
       setMessages(value => value.map(m => m.id === optimistic.id ? { ...m, id: created.id, pending: false } : m));
       setInbox(value => [...value, { ...optimistic, id: created.id, pending: false }]);
     } catch (e) {
+      if (version !== sequence.current) return;
       setMessages(value => value.filter(m => m.id !== optimistic.id));
       toast.error((e as Error).message);
       setBody(text);
@@ -232,16 +238,21 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           <div ref={bottom} />
         </div>
         <form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
-          <span className="emoji-anchor">
+          <span
+            className="emoji-anchor"
+            onMouseDown={event => event.stopPropagation()}
+            onTouchStart={event => event.stopPropagation()}
+          >
             <EmojiTrigger open={emojiOpen} label={t("messages.add_a_smile")} onToggle={() => {
-              // Opening the picker parks the caret where the user left it so
-              // the first emoji lands there; closing returns focus to the
-              // message field.
-              setEmojiOpen(open => {
-                if (open) input.current?.focus();
-                else setCaret(input.current?.selectionStart ?? body.length);
-                return !open;
-              });
+              // The trigger sits next to the picker. Capture the last caret
+              // before opening, and explicitly close/focus when toggling off.
+              if (!emojiOpen) {
+                setCaret(input.current?.selectionStart ?? body.length);
+                setEmojiOpen(true);
+              } else {
+                setEmojiOpen(false);
+                requestAnimationFrame(() => input.current?.focus());
+              }
             }} />
             {emojiOpen && (
               <EmojiPicker
@@ -273,7 +284,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
             onKeyUp={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onClick={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
           />
-          <button aria-label={t("messages.send_message")} className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
+          <button type="submit" aria-label={t("messages.send_message")} className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
         </form>
       </section>
     </div>
