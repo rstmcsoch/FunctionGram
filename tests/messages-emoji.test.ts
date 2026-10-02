@@ -95,6 +95,13 @@ test('the picker renders a labelled, searchable, categorised emoji grid', () => 
   assert.doesNotMatch(emojiText, /https?:\/\//, 'the picker loads no remote emoji asset');
 });
 
+test('category buttons control one visible category grid instead of rendering every category', () => {
+  assert.match(picker, /const activeCategory = useMemo\([\s\S]*EMOJI_CATEGORIES\.find/, 'the selected category drives the grid');
+  assert.match(picker, /activeCategory\.emoji\.map/, 'the visible grid uses the selected category');
+  assert.doesNotMatch(picker, /EMOJI_CATEGORIES\.map\(item => \(\s*<section/, 'browsing does not mount every category grid at once');
+  assert.match(picker, /setCategory\(item\.id\); setTerm\(\"\"\)/, 'category buttons switch categories');
+});
+
 test('the picker closes on Escape and on an outside click', () => {
   assert.match(picker, /event\.key === ["']Escape["']/, 'Escape closes the picker');
   assert.match(picker, /panel\.current\?\.contains\(target\)/, 'an outside click closes the picker');

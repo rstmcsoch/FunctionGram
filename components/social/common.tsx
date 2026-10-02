@@ -142,7 +142,7 @@ export function Avatar({ person, size = 42, ring = false, onClick, className = "
     </span>
   );
   return onClick ? (
-    <button aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button">{content}</button>
+    <button type="button" aria-label={t("common.open") + (person?.username || t("common.your_profile"))} onClick={onClick} className="avatar-button">{content}</button>
   ) : content;
 }
 

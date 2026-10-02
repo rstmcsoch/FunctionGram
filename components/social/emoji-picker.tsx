@@ -38,6 +38,10 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
   const panel = useRef<HTMLDivElement>(null);
 
   const emoji = useMemo(() => searchEmoji(term), [term]);
+  const activeCategory = useMemo(
+    () => EMOJI_CATEGORIES.find(item => item.id === category) || EMOJI_CATEGORIES[0],
+    [category],
+  );
   const searching = term.trim().length > 0;
 
   // Escape closes the picker from anywhere inside it, and an outside pointer
@@ -98,34 +102,19 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
           ))}
         </div>
       )}
-      <div
-        className="emoji-scroll"
-        onScroll={event => {
-          // While browsing (not searching) the highlighted tab follows the
-          // scroll position, so the category row always describes what the
-          // grid is showing.
-          if (searching) return;
-          const top = event.currentTarget.scrollTop + 8;
-          for (const item of EMOJI_CATEGORIES) {
-            const section = panel.current?.querySelector<HTMLElement>('[data-emoji-category="' + item.id + '"]');
-            if (section && section.offsetTop <= top) setCategory(item.id);
-          }
-        }}
-      >
+      <div className="emoji-scroll">
         {emoji.length ? (
           searching ? (
             <div className="emoji-grid" role="list" aria-label={t("emoji.results")}>
               {emoji.map(item => <EmojiOption key={item} emoji={item} onPick={choose} />)}
             </div>
           ) : (
-            EMOJI_CATEGORIES.map(item => (
-              <section key={item.id} data-emoji-category={item.id} aria-label={t(CATEGORY_LABEL[item.id])}>
-                <h3>{t(CATEGORY_LABEL[item.id])}</h3>
-                <div className="emoji-grid">
-                  {item.emoji.map(item => <EmojiOption key={item} emoji={item} onPick={choose} />)}
-                </div>
-              </section>
-            ))
+            <section key={activeCategory.id} data-emoji-category={activeCategory.id} aria-label={t(CATEGORY_LABEL[activeCategory.id])}>
+              <h3>{t(CATEGORY_LABEL[activeCategory.id])}</h3>
+              <div className="emoji-grid">
+                {activeCategory.emoji.map(item => <EmojiOption key={item} emoji={item} onPick={choose} />)}
+              </div>
+            </section>
           )
         ) : (
           <p className="emoji-empty">{t("emoji.no_results")}</p>
