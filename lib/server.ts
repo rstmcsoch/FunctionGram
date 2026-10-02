@@ -263,6 +263,12 @@ type MessageRow=Record<string,unknown>;
  * the "is the shared post still readable" check evaluated only for messages
  * that reference a post.
  */
+/** Delete a message for everyone. Only the original sender owns this mutation. */
+export async function deleteMessage(viewer:string,id:string):Promise<boolean>{
+  const result=await db().prepare('DELETE FROM messages WHERE id=? AND sender_id=?').bind(id,viewer).run();
+  return Boolean(result.meta.changes);
+}
+
 export async function conversation(viewer:string,other:string,limit=50,cursor:[number,string]|null=null){
   const policy=await featurePolicy(viewer);
   const flags=policy.flags;

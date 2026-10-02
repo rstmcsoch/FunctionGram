@@ -1,0 +1,48 @@
+import { strict as assert } from "node:assert";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const commonPath = new URL("../components/social/common.tsx", import.meta.url);
+const cssPath = new URL("../app/globals.css", import.meta.url);
+
+test("message avatars have fixed square geometry and crop images without distortion", async () => {
+  const common = await readFile(commonPath, "utf8");
+  const css = await readFile(cssPath, "utf8");
+
+  assert.match(common, /minWidth: size/);
+  assert.match(common, /minHeight: size/);
+  assert.match(common, /maxWidth: size/);
+  assert.match(common, /maxHeight: size/);
+  assert.match(common, /aspectRatio: "1 \/ 1"/);
+
+  assert.match(css, /\.avatar\{[^}]*aspect-ratio:1 \/ 1/);
+  assert.match(css, /\.avatar img\{[^}]*object-fit:cover/);
+  assert.match(css, /\.avatar img\{[^}]*object-position:center/);
+  assert.match(css, /\.avatar img\{[^}]*max-width:none/);
+  assert.match(css, /\.avatar img\{[^}]*max-height:none/);
+});
+
+test("message emoji control opens a local full picker without an external emoji package", async () => {
+  const messages = await readFile(new URL("../components/social/messages.tsx", import.meta.url), "utf8");
+  const picker = await readFile(new URL("../components/social/emoji-picker.tsx", import.meta.url), "utf8");
+
+  assert.match(messages, /useState\(false\)/);
+  assert.match(messages, /<EmojiPicker open=\{emojiOpen\}/);
+  assert.match(messages, /type="button"/);
+  assert.match(messages, /setEmojiOpen\(value => !value\)/);
+  assert.match(picker, /const EMOJI_CATEGORIES/);
+  assert.match(picker, /role="dialog"/);
+  assert.doesNotMatch(picker, /from ["']emoji-(mart|picker)/);
+});
+
+test("message deletion is sender-owned in both UI and API", async () => {
+  const messages = await readFile(new URL("../components/social/messages.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/social/route.ts", import.meta.url), "utf8");
+  const server = await readFile(new URL("../lib/server.ts", import.meta.url), "utf8");
+
+  assert.match(messages, /m\.sender_id === me\.id && <button className="message-delete"/);
+  assert.match(messages, /if \(message\.sender_id !== me\.id\) return/);
+  assert.match(route, /deleteMessage\(user,id\)/);
+  assert.match(server, /DELETE FROM messages WHERE id=\? AND sender_id=\?/);
+  assert.doesNotMatch(route, /DELETE FROM messages WHERE id=\?'/);
+});

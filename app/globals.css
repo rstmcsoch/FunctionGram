@@ -431,9 +431,9 @@ h1,h2,h3,p{margin:0}
 }
 
 /* avatars */
-.avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
-.avatar img{width:100%;height:100%;object-fit:cover}
-.avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
+.avatar{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:0;min-height:0;box-sizing:border-box;aspect-ratio:1 / 1;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
+.avatar img{display:block;width:100%;height:100%;min-width:100%;min-height:100%;max-width:none;max-height:none;flex:0 0 100%;object-fit:cover;object-position:center;border-radius:inherit}
+.avatar-initial{width:100%;height:100%;min-width:100%;min-height:100%;display:flex;align-items:center;justify-content:center;border-radius:inherit;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
 [data-theme=dark] .avatar-initial{background:linear-gradient(140deg,#3a2029,#33202c);color:#ff7497}
 .avatar-ring{padding:3px;background:conic-gradient(from 200deg,#ffbe49,#f74774 45%,#e931a9 75%,#b83dff);border:0}
 .avatar-ring img,.avatar-ring .avatar-initial{border:3px solid var(--background);border-radius:50%;width:100%;height:100%}
@@ -1165,8 +1165,25 @@ div[data-slot=dialog-content].post-viewer {
 .message-row.incoming p{background:var(--muted);border-bottom-left-radius:7px}
 .message-row.sending{opacity:.55}
 .message-link{text-decoration:underline;text-underline-offset:3px}
-.message-compose{display:flex;align-items:center;gap:8px;margin:12px 14px 16px;padding:4px 6px 4px 10px;border:1px solid var(--input);border-radius:26px;background:var(--background);transition:border-color var(--motion-fast)}
+.message-compose{display:flex;align-items:center;gap:8px;margin:12px 14px 16px;padding:4px 6px 4px 10px;border:1px solid var(--input);border-radius:26px;background:var(--background);transition:border-color var(--motion-fast);position:relative}
 .message-compose:focus-within{border-color:var(--ring)}
+.emoji-picker-popover{position:absolute;left:0;bottom:calc(100% + 8px);z-index:80;width:min(360px,calc(100vw - 24px));max-height:min(380px,52dvh);padding:10px;border:1px solid var(--border);border-radius:18px;background:var(--popover);color:var(--popover-foreground);box-shadow:var(--shadow-3);display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.emoji-picker-top{display:flex;gap:8px}
+.emoji-picker-search{width:100%;height:38px;padding:0 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground);font-size:14px}
+.emoji-picker-search::placeholder{color:var(--muted-foreground)}
+.emoji-picker-tabs{display:flex;align-items:center;gap:2px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.emoji-picker-tabs::-webkit-scrollbar{display:none}
+.emoji-picker-tab{flex:0 0 38px;height:36px;border:0;border-radius:10px;background:none;font-size:19px;cursor:pointer}
+.emoji-picker-tab:hover,.emoji-picker-tab.active{background:var(--muted)}
+.emoji-picker-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px;overflow:auto;min-height:0;padding:2px;overscroll-behavior:contain}
+.emoji-picker-item{display:flex;align-items:center;justify-content:center;min-width:0;aspect-ratio:1;border:0;border-radius:10px;background:none;font-size:25px;line-height:1;cursor:pointer}
+.emoji-picker-item:hover{background:var(--muted)}
+.emoji-picker-empty{margin:12px 4px;color:var(--muted-foreground);font-size:13px;text-align:center}
+@media(max-width:600px){
+  .emoji-picker-popover{left:-2px;width:min(360px,calc(100vw - 18px));max-height:min(360px,48dvh);padding:8px}
+  .emoji-picker-grid{grid-template-columns:repeat(7,minmax(0,1fr))}
+  .emoji-picker-item{font-size:24px}
+}
 .message-compose input{flex:1;min-width:0;border:0;background:none;font-size:14.5px;height:44px;color:var(--foreground)}
 .message-compose input::placeholder{color:var(--subtle)}
 .message-send{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;color:var(--primary)}

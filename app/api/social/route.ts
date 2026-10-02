@@ -11,7 +11,7 @@ import { visibleComment, visiblePost } from '@/lib/content-visibility';
 import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
-import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch,deleteMessage } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
 export const maxDuration=60;
 export const dynamic='force-dynamic';
@@ -236,11 +236,9 @@ export async function POST(request:Request){
     const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
   }
   if(action==='delete_message'){
-    const message=await database.prepare('SELECT sender_id,recipient_id FROM messages WHERE id=?').bind(id).first<{sender_id:string;recipient_id:string}>();
-    // A 404 for strangers never confirms that a conversation exists.
-    if(!message||message.sender_id!==user&&message.recipient_id!==user)throw new AppError('Message not found.',404);
-    const result=await database.prepare('DELETE FROM messages WHERE id=?').bind(id).run();
-    if(!result.meta.changes)throw new AppError('Message not found.',404);
+    // Destructive deletion is sender-owned: the recipient cannot delete the
+    // sender's message or use this endpoint to mutate another user's message.
+    if(!await deleteMessage(user,id))throw new AppError('Message not found.',404);
     return json({ok:true});
   }
   if(action==='read_messages'){await database.prepare('UPDATE messages SET read_at=? WHERE recipient_id=? AND sender_id=? AND read_at IS NULL').bind(now,user,id).run();return json({ok:true});}

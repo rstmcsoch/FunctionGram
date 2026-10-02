@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Send, Search, SquarePen, ArrowLeft, Bookmark, Smile, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, Empty, IconButton, Busy, request, timeAgo, count } from "./common";
+import { EmojiPicker } from "./emoji-picker";
 import type { Person, Message } from "@/lib/types";
 
 type OutgoingMessage = Message & { pending?: boolean };
@@ -16,6 +17,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const [recipient, setRecipient] = useState(initialRecipient || me.id);
   const [query, setQuery] = useState("");
   const [body, setBody] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [messages, setMessages] = useState<OutgoingMessage[]>([]);
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -95,6 +97,8 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   };
 
   const removeMessage = async (message: Message) => {
+    // UI defense-in-depth; the API independently enforces sender ownership.
+    if (message.sender_id !== me.id) return;
     setMessages(current => current.filter(item => item.id !== message.id));
     setInbox(current => current.filter(item => item.id !== message.id));
     try { await request("/api/social", { action: "delete_message", id: message.id }, t); }
@@ -102,6 +106,12 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
       setMessages(current => [message, ...current.filter(item => item.id !== message.id)]);
       toast.error((e as Error).message);
     }
+  };
+
+  const insertEmoji = (emoji: string) => {
+    setBody(current => current + emoji);
+    setEmojiOpen(false);
+    requestAnimationFrame(() => input.current?.focus());
   };
 
   const send = async () => {
@@ -210,7 +220,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
                   /^https?:\/\//.test(text) ? <a key={index} href={text} target="_blank" rel="noreferrer" className="message-link">{text}</a> : text)}</p>
                 <span className="message-row-foot">
                   <time title={new Date(m.created_at).toLocaleString()}>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                  {!m.pending && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
+                  {!m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
                 </span>
               </div>
             ))}
@@ -223,7 +233,18 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           <div ref={bottom} />
         </div>
         <form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
-          <IconButton label={t("messages.add_a_smile")} onClick={() => { setBody(value => value + " 😊"); input.current?.focus(); }}><Smile size={22} /></IconButton>
+          <EmojiPicker open={emojiOpen} onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Emoji"
+            aria-expanded={emojiOpen}
+            aria-controls="functiongram-emoji-picker"
+            title="Emoji"
+            onClick={() => setEmojiOpen(value => !value)}
+          >
+            <Smile size={22} />
+          </button>
           <input ref={input} aria-label={t("messages.write_a_message")} placeholder={t("messages.message")} value={body} maxLength={2000} onChange={e => setBody(e.target.value)} />
           <button aria-label={t("messages.send_message")} className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
         </form>
