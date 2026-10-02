@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import crypto, { randomBytes } from 'node:crypto';
 
 // Complete messaging system integration tests.
 // Tests replies, reactions, editing, forwarding, pinning, saving,
@@ -24,6 +24,9 @@ import { getTursoDb } from '../lib/turso';
 import { ensureSchema, getPool } from '../lib/postgres';
 // db imported conditionally if needed
 import { GET, POST } from '../app/api/social/route';
+import { POST as attachmentPOST } from '../app/api/message-attachment/route';
+import { pdfBytes, realImageBytes, wavBytes } from './support/harness';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const origin = 'http://localhost:3000';
 const host = new URL(origin).host;
@@ -86,7 +89,6 @@ before(async () => {
 
 after(() => { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ } });
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 async function api(user: Account | null, body?: Record<string, unknown> | null, query = '') {
   const response = body
     ? await POST(new Request(origin + '/api/social' + query, {
@@ -98,7 +100,6 @@ async function api(user: Account | null, body?: Record<string, unknown> | null, 
   const data = (await response.json().catch(() => null)) as any;
   return { status: response.status, data };
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const pool = await getPool();
 
@@ -112,6 +113,35 @@ async function send(from: Account, to: Account | string, body: string, extra: Re
 async function row(sql: string, values: unknown[] = []) {
   const { rows } = await pool.query(sql, values);
   return rows[0] as Record<string, unknown> | undefined;
+}
+
+/** Upload real bytes through the attachment route and return the asset key. */
+async function upload(user: Account, file: Uint8Array, mime: string, filename: string, category: string) {
+  const form = new FormData();
+  form.set('key', crypto.randomUUID());
+  form.set('file', new Blob([file as unknown as BlobPart], { type: mime }), filename);
+  form.set('category', category);
+  const response = await attachmentPOST(new Request(origin + '/api/message-attachment', {
+    method: 'POST',
+    headers: { host, origin, cookie: user.cookie },
+    body: form,
+  }));
+  const data = (await response.json().catch(() => null)) as any;
+  assert.equal(response.status, 200, JSON.stringify(data));
+  return data;
+}
+
+/** Send one real attachment and return the message id. */
+async function sendMedia(from: Account, to: Account, type: 'image' | 'voice' | 'file', extra: Record<string, unknown> = {}) {
+  const fixture = type === 'image'
+    ? { bytes: realImageBytes(), mime: 'image/jpeg', name: 'photo.jpg' }
+    : type === 'voice'
+      ? { bytes: wavBytes(2), mime: 'audio/wav', name: 'note.wav' }
+      : { bytes: pdfBytes('quarterly report'), mime: 'application/pdf', name: 'report.pdf' };
+  const asset = await upload(from, fixture.bytes, fixture.mime, fixture.name, type);
+  const result = await api(from, { action: 'message', id: to.id, message_type: type, media_key: asset.key, ...extra });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  return { id: result.data.id as string, data: result.data, asset };
 }
 
 // ---- Reply Tests ----
@@ -366,41 +396,99 @@ test('migration 4 is idempotent (re-running is a no-op)', async () => {
 
 // ---- Message Types ----
 
-test('messages support different types', async () => {
-  const voice = await send(alice, bob, '[Voice message]', { message_type: 'voice' });
-  const stored = await row('SELECT message_type FROM messages WHERE id=?', [voice]);
-  assert.equal(stored!.message_type, 'voice');
+test('messages support different types, and a media type carries real media', async () => {
+  // A voice message is audio and a file message is a document. The previous
+  // implementation accepted a text body and stored the type, so the thread
+  // showed the literal string "[Voice message]" with nothing to play; a media
+  // type now has to reference a verified upload the sender owns.
+  const voice = await sendMedia(alice, bob, 'voice');
+  const voiceRow = await row('SELECT message_type,media_key,media_mime,media_duration,media_filename FROM messages WHERE id=?', [voice.id]);
+  assert.equal(voiceRow!.message_type, 'voice');
+  assert.equal(voiceRow!.media_mime, 'audio/wav');
+  assert.ok(voiceRow!.media_key, 'a real asset backs the message');
+  assert.equal(voiceRow!.media_filename, 'note.wav');
+  assert.ok(Math.abs(Number(voiceRow!.media_duration) - 2) < 0.2, 'duration measured from the audio bytes');
 
-  const file = await send(alice, bob, 'report.pdf', { message_type: 'file' });
-  const fileStored = await row('SELECT message_type FROM messages WHERE id=?', [file]);
-  assert.equal(fileStored!.message_type, 'file');
+  const file = await sendMedia(alice, bob, 'file');
+  const fileRow = await row('SELECT message_type,media_mime,media_filename FROM messages WHERE id=?', [file.id]);
+  assert.equal(fileRow!.message_type, 'file');
+  assert.equal(fileRow!.media_mime, 'application/pdf');
+  assert.equal(fileRow!.media_filename, 'report.pdf');
+
+  const image = await sendMedia(alice, bob, 'image');
+  assert.equal((await row('SELECT media_width,media_height FROM messages WHERE id=?', [image.id]))!.media_width, 256);
+
+  // Text placeholders are no longer accepted as media: there is nothing to play
+  // or download, so the request is refused instead of storing a lie.
+  const missing = await api(alice, { action: 'message', id: bob.id, body: '[Voice message]', message_type: 'voice' });
+  assert.equal(missing.status, 400, JSON.stringify(missing.data));
+  assert.match(String(missing.data.error), /required fields/i, 'the attachment itself is the required field');
+  const notAnAsset = await api(alice, { action: 'message', id: bob.id, body: 'report.pdf', message_type: 'file', media_key: 'not-an-asset' });
+  assert.equal(notAnAsset.status, 404, JSON.stringify(notAnAsset.data));
+  assert.equal((await api(alice, { action: 'message', id: bob.id, message_type: 'image', media_key: crypto.randomUUID() })).status, 404, 'a key that was never uploaded is not attachable');
 });
 
 // ---- View Once ----
 
 test('view once message can be consumed once by recipient', async () => {
-  const msgId = await send(alice, bob, 'view once secret', { view_once: true });
-  const consume1 = await api(bob, { action: 'consume_view_once', id: msgId });
+  // View once is a property of media: it exists so a photo or a video can be
+  // opened a single time. On a text message there is nothing to consume, so the
+  // flag is refused rather than stored as a state the UI would have to invent
+  // meaning for.
+  const text = await api(alice, { action: 'message', id: bob.id, body: 'view once secret', view_once: true });
+  assert.equal(text.status, 422, JSON.stringify(text.data));
+  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'x', message_type: 'file', view_once: true })).status, 422);
+
+  const media = await sendMedia(alice, bob, 'image', { view_once: true });
+  const stored = await row('SELECT view_once,view_once_consumed FROM messages WHERE id=?', [media.id]);
+  assert.equal(Number(stored!.view_once), 1);
+  assert.equal(Number(stored!.view_once_consumed), 0);
+
+  const consume1 = await api(bob, { action: 'consume_view_once', id: media.id });
   assert.equal(consume1.status, 200);
   assert.ok(consume1.data.consumed_at);
 
-  // Second consumption fails
-  const consume2 = await api(bob, { action: 'consume_view_once', id: msgId });
+  // Second consumption fails.
+  const consume2 = await api(bob, { action: 'consume_view_once', id: media.id });
   assert.equal(consume2.status, 410);
+  // A non-participant is not told the message exists.
+  assert.equal((await api(carol, { action: 'consume_view_once', id: media.id })).status, 404);
 });
 
 test('sender cannot consume their own view-once message', async () => {
-  const msgId = await send(alice, bob, 'view once from alice', { view_once: true });
-  const consume = await api(alice, { action: 'consume_view_once', id: msgId });
+  const media = await sendMedia(alice, bob, 'image', { view_once: true });
+  const consume = await api(alice, { action: 'consume_view_once', id: media.id });
   assert.equal(consume.status, 403, 'only the recipient can view');
+  assert.equal(Number((await row('SELECT view_once_consumed FROM messages WHERE id=?', [media.id]))!.view_once_consumed), 0, 'the refused attempt consumed nothing');
 });
 
 // ---- Delivered state ----
 
-test('message has delivered_at for non-self messages', async () => {
+test('delivered_at records real retrieval, not a successful send', async () => {
   const msgId = await send(alice, bob, 'check delivery');
-  const stored = await row('SELECT delivered_at FROM messages WHERE id=?', [msgId]);
-  assert.ok(stored!.delivered_at, 'delivered_at is set for a sent message');
+  // A 200 from the send means "sent". Claiming delivery at that moment was the
+  // bug: the recipient's client had not fetched anything yet.
+  assert.equal((await row('SELECT delivered_at FROM messages WHERE id=?', [msgId]))!.delivered_at, null, 'sent, not yet delivered');
+  assert.equal((await row('SELECT read_at FROM messages WHERE id=?', [msgId]))!.read_at, null, 'and not read either');
+
+  // The recipient's client retrieves the thread: that is delivery.
+  const fetched = await api(bob, null, '?messages=' + encodeURIComponent(alice.id));
+  assert.equal(fetched.status, 200);
+  const delivered = await row('SELECT delivered_at,read_at FROM messages WHERE id=?', [msgId]);
+  assert.ok(Number(delivered!.delivered_at) > 0, 'delivered once the recipient retrieved it');
+  assert.equal(delivered!.read_at, null, 'delivery is not a read receipt');
+  assert.ok(fetched.data.items.find((item: any) => item.id === msgId).delivered_at, 'and the payload agrees with the row');
+
+  // Opening it marks it read, and the sender can see that.
+  assert.equal((await api(bob, { action: 'read_messages', id: alice.id })).status, 200);
+  const read = await row('SELECT read_at,delivered_at FROM messages WHERE id=?', [msgId]);
+  assert.ok(Number(read!.read_at) > 0);
+  assert.ok(Number(read!.delivered_at) > 0, 'a read message was necessarily delivered');
+
+  // Retrieving again is a no-op rather than a moving timestamp.
+  const firstDelivery = Number((await row('SELECT delivered_at FROM messages WHERE id=?', [msgId]))!.delivered_at);
+  await api(bob, null, '?messages=' + encodeURIComponent(alice.id));
+  assert.equal(Number((await row('SELECT delivered_at FROM messages WHERE id=?', [msgId]))!.delivered_at), firstDelivery, 'delivery is recorded once');
 });
 
 test('self-message has no delivered_at', async () => {

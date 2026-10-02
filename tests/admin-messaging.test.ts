@@ -36,6 +36,7 @@ import {
 } from '../lib/admin/communications';
 import { AdminError } from '../lib/admin/validation';
 import { POST, GET } from '../app/api/social/route';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const origin = 'http://localhost:3000';
 const host = new URL(origin).host;
@@ -116,7 +117,6 @@ before(async () => {
 
 after(() => { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ } });
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 async function api(user: Account | null, body?: Record<string, unknown> | null, query = '') {
   const response = body
     ? await POST(new Request(origin + '/api/social' + query, {
@@ -128,7 +128,6 @@ async function api(user: Account | null, body?: Record<string, unknown> | null, 
   const data = (await response.json().catch(() => null)) as any;
   return { status: response.status, data };
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Every test starts from the shipped state, so no test can pass or fail
 // because of what the previous one left behind.
@@ -381,13 +380,30 @@ test('each messaging feature switch is enforced by the API, not only by the UI',
   assert.equal((await api(alice, { action: 'delete_message', id: seedId })).status, 200, 'the same request succeeds once the switch is back on');
 
   // Read receipts.
+  //
+  // The switch answers one question only: is a *sender* shown "Seen"? Recording
+  // read state is a different question and is never optional, because unread
+  // counts, the Unread filter and "mark as unread" all read `read_at`. Refusing
+  // the write while receipts were hidden used to break all three, so both halves
+  // of the decoupled behaviour are asserted here.
+  const receiptSeed = await send(bob, alice, 'receipt probe');
   features.flags.readReceipts.enabled = false;
   await writeFeatures(features);
   const read = await api(alice, { action: 'read_messages', id: bob.id });
-  assert.equal(read.status, 403, 'marking a thread read is refused');
+  assert.equal(read.status, 200, 'read state is recorded even while receipts are hidden');
+  const stored = await pool.query('SELECT read_at,delivered_at FROM messages WHERE id=?', [receiptSeed]);
+  assert.ok(Number(stored.rows[0].read_at) > 0, 'the server knows the thread was read');
+  assert.ok(Number(stored.rows[0].delivered_at) > 0, 'and that it was delivered');
+  const unreadList = await api(alice, null, '?conversations=unread');
+  assert.equal(unreadList.status, 200);
+  assert.equal(unreadList.data.items.some((item: any) => item.peer_id === bob.id), false, 'the Unread filter still works with receipts off');
+  const hidden = await api(bob, null, '?messages=' + encodeURIComponent(alice.id));
+  assert.equal(hidden.data.items.find((item: any) => item.id === receiptSeed).read_at, null, 'a hidden receipt is never sent to the other side');
   features.flags.readReceipts.enabled = true;
   await writeFeatures(features);
   assert.equal((await api(alice, { action: 'read_messages', id: bob.id })).status, 200);
+  const shown = await api(bob, null, '?messages=' + encodeURIComponent(alice.id));
+  assert.ok(Number(shown.data.items.find((item: any) => item.id === receiptSeed).read_at) > 0, 'the same receipt is visible once the switch is back on');
 
   // Conversation search.
   features.flags.messageSearch.enabled = false;
@@ -433,7 +449,12 @@ test('the messaging surface of the client mirrors the switches instead of hiding
   const features = readFileSync(path.join(process.cwd(), 'lib/features.ts'), 'utf8');
   assert.match(features, /delete_message:'messageDeletion'/, 'deletion maps to its own switch');
   assert.match(features, /messages_search:'messageSearch'/, 'search maps to its own switch');
-  assert.match(features, /read_messages:'readReceipts'/, 'read receipts map to their own switch');
+  // Recording read state is gated by messaging itself, not by the receipt
+  // switch: hiding receipts must not stop the server knowing a thread was read
+  // (see the enforcement test above). What the receipt switch gates is the
+  // *display* of `read_at` to the other participant.
+  assert.match(features, /read_messages:'messages'/, 'recording read state follows messaging, not the receipt display switch');
+  assert.doesNotMatch(features, /read_messages:'readReceipts'/, 'the old coupling is gone');
 });
 
 test('the admin write path requires the messaging permission and the API rejects a forged client flag', async () => {
