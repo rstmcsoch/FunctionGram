@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -47,11 +47,6 @@ export interface PoolLike extends QueryExecutor {
 type Migration = {
   version: number;
   statements: string[];
-  /** When true, individual statement failures (e.g. duplicate columns) are
-   *  tolerated — the migration is still marked as applied. This is required
-   *  for ALTER TABLE ADD COLUMN statements, which error when the column
-   *  already exists on an existing database. */
-  allowPartial?: boolean;
 };
 
 export const DATABASE_MIGRATIONS: Migration[] = [
@@ -75,14 +70,94 @@ export const DATABASE_MIGRATIONS: Migration[] = [
   {
     // Complete messaging system extension: new columns on messages table
     // (reply_to_id, edited_at, message_type, media_*, forward_*, view_once,
-    // delivered_at) plus new tables for reactions, pins, saves, conversation
-    // state, typing, presence, view-once and message reports.
-    // ALTER TABLE ADD COLUMN errors (duplicate column) are caught and ignored.
+    // delivered_at). `ALTER TABLE ... ADD COLUMN` is applied per column after
+    // checking which columns actually exist, so a replay is a no-op and an
+    // unrelated SQL failure still surfaces.
     version: 4,
     statements: tursoMessagingV4Statements,
-    allowPartial: true,
+  },
+  {
+    // Messaging completeness upgrade. Versions 5–12 are reserved for the
+    // administrative-schema phases defined in `lib/postgres-schema.ts`, so
+    // this does not occupy 5 and cannot collide with them later.
+    //
+    // It replays the messaging tables and migration 4's columns (an existing
+    // database recorded migration 1 before those tables were listed, and
+    // migration 4 used to be marked applied even when a statement failed) and
+    // then adds what the finished features need: conversation_key, expires_at,
+    // media_key/media_filename, sticker_id, shared_profile_id, per-account
+    // read_receipts and cleared_before.
+    version: 13,
+    statements: tursoMessagingV13Statements,
   },
 ];
+
+/** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not
+ *  idempotent on SQLite/libSQL, and therefore the only DDL that needs an
+ *  explicit existence check before it runs. */
+const ADD_COLUMN = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?"?([A-Za-z_][\w$]*)"?\s+ADD\s+COLUMN\s+"?([A-Za-z_][\w$]*)"?/i;
+
+/** True when a migration contains at least one additive column, which is the
+ *  only case that cannot be replayed blindly. */
+function hasAdditiveColumns(statements: string[]): boolean {
+  return statements.some(statement => ADD_COLUMN.test(statement));
+}
+
+/** Column names of one table, or `null` when the table itself is missing. */
+async function tableColumns(
+  executor: QueryExecutor,
+  table: string,
+): Promise<Set<string> | null> {
+  if (executor.storageDialect === 'postgres') {
+    const { rows } = await executor.query(
+      'SELECT column_name FROM information_schema.columns WHERE table_name = $1',
+      [table],
+    );
+    return rows.length ? new Set(rows.map(row => String(row.column_name))) : null;
+  }
+  // PRAGMA reports zero rows (rather than an error) for an unknown table, so
+  // the empty result is what distinguishes "no columns" from "no table".
+  const { rows } = await executor.query(`PRAGMA table_info("${table}")`);
+  return rows.length ? new Set(rows.map(row => String(row.name))) : null;
+}
+
+/**
+ * Apply one migration's statements.
+ *
+ * Additive columns are checked against the live table instead of being run
+ * blind: a column that already exists is skipped, a column that is missing is
+ * added, and a table that does not exist at all raises rather than being
+ * quietly tolerated. Every other statement runs as written and any error
+ * propagates, so a migration is only ever recorded once its schema actually
+ * exists. The previous behaviour swallowed any statement error mentioning
+ * "duplicate column" and then marked the version applied, which could leave a
+ * database permanently half-migrated with no way to notice.
+ */
+async function applyMigrationStatements(
+  executor: QueryExecutor,
+  statements: string[],
+): Promise<void> {
+  // One PRAGMA per table per migration, not one per statement.
+  const known = new Map<string, Set<string> | null>();
+  for (const statement of statements) {
+    const addColumn = ADD_COLUMN.exec(statement);
+    if (!addColumn) {
+      await executor.query(statement);
+      continue;
+    }
+    const [, table, column] = addColumn;
+    if (!known.has(table)) known.set(table, await tableColumns(executor, table));
+    const columns = known.get(table);
+    if (!columns) {
+      throw new Error(
+        `Migration cannot add ${table}.${column}: table "${table}" does not exist.`,
+      );
+    }
+    if (columns.has(column)) continue;
+    await executor.query(statement);
+    columns.add(column);
+  }
+}
 
 let ready: Promise<void> | undefined;
 
@@ -429,18 +504,12 @@ export async function ensureSchema() {
           );
 
           if (!applied.rowCount) {
-            if (migration.allowPartial) {
-              // ALTER TABLE ADD COLUMN statements fail when the column already
-              // exists. Run each statement individually and swallow the
-              // duplicate-column error so the migration still completes.
-              for (const stmt of migration.statements) {
-                try {
-                  await database.query(stmt);
-                } catch (err) {
-                  const msg = String(err instanceof Error ? err.message : err);
-                  if (!msg.includes('duplicate column')) throw err;
-                }
-              }
+            if (hasAdditiveColumns(migration.statements)) {
+              // Additive columns need a per-column existence check, and a batch
+              // cannot return PRAGMA results between its own statements. This
+              // path therefore runs statement by statement — once per
+              // deployment, because the version is recorded immediately after.
+              await applyMigrationStatements(database, migration.statements);
               await database.query(
                 'INSERT INTO functiongram_migrations(version) VALUES(?)',
                 [migration.version],
@@ -481,20 +550,7 @@ export async function ensureSchema() {
           );
 
           if (!applied.rowCount) {
-            if (migration.allowPartial) {
-              for (const statement of migration.statements) {
-                try {
-                  await client.query(statement);
-                } catch (err) {
-                  const msg = String(err instanceof Error ? err.message : err);
-                  if (!msg.includes('duplicate column')) throw err;
-                }
-              }
-            } else {
-              for (const statement of migration.statements) {
-                await client.query(statement);
-              }
-            }
+            await applyMigrationStatements(client, migration.statements);
 
             await client.query(
               'INSERT INTO functiongram_migrations(version) VALUES(?)',

@@ -59,13 +59,16 @@ function cacheMode(url: string, hasBody: boolean): RequestCache {
   if (hasBody) return "no-store";
   return PUBLIC_CACHEABLE.some(prefix => url.startsWith(prefix)) ? "default" : "no-store";
 }
-export async function request<T = unknown>(url: string, body?: unknown, t: Translator = defaultTranslator): Promise<T> {
+export async function request<T = unknown>(url: string, body?: unknown, t: Translator = defaultTranslator, signal?: AbortSignal): Promise<T> {
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(url, {
     method: body ? "POST" : "GET",
     headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
     body: body ? (isForm ? (body as FormData) : JSON.stringify(body)) : undefined,
     cache: cacheMode(url, Boolean(body)),
+    // Callers that poll pass a controller so a response for a conversation the
+    // reader has already left cannot land in the new one.
+    signal,
   });
   let data;
   try { data = await response.json(); } catch { throw new Error(t("auth_form.unable_to_connect_please_try_again")); }

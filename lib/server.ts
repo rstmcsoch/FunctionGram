@@ -4,14 +4,17 @@ import { readMessagingPolicy } from './messaging-policy';
 import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
 import {displayCounterColumns} from './counters';
 import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
-import { database, getPool } from './postgres';
+import { getPool } from './postgres';
+import { db } from './server-db';
+import { acknowledgeDelivery, clearedBefore, conversationPredicate, readReceiptsVisibleTo, unreadTotal } from './messaging';
 import { ensureDemoSeed, publishReady } from './publish';
 import { ensureProfileRow } from './profiles';
 import { getAppUser } from '@/lib/auth';
 import type { MediaOption, Person, Post, SavedCollection, StoryViewer, SocialData } from './types';
 
 export class AppError extends Error { constructor(message:string,public status=400){super(message);} }
-export function db(){return database();}
+// Re-exported so existing callers keep importing `db` from '@/lib/server'.
+export { db };
 export function fail(error:unknown){if(error instanceof AppError||error instanceof FeatureError||error instanceof AdminError)return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'private, no-store'}});console.error('RSTMC request failed',error);return Response.json({error:'Something went wrong. Your changes were not saved. Please try again.'},{status:500,headers:{'Cache-Control':'private, no-store'}});}
 // Personalised payloads stay private and uncached by default. Genuinely
 // public configuration (appearance, labels, media policy) opts into a shared
@@ -142,7 +145,7 @@ function parseIdList(value:unknown):string[]{
   if(typeof value!=='string'||!value)return [];
   try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map(String):[];}catch{return [];}
 }
-export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username ILIKE ? ESCAPE '\\' OR p.name ILIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
+export async function searchPeople(viewer:string|null,query:string):Promise<Person[]>{const r=await db().prepare(`SELECT ${personColumns} FROM profiles p WHERE p.deleted_at IS NULL AND (p.username LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\') ORDER BY p.is_demo ASC,p.created_at DESC LIMIT 30`).bind(viewer||'',viewer||'',searchPattern(query.replace(/^@/,'')),searchPattern(query)).all<Person>();return r.results;}
 export async function relatedPeople(viewer:string|null,id:string,kind:'followers'|'following'):Promise<Person[]>{const join=kind==='followers'?'f.follower_id=p.id AND f.followee_id=?':'f.followee_id=p.id AND f.follower_id=?';const r=await db().prepare(`SELECT ${personColumns} FROM profiles p JOIN follows f ON ${join} WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 300`).bind(viewer||'',viewer||'',id).all<Person>();return r.results;}
 
 type FeedFilter={author?:string;post?:string;saved?:boolean;tagged?:string;search?:string;category?:string;discovery?:boolean;reels?:boolean;following?:boolean;hashtag?:string};
@@ -161,7 +164,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   if(filter.post){conditions.push('p.id=?');filterArgs.push(filter.post);}
   if(filter.saved){conditions.push("EXISTS(SELECT 1 FROM reactions WHERE post_id=p.id AND user_id=? AND kind='save')");filterArgs.push(v);}
   if(filter.tagged){conditions.push("EXISTS(SELECT 1 FROM json_each(COALESCE(p.tagged_users,'[]')) WHERE value=?)");filterArgs.push(filter.tagged);}
-  if(filter.search){const term=searchPattern(filter.search);conditions.push("(p.caption ILIKE ? ESCAPE '\\' OR p.location ILIKE ? ESCAPE '\\' OR a.username ILIKE ? ESCAPE '\\')");filterArgs.push(term,term,term);}
+  if(filter.search){const term=searchPattern(filter.search);conditions.push("(p.caption LIKE ? ESCAPE '\\' OR p.location LIKE ? ESCAPE '\\' OR a.username LIKE ? ESCAPE '\\')");filterArgs.push(term,term,term);}
   if(filter.category&&filter.category!=='For you'){conditions.push('p.category=?');filterArgs.push(filter.category);}
   if(filter.discovery){conditions.push("p.kind!='story'");}
   if(filter.reels){conditions.push("p.kind='reel'");}
@@ -239,7 +242,7 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
     people(viewer,12),
     feed(viewer,20),
     viewer?notifications(viewer,25):Promise.resolve({results:[]}),
-    viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+    viewer&&policy.flags.messages?unreadTotal(viewer).then(count=>({count})):Promise.resolve({count:0}),
   ]);
   const messaging=await readMessagingPolicy();
   return {features:policy.flags,messaging,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
@@ -254,7 +257,7 @@ export async function activity(viewer:string){
   if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags,messaging:await readMessagingPolicy()};
   const [notifs,unread]=await Promise.all([
     policy.flags.notifications?notifications(viewer,10):Promise.resolve({results:[]}),
-    policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+    policy.flags.messages?unreadTotal(viewer).then(count=>({count})):Promise.resolve({count:0}),
   ]);
   return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags,messaging:await readMessagingPolicy()};
 }
@@ -264,57 +267,161 @@ export async function activity(viewer:string){
 type MessageRow=Record<string,unknown>;
 
 /**
+ * Drop the storage key from a message before it leaves the server.
+ *
+ * A message attachment is served through `/api/message-media/<id>`, which
+ * authorizes the two participants. The public, content-addressed
+ * `/api/media/<key>` route exists for post and avatar media and does not
+ * authorize anybody, so a key that reaches a browser becomes a permanent
+ * capability URL for private media. Participants do not need it: the message
+ * already carries `media_url`.
+ */
+function stripAssetKey(message:MessageRow):MessageRow{
+  if(!('media_key' in message))return message;
+  const rest={...message};
+  delete rest.media_key;
+  return rest;
+}
+
+/**
  * Conversation history (and older pages) for one thread.
  *
- * The previous API path issued two requests for the message view plus a third
- * write to mark the thread read; this is the single rows query it needs, with
- * the "is the shared post still readable" check evaluated only for messages
- * that reference a post.
+ * One rows query plus three bounded batch lookups (reactions, reply targets,
+ * saved flags). The reply preview used to be fetched per message inside a loop —
+ * an N+1 that grew with the page size — and is now a single `IN` query.
+ *
+ * Three rules are applied here rather than in the browser, because each one is a
+ * correctness or privacy property rather than a presentation detail:
+ *
+ *  - expired (disappearing) and cleared messages are filtered out, so the
+ *    thread, the list, search and the content views can never disagree;
+ *  - retrieval by the recipient is what marks a message *delivered*; a
+ *    successful send POST only ever means *sent*;
+ *  - `read_at` is withheld from the sender when the recipient hides receipts.
+ *    The row keeps its real read state — unread counts and the Unread filter
+ *    depend on it — only the outgoing copy in this response is redacted.
  */
 export async function conversation(viewer:string,other:string,limit=50,cursor:[number,string]|null=null){
   const policy=await featurePolicy(viewer);
   const flags=policy.flags;
   const boundedLimit=Math.max(1,Math.min(100,limit||50));
+  const now=Date.now();
+  const cleared=await clearedBefore(viewer,other);
   // Placeholder order matches the text: the 4 visibility values from
-  // `readablePost()` inside the CASE, then the two participants (each used
-  // twice), then the optional cursor and the limit.
+  // `readablePost()` inside the CASE, then expiry, then the clear-chat marker
+  // (tested and compared), then the two participants (each used twice), then the
+  // optional cursor and the limit.
   // The visibility CASE is selected under its own name: `SELECT m.*` already
   // yields a `post_id` column, and libSQL keeps the FIRST of two same-named
   // result columns, so reusing the name would silently return the raw value.
   const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
-  const args:unknown[]=[viewer,viewer,viewer,viewer,viewer,other,other,viewer];
-  let sql=`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=? AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=?))`;
+  const args:unknown[]=[viewer,viewer,viewer,viewer,now,cleared,cleared,viewer,other,other,viewer];
+  let sql=`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND (? IS NULL OR m.created_at>=?) AND ${conversationPredicate()}`;
   if(cursor){sql+=' AND (m.created_at<? OR (m.created_at=? AND m.id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
   sql+=' ORDER BY m.created_at DESC,m.id DESC LIMIT ?';args.push(boundedLimit+1);
   const rows=(await db().prepare(sql).bind(...args).all()).results as MessageRow[];
-  const items=rows.slice(0,boundedLimit).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...message,post_id:visible??null};});
+  const items=rows.slice(0,boundedLimit).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...stripAssetKey(message),post_id:visible??null};});
   const next_cursor=rows.length>boundedLimit?`${items[items.length-1].created_at},${items[items.length-1].id}`:null;
 
-  // Batch-load reactions for all visible messages to avoid N+1 queries.
+  // Delivery is defined by retrieval, so this is where it happens. Only the
+  // first fetch after a message arrives writes anything: once every row carries
+  // a timestamp the statement matches nothing.
+  if(items.some(item=>item.recipient_id===viewer&&!item.delivered_at)){
+    const delivered=await acknowledgeDelivery(viewer,other,now);
+    if(delivered)for(const item of items)if(item.recipient_id===viewer&&!item.delivered_at)item.delivered_at=now;
+  }
+
+  // Whether the *other* participant lets this viewer see their read receipts.
+  // Computed once per page, never per message.
+  const receipts=viewer===other?true:(flags.readReceipts&&await readReceiptsVisibleTo(other,viewer));
+
   if(items.length){
-    const messageIds=items.map(m=>String((m as Record<string,unknown>).id));
+    const messageIds=items.map(item=>String(item.id));
     const placeholders=messageIds.map(()=>'?').join(',');
-    const reactionRows=(await db().prepare(
-      `SELECT mr.*,p.username FROM message_reactions mr JOIN profiles p ON p.id=mr.user_id WHERE mr.message_id IN (${placeholders})`
-    ).bind(...messageIds).all()).results as Record<string,unknown>[];
-    const reactionMap=new Map<string,Record<string,unknown>[]>();
-    for(const r of reactionRows){
-      const mid=String(r.message_id);
-      if(!reactionMap.has(mid))reactionMap.set(mid,[]);
-      reactionMap.get(mid)!.push(r);
+    const [reactionRows,savedRows,replyRows]=await Promise.all([
+      db().prepare(`SELECT mr.*,p.username FROM message_reactions mr JOIN profiles p ON p.id=mr.user_id WHERE mr.message_id IN (${placeholders})`).bind(...messageIds).all() as Promise<{results:MessageRow[]}>,
+      flags.messageSaving
+        ? db().prepare(`SELECT message_id FROM saved_messages WHERE user_id=? AND message_id IN (${placeholders})`).bind(viewer,...messageIds).all() as Promise<{results:MessageRow[]}>
+        : Promise.resolve({results:[] as MessageRow[]}),
+      replyTargets(items),
+    ]);
+    const reactionMap=new Map<string,MessageRow[]>();
+    for(const reaction of reactionRows.results){
+      const id=String(reaction.message_id);
+      const list=reactionMap.get(id);
+      if(list)list.push(reaction);else reactionMap.set(id,[reaction]);
     }
+    const savedIds=new Set(savedRows.results.map(row=>String(row.message_id)));
+    const replyMap=new Map<string,MessageRow>();
+    for(const reply of replyRows)replyMap.set(String(reply.id),reply);
+    const profiles=await sharedProfiles(items,viewer);
     for(const item of items){
-      const rec=item as Record<string,unknown>;
-      rec.reactions=reactionMap.get(String(rec.id))||[];
-      // Attach reply preview if this message is a reply.
-      if(rec.reply_to_id){
-        const replyTo=await db().prepare('SELECT m.body,m.sender_id,p.username FROM messages m JOIN profiles p ON p.id=m.sender_id WHERE m.id=?').bind(rec.reply_to_id).first<{body:string;sender_id:string;username:string}>();
-        rec.reply_preview=replyTo||null;
-      }
+      item.reactions=reactionMap.get(String(item.id))||[];
+      item.saved=flags.messageSaving&&savedIds.has(String(item.id))?1:0;
+      // A reply whose target was unsent or expired resolves to nothing, which is
+      // exactly what the UI needs in order to say "original unavailable"
+      // instead of rendering a stale preview.
+      item.reply_preview=item.reply_to_id?replyMap.get(String(item.reply_to_id))||null:null;
+      item.profile_preview=item.shared_profile_id?profiles.get(String(item.shared_profile_id))||null:null;
+      // Redact the read receipt for outgoing messages when the recipient hides
+      // them. `delivered_at` is not private and stays.
+      if(!receipts&&item.sender_id===viewer&&item.read_at)item.read_at=null;
     }
   }
 
   return {items,next_cursor};
+}
+
+type ProfilePreview={id:string;username:string;name:string;avatar:string;available:boolean};
+
+/** One batched lookup for every reply target referenced by a page. */
+async function replyTargets(items:MessageRow[]):Promise<MessageRow[]>{
+  const ids=[...new Set(items.map(item=>item.reply_to_id).filter(Boolean).map(String))];
+  if(!ids.length)return [];
+  const list=ids.map(()=>'?').join(',');
+  // An unsent target simply has no row, and an expired one is excluded by the
+  // same predicate every other read path uses, so the caller can treat a
+  // missing id as "original unavailable" without a second check.
+  const result=await db().prepare(
+    `SELECT m.id,m.body,m.sender_id,m.created_at,m.deleted_at,m.expires_at,p.username
+     FROM messages m JOIN profiles p ON p.id=m.sender_id
+     WHERE m.id IN (${list}) AND m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?)`,
+  ).bind(...ids,Date.now()).all();
+  return result.results as MessageRow[];
+}
+
+/**
+ * Resolve shared profiles for one page.
+ *
+ * Only the reference is stored on the message; the profile itself is resolved
+ * here through the normal visibility rules, so a private account the viewer does
+ * not follow, a deleted account, or a blocked one collapses to a neutral
+ * "unavailable" preview instead of leaking a username, name or photo.
+ */
+async function sharedProfiles(items:MessageRow[],viewer:string):Promise<Map<string,ProfilePreview>>{
+  const ids=[...new Set(items.map(item=>item.shared_profile_id).filter(Boolean).map(String))];
+  const map=new Map<string,ProfilePreview>();
+  if(!ids.length)return map;
+  const list=ids.map(()=>'?').join(',');
+  const rows=(await db().prepare(
+    `SELECT p.id,p.username,p.name,p.avatar,p.is_private,p.deleted_at,
+            EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=? AND f.followee_id=p.id) AS follows,
+            EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=p.id AND b.blocked_id=?) AS blocks
+     FROM profiles p WHERE p.id IN (${list})`,
+  ).bind(viewer,viewer,...ids).all()).results as MessageRow[];
+  for(const row of rows){
+    // A private account the viewer does not follow, a deleted account, and an
+    // account that blocked the viewer all collapse to the same neutral preview:
+    // no username, no name, no photo.
+    const available=!row.deleted_at&&Number(row.blocks)===0&&(Number(row.is_private)===0||Number(row.follows)===1||String(row.id)===viewer);
+    map.set(String(row.id),available
+      ?{id:String(row.id),username:String(row.username),name:String(row.name),avatar:String(row.avatar||''),available:true}
+      :{id:String(row.id),username:'',name:'',avatar:'',available:false});
+  }
+  // An id that matches no profile row at all is also "unavailable", never a
+  // dangling reference the client would have to guess about.
+  for(const id of ids)if(!map.has(id))map.set(id,{id,username:'',name:'',avatar:'',available:false});
+  return map;
 }
 
 /** Inbox previews for the message view: one statement, newest first. */
@@ -325,8 +432,8 @@ export async function inboxPreview(viewer:string,limit=200){
   // See `conversation`: the computed visibility column must not reuse the
   // `post_id` name that `m.*` already produces.
   const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
-  const r=await db().prepare(`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,viewer,viewer,bounded).all();
-  return (r.results as MessageRow[]).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...message,post_id:visible??null};});
+  const r=await db().prepare(`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,Date.now(),viewer,viewer,bounded).all();
+  return (r.results as MessageRow[]).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...stripAssetKey(message),post_id:visible??null};});
 }
 
 /* ------------------------------- post comments ------------------------------- */
@@ -376,9 +483,23 @@ export async function savedCollections(viewer:string):Promise<SavedCollection[]>
   // is parsed here instead of being handed to the client as a string.
   return r.results.map(row=>({id:String(row.id),name:String(row.name),created_at:Number(row.created_at),post_ids:parseIdList(row.post_ids)}));
 }
+/**
+ * Search *conversation partners* by message text.
+ *
+ * This is the directory half of messaging search: it answers "who did I talk to
+ * about this", and returns people. Finding the messages themselves inside one
+ * open conversation is `searchConversation()` in `lib/messaging.ts`, which is a
+ * different query with a different result shape.
+ *
+ * `LIKE` rather than `ILIKE`: SQLite's `LIKE` is already case-insensitive for
+ * ASCII, and `ILIKE` is PostgreSQL-only syntax that the production libSQL path
+ * would have to have rewritten for it at runtime. Expired messages are excluded
+ * so a disappeared message cannot keep a partner in the results.
+ */
 export async function messageSearch(viewer:string,term:string):Promise<Person[]>{
   const pattern=searchPattern(term);
-  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND body ILIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,pattern,viewer,viewer).all<Person>();
+  const now=Date.now();
+  const r=await db().prepare(`WITH matches AS (SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END partner FROM messages WHERE (sender_id=? OR recipient_id=?) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>?) AND body LIKE ? ESCAPE '\\') SELECT p.*, (SELECT m.body FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND ((m.sender_id=p.id AND m.recipient_id=?) OR (m.sender_id=? AND m.recipient_id=p.id)) ORDER BY m.created_at DESC,m.id DESC LIMIT 1) last_message FROM matches mm JOIN profiles p ON p.id=mm.partner WHERE p.deleted_at IS NULL GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`).bind(viewer,viewer,viewer,now,pattern,viewer,viewer,now).all<Person>();
   return r.results;
 }
 

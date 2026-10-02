@@ -5,17 +5,27 @@ import {getPool,type PoolLike,localDevDatabase} from './postgres';
 import {transaction} from './admin/core';
 import {AdminError} from './admin/validation';
 import {checkUploadInput,readMediaConfig,MEDIA_LOCK} from './media-policy';
+import type {MediaConfig} from './media-config';
 import {MIB} from './media-config';
 import {processMedia,readBounded,type ProcessedMedia} from './media-processing';
 import {promises as fs} from 'node:fs';
 export const uploadKeyPattern=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HOUR=3600000,LEASE=5*60000;
-export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload:string|null){
+/**
+ * Reserve an upload claim.
+ *
+ * `validate` defaults to the post media rules (`checkUploadInput`). Message
+ * attachments pass their own validator because voice notes and documents are
+ * deliberately outside the photo/video allowlist an administrator configures
+ * for posts, while still sharing the same claim table, the same daily quota
+ * accounting and the same lease/expiry behaviour.
+ */
+export async function reserveClaim(pool:PoolLike,key:string,owner:string,payload:string|null,validate:(config:MediaConfig,size:number,type:string)=>void=checkUploadInput){
  if(!uploadKeyPattern.test(key))throw new AdminError('Invalid upload name.');
  let input:{size:number;type:string};try{input=JSON.parse(payload||'');if(!input||typeof input!=='object')throw new Error();}catch{throw new AdminError('Invalid upload.');}
  return transaction(pool,async db=>{
   // Serialize quota reservations with settings changes and media attach/quarantine.
-  const config=await readMediaConfig(db);checkUploadInput(config,input.size,input.type);
+  const config=await readMediaConfig(db);validate(config,input.size,input.type);
   const now=Date.now();
   const {rows:[existing]}=await db.query('SELECT * FROM upload_claims WHERE key=$1',[key]);
   if(existing&&(existing.owner_id!==owner||existing.expected_size!==input.size||existing.mime!==input.type||existing.completed||Number(existing.created_at)<now-HOUR))throw new AdminError('Please start a new upload.');
