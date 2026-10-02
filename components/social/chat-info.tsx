@@ -201,6 +201,19 @@ export function ChatInfo({ person, state, pins, onClose, onChange, onJump, onOpe
         )}
       </section>
 
+      {/*
+        Chat lock is deliberately absent. The spec allows it only if a secure
+        mechanism already exists in this product, and none does: there is no
+        device-level credential, no session-scoped unlock and no key storage the
+        server could verify per conversation. A PIN kept beside the messages it
+        protects would only hide a thread from someone who already owns the
+        account and the session, so instead of shipping that illusion the control
+        is not offered at all. Conversation privacy here is real and enforced
+        server-side (participant-only reads and media, blocking, disappearing
+        messages, view-once, read-receipt control); a lock on top of it would add
+        nothing a viewer with the session could not walk around.
+      */}
+
       {/* ---- Appearance ---- */}
       {flags.chatThemes && (
         <section className="chat-info-section">
