@@ -9,7 +9,13 @@ const nextConfig: NextConfig = {
   // Profile URLs are /<username> and usernames may contain dots (john.doe).
   // Do not add extension-based rewrites or skip-trailing-slash rules that
   // would treat dotted paths as static files.
-  experimental: { authInterrupts: true },
+  experimental: {
+    authInterrupts: true,
+    // The social shell (dialogs, dropdowns, tabs, carousels) imports these
+    // icon/primitive packages heavily; rewriting the imports lets the bundler
+    // include only the modules actually used.
+    optimizePackageImports: ['lucide-react', 'radix-ui', 'date-fns'],
+  },
   async headers() {
     return [ADMIN_BASE_PATH + '/:path*', '/api/admin/:path*'].map(source => ({
       source,

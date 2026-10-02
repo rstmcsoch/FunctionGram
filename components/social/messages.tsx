@@ -25,6 +25,16 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const [mobileChat, setMobileChat] = useState(!!initialRecipient);
   const [error, setError] = useState("");
   const [searchHits, setSearchHits] = useState<Person[] | null>(null);
+  // Contacts come from the directory endpoint when the message view opens,
+  // rather than from every page's bootstrap payload.
+  const [directory, setDirectory] = useState<Person[]>([]);
+  useEffect(() => {
+    let active = true;
+    void request<Person[]>("/api/social?people=1&limit=60", undefined, t)
+      .then(items => { if (active) setDirectory(items); })
+      .catch(() => { /* keep the bootstrap people as the fallback */ });
+    return () => { active = false; };
+  }, [t]);
   const top = useRef<HTMLDivElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -112,12 +122,13 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   };
 
   const nameMatches = (p: Person) => (p.name + " " + p.username).toLowerCase().includes(query.toLowerCase());
+  const allPeople = directory.length ? directory : people;
   // Above two characters the list leads with the server's conversation-text
   // matches, then falls back to name/username filtering.
   const serverHits = query.trim().length >= 2
-    ? (searchHits || []).filter(p => p.id !== me.id && !people.some(existing => existing.id === p.id) && !p.is_demo)
+    ? (searchHits || []).filter(p => p.id !== me.id && !allPeople.some(existing => existing.id === p.id) && !p.is_demo)
     : [];
-  const contacts = [me, ...people.filter(p => p.id !== me.id && !p.is_demo && nameMatches(p))];
+  const contacts = [me, ...allPeople.filter(p => p.id !== me.id && !p.is_demo && nameMatches(p))];
 
   const unreadFor = (id: string) => inbox.filter(m => m.sender_id === id && m.recipient_id === me.id && !m.read_at).length;
 

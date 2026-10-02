@@ -44,13 +44,28 @@ export function count(n: number) {
   return new Intl.NumberFormat("en", { notation: n >= 10000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(n);
 }
 export class RequestError extends Error { constructor(message: string, public readonly status: number) { super(message); } }
+/**
+ * Request cache policy.
+ *
+ * Personalised reads and every mutation stay non-cacheable. Two genuinely
+ * public reads can be reused by the browser (and the CDN) for a short window:
+ * the upload/media policy and the sample credit lists. Both are the same for
+ * every visitor and carry no account data, and both are revalidated in the
+ * background so a policy change is visible within a minute without the user
+ * ever waiting for the round trip.
+ */
+const PUBLIC_CACHEABLE = ["/api/social?upload-policy", "/media/photo-credits.json", "/media/portrait-credits.json"];
+function cacheMode(url: string, hasBody: boolean): RequestCache {
+  if (hasBody) return "no-store";
+  return PUBLIC_CACHEABLE.some(prefix => url.startsWith(prefix)) ? "default" : "no-store";
+}
 export async function request<T = unknown>(url: string, body?: unknown, t: Translator = defaultTranslator): Promise<T> {
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(url, {
     method: body ? "POST" : "GET",
     headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
     body: body ? (isForm ? (body as FormData) : JSON.stringify(body)) : undefined,
-    cache: "no-store",
+    cache: cacheMode(url, Boolean(body)),
   });
   let data;
   try { data = await response.json(); } catch { throw new Error(t("auth_form.unable_to_connect_please_try_again")); }
@@ -223,7 +238,7 @@ export function MediaFrame({
   }
   return (
     <div className={"media-frame " + (fit === "contain" ? "media-contain " : "") + className} style={style} onDoubleClick={onDoubleClick}>
-      <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async" draggable={false}
+      <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} fetchPriority={eager ? "high" : undefined} decoding="async" draggable={false}
         onLoad={event => { if (!ratio) { const image = event.currentTarget; if (image.naturalWidth && image.naturalHeight) setMeasured(image.naturalWidth / image.naturalHeight); } }}
         onError={event => { event.currentTarget.alt = t("common.this_photo_could_not_be_loaded"); }} />
       {children}
@@ -302,7 +317,7 @@ export function Carousel({ items, render, aspects, onDoubleClick, ariaLabel }: {
               aria-roledescription="slide"
               aria-label={t("common.position",{number:position+1,total:items.length})}
             >
-              {render(item, position, Math.abs(position - index) <= 1)}
+              {render(item, position, position === index)}
             </div>
           ))}
         </div>
