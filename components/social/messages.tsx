@@ -2,9 +2,10 @@
 import {useLabels} from "./labels";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Search, SquarePen, ArrowLeft, Bookmark, Smile, Trash2 } from "lucide-react";
+import { Send, Search, SquarePen, ArrowLeft, Bookmark, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, Empty, IconButton, Busy, request, timeAgo, count } from "./common";
+import { EmojiPicker, EmojiTrigger } from "./emoji-picker";
 import type { Person, Message } from "@/lib/types";
 
 type OutgoingMessage = Message & { pending?: boolean };
@@ -25,6 +26,10 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
   const [mobileChat, setMobileChat] = useState(!!initialRecipient);
   const [error, setError] = useState("");
   const [searchHits, setSearchHits] = useState<Person[] | null>(null);
+  // Emoji picker state. `caret` remembers where the next emoji lands so
+  // selecting one splices into the existing text instead of replacing it.
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [caret, setCaret] = useState(0);
   // Contacts come from the directory endpoint when the message view opens,
   // rather than from every page's bootstrap payload.
   const [directory, setDirectory] = useState<Person[]>([]);
@@ -223,8 +228,47 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
           <div ref={bottom} />
         </div>
         <form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
-          <IconButton label={t("messages.add_a_smile")} onClick={() => { setBody(value => value + " 😊"); input.current?.focus(); }}><Smile size={22} /></IconButton>
-          <input ref={input} aria-label={t("messages.write_a_message")} placeholder={t("messages.message")} value={body} maxLength={2000} onChange={e => setBody(e.target.value)} />
+          <span className="emoji-anchor">
+            <EmojiTrigger open={emojiOpen} label={t("messages.add_a_smile")} onToggle={() => {
+              // Opening the picker parks the caret where the user left it so
+              // the first emoji lands there; closing returns focus to the
+              // message field.
+              setEmojiOpen(open => {
+                if (open) input.current?.focus();
+                else setCaret(input.current?.selectionStart ?? body.length);
+                return !open;
+              });
+            }} />
+            {emojiOpen && (
+              <EmojiPicker
+                value={body}
+                cursor={caret}
+                onInsert={next => {
+                  // Optimistic and purely local: the emoji is in the composer
+                  // immediately, with no request and no round trip.
+                  setBody(next.value);
+                  setCaret(next.cursor);
+                  requestAnimationFrame(() => {
+                    const field = input.current;
+                    if (!field) return;
+                    field.focus();
+                    field.setSelectionRange(next.cursor, next.cursor);
+                  });
+                }}
+                onClose={() => { setEmojiOpen(false); input.current?.focus(); }}
+              />
+            )}
+          </span>
+          <input
+            ref={input}
+            aria-label={t("messages.write_a_message")}
+            placeholder={t("messages.message")}
+            value={body}
+            maxLength={2000}
+            onChange={e => { setBody(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
+            onKeyUp={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onClick={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+          />
           <button aria-label={t("messages.send_message")} className="message-send" disabled={!body.trim() || busy}>{busy ? <Busy size={16} /> : <Send size={20} />}</button>
         </form>
       </section>
