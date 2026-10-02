@@ -99,7 +99,11 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
     finally { setLoadingOlder(false); }
   };
 
+  // A message belongs to the account that sent it. The button below is only
+  // rendered for `sender_id === me.id`, and this guard repeats that rule so a
+  // stale row can never be unsent locally; the server enforces it too.
   const removeMessage = async (message: Message) => {
+    if (message.sender_id !== me.id) return;
     setMessages(current => current.filter(item => item.id !== message.id));
     setInbox(current => current.filter(item => item.id !== message.id));
     try { await request("/api/social", { action: "delete_message", id: message.id }, t); }
@@ -215,7 +219,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
                   /^https?:\/\//.test(text) ? <a key={index} href={text} target="_blank" rel="noreferrer" className="message-link">{text}</a> : text)}</p>
                 <span className="message-row-foot">
                   <time title={new Date(m.created_at).toLocaleString()}>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                  {!m.pending && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
+                  {!m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
                 </span>
               </div>
             ))}

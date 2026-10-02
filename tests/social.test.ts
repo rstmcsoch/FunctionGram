@@ -348,6 +348,11 @@ test('messages support deletion and story replies with lifecycle checks', async 
   const messageId = sent.data.id as string;
   const stranger = await api(carol, { action: 'delete_message', id: messageId });
   assert.equal(stranger.status, 404, 'participants only');
+  // A message belongs to its sender: the recipient may read it but may never
+  // unsend it, even when the request claims the sender's identity.
+  const recipient = await api(bob, { action: 'delete_message', id: messageId, sender_id: alice.id, owner: true });
+  assert.equal(recipient.status, 404, 'the recipient cannot delete the sender’s message');
+  assert.ok(await api(alice, null, '?messages=' + bob.id).then(r => r.data.items.some((m: { id: string }) => m.id === messageId)), 'the message survived the rejected delete');
   assert.equal((await api(alice, { action: 'delete_message', id: messageId })).data.ok, true);
   assert.equal((await api(alice, { action: 'delete_message', id: messageId })).status, 404, 'deleted twice is a 404');
   // Story reply: carol replies to alice's new story and it lands in alice's inbox.
