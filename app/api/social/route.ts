@@ -230,8 +230,8 @@ export async function POST(request:Request){
     const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(recipientId).first<{id:string;is_demo:number}>();
     if(!recipient)throw new AppError('Profile not found.',404);
     if(recipient.is_demo)throw new AppError('This is a sample profile. You can message real members or save a note to yourself.');
-    const {rows:restricted}=await (await getPool()).query('SELECT profile_id FROM admin_message_controls WHERE profile_id=ANY($1::text[]) AND dm_disabled=true',[user===recipientId?[user]:[user,recipientId]]);
-    if(restricted.length)throw new AppError('Direct messages are unavailable for one of these accounts.',403);
+    const restricted=await database.prepare('SELECT profile_id FROM admin_message_controls WHERE dm_disabled=1 AND profile_id IN (?,?)').bind(user,recipientId).all<{profile_id:string}>();
+    if(restricted.results.length)throw new AppError('Direct messages are unavailable for one of these accounts.',403);
     // A block cuts off the blocked person's messages to the blocker.
     if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
     const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
