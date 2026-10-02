@@ -342,6 +342,25 @@ export async function messageSearch(viewer:string,term:string):Promise<Person[]>
   return r.results;
 }
 
+/**
+ * Unsend one message.
+ *
+ * A message belongs to its `sender_id`, so ownership is part of the DELETE
+ * itself instead of a separate check: the statement only ever matches a row
+ * the authenticated viewer sent. The other participant therefore cannot
+ * remove it, and neither can anyone who edits the request — the viewer comes
+ * from the server-side session, never from the request body.
+ *
+ * Anything that matches nothing (another participant's message, an unknown
+ * id, an already-deleted row) is reported as not found, which keeps the
+ * existence of a conversation private and leaves the original row untouched.
+ */
+export async function unsendMessage(viewer:string,messageId:string){
+  const result=await db().prepare('DELETE FROM messages WHERE id=? AND sender_id=?').bind(messageId,viewer).run();
+  if(!result.meta.changes)throw new AppError('Message not found.',404);
+  return {ok:true};
+}
+
 function publicPosts(posts:Post[],flags:Flags):Post[]{return posts.map(post=>({...post,tagged_users:flags.tagging?post.tagged_users:[],comment_preview:flags.comments?post.comment_preview:null,display_comments:flags.comments?post.display_comments:null,display_likes:flags.likes?post.display_likes:null,saved:flags.saves?post.saved:0,liked:flags.likes?post.liked:0}));}
 export async function postCounters(viewer:string,id:string){
  const policy=await featurePolicy(viewer);

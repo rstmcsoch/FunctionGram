@@ -431,14 +431,15 @@ h1,h2,h3,p{margin:0}
 }
 
 /* avatars */
-.avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
-.avatar img{width:100%;height:100%;object-fit:cover}
-.avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
+/* avatars — the container owns the geometry, the source image only fills it */
+.avatar{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:var(--avatar-size,42px);height:var(--avatar-size,42px);aspect-ratio:1/1;min-width:0;min-height:0;padding:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;border:1px solid var(--border);transition:transform .18s var(--ease)}
+.avatar img{display:block;flex:0 0 auto;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;object-position:50% 50%}
+.avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em;line-height:1}
 [data-theme=dark] .avatar-initial{background:linear-gradient(140deg,#3a2029,#33202c);color:#ff7497}
 .avatar-ring{padding:3px;background:conic-gradient(from 200deg,#ffbe49,#f74774 45%,#e931a9 75%,#b83dff);border:0}
 .avatar-ring img,.avatar-ring .avatar-initial{border:3px solid var(--background);border-radius:50%;width:100%;height:100%}
 .story-seen .avatar-ring{background:var(--input)}
-.avatar-button{display:flex;flex-shrink:0;border-radius:50%}
+.avatar-button{display:inline-flex;flex:0 0 auto;padding:0;border:0;background:none;border-radius:50%;overflow:hidden}
 button:hover>.avatar{transform:scale(1.04)}
 
 /* ============================================================
@@ -1139,6 +1140,10 @@ div[data-slot=dialog-content].post-viewer {
 .unread-total{font-size:12.5px;font-weight:650;color:var(--primary);background:var(--accent);border-radius:14px;padding:2px 9px;min-width:20px;text-align:center}
 .conversation-list .search-field{min-height:40px}
 .conversation-list>h3{font-size:12.5px;font-weight:650;text-transform:uppercase;letter-spacing:.7px;color:var(--muted-foreground);padding:8px 8px 2px}
+/* Messages avatars are container-owned circles: the shared .avatar box already
+   fixes the geometry from --avatar-size, and these contexts must never let a
+   flex parent, a wrapper or a source image's natural size change it. */
+.conversation .avatar,.chat-panel .avatar{flex:0 0 auto;aspect-ratio:1/1;border-radius:50%;overflow:hidden}
 .conversation{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:14px;text-align:left;width:100%;transition:background var(--motion-fast)}
 .conversation:hover{background:var(--muted)}
 .conversation.selected{background:var(--accent)}
@@ -1171,6 +1176,36 @@ div[data-slot=dialog-content].post-viewer {
 .message-compose input::placeholder{color:var(--subtle)}
 .message-send{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;color:var(--primary)}
 .message-send:disabled{color:var(--subtle)}
+
+/* ---------- messages: emoji picker ---------- */
+/* Anchored to the trigger and floating above the composer, so the picker is
+   never clipped by the composer, the chat panel or the viewport. */
+.emoji-anchor{position:relative;display:inline-flex;flex:0 0 auto}
+.emoji-picker{position:absolute;left:0;bottom:calc(100% + 10px);z-index:30;display:flex;flex-direction:column;width:min(330px,calc(100vw - 28px));max-height:min(390px,58dvh);border:1px solid var(--border);border-radius:18px;background:var(--popover);color:var(--popover-foreground);box-shadow:var(--shadow-3);overflow:hidden;animation:view-in var(--motion-fast) var(--ease)}
+.emoji-picker>header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px 8px 14px}
+.emoji-picker>header strong{font-size:14px;font-weight:700;letter-spacing:-.2px}
+.emoji-close{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:none;background:none;color:var(--muted-foreground);border-radius:50%}
+.emoji-close:hover{background:var(--muted);color:var(--foreground)}
+.emoji-search{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:0 10px;height:36px;border:1px solid var(--input);border-radius:999px;background:var(--background);color:var(--muted-foreground)}
+.emoji-search:focus-within{border-color:var(--ring)}
+.emoji-search input{flex:1;min-width:0;border:0;background:none;font-size:13.5px;color:var(--foreground)}
+.emoji-search input::placeholder{color:var(--subtle)}
+.emoji-categories{display:flex;gap:4px;padding:0 8px 8px;overflow-x:auto;scrollbar-width:none}
+.emoji-categories::-webkit-scrollbar{display:none}
+.emoji-category{flex:0 0 auto;padding:5px 10px;border:none;border-radius:999px;background:var(--muted);color:var(--muted-foreground);font-size:12px;font-weight:600;white-space:nowrap}
+.emoji-category.is-active{background:var(--primary);color:var(--primary-foreground)}
+.emoji-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 10px;-webkit-overflow-scrolling:touch}
+.emoji-scroll section{padding-top:4px}
+.emoji-scroll h3{position:sticky;top:0;z-index:1;margin:0;padding:6px 4px;background:var(--popover);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted-foreground)}
+.emoji-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px}
+.emoji-option{display:flex;align-items:center;justify-content:center;aspect-ratio:1/1;min-width:0;border:0;border-radius:10px;background:none;font-size:21px;line-height:1;padding:0}
+.emoji-option:hover,.emoji-option:focus-visible{background:var(--muted)}
+.emoji-empty{margin:0;padding:22px 8px;text-align:center;font-size:13px;color:var(--muted-foreground)}
+@media (max-width:420px){
+  .emoji-picker{width:calc(100vw - 24px);max-height:min(340px,52dvh)}
+  .emoji-grid{grid-template-columns:repeat(7,minmax(0,1fr))}
+}
+@media (hover:none){.emoji-option{font-size:23px}}
 
 /* ============================================================
    14. REELS

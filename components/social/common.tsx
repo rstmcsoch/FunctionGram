@@ -120,13 +120,24 @@ export async function upload(file: File, t: Translator = defaultTranslator): Pro
 
 /* --------------------------------- avatars --------------------------------- */
 
+/**
+ * One shared avatar for the whole app, Messages included.
+ *
+ * The geometry is owned entirely by the container: a fixed square box exposed
+ * through the `--avatar-size` custom property, a 1:1 aspect ratio and
+ * `border-radius: 50%` + `overflow: hidden`. The photo inside is only ever
+ * cropped (`object-fit: cover`, centred), so a source image of any dimensions
+ * or aspect ratio can never resize, stretch or squash the avatar — and neither
+ * can a stylesheet that wants a different size for one context. The fallback
+ * initials fill the same circle.
+ */
 export function Avatar({ person, size = 42, ring = false, onClick, className = "" }: { person: Partial<Person> | null; size?: number; ring?: boolean; onClick?: () => void; className?: string }) {
   const t=useLabels();
   const [broken, setBroken] = useState(false);
   const content = (
-    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size }}>
+    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ "--avatar-size": size + "px" } as React.CSSProperties}>
       {person?.avatar && !broken
-        ? <img src={person.avatar} alt="" width={size} height={size} loading="lazy" onError={() => setBroken(true)} />
+        ? <img src={person.avatar} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
         : <span className="avatar-initial">{(person?.name || t("common.avatarFallback")).slice(0, 1).toUpperCase()}</span>}
     </span>
   );
