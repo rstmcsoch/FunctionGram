@@ -124,7 +124,11 @@ export function Avatar({ person, size = 42, ring = false, onClick, className = "
   const t=useLabels();
   const [broken, setBroken] = useState(false);
   const content = (
-    <span className={"avatar " + (ring ? "avatar-ring " : "") + className} style={{ width: size, height: size }}>
+    <span
+      className={"avatar " + (ring ? "avatar-ring " : "") + className}
+      style={{ width: size, height: size, minWidth: size, minHeight: size, maxWidth: size, maxHeight: size, aspectRatio: "1 / 1" }}
+      data-avatar-size={size}
+    >
       {person?.avatar && !broken
         ? <img src={person.avatar} alt="" width={size} height={size} loading="lazy" onError={() => setBroken(true)} />
         : <span className="avatar-initial">{(person?.name || t("common.avatarFallback")).slice(0, 1).toUpperCase()}</span>}
