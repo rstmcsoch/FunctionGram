@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -44,7 +44,17 @@ export interface PoolLike extends QueryExecutor {
   batch?(statements: BatchItem[]): Promise<QueryResult[]>;
 }
 
-export const DATABASE_MIGRATIONS = [
+type Migration = {
+  version: number;
+  statements: string[];
+  /** When true, individual statement failures (e.g. duplicate columns) are
+   *  tolerated — the migration is still marked as applied. This is required
+   *  for ALTER TABLE ADD COLUMN statements, which error when the column
+   *  already exists on an existing database. */
+  allowPartial?: boolean;
+};
+
+export const DATABASE_MIGRATIONS: Migration[] = [
   {
     version: 1,
     statements: tursoSchemaStatements,
@@ -61,6 +71,16 @@ export const DATABASE_MIGRATIONS = [
     // already received the table with the base schema pays nothing here.
     version: 3,
     statements: tursoMessagingUpgradeStatements,
+  },
+  {
+    // Complete messaging system extension: new columns on messages table
+    // (reply_to_id, edited_at, message_type, media_*, forward_*, view_once,
+    // delivered_at) plus new tables for reactions, pins, saves, conversation
+    // state, typing, presence, view-once and message reports.
+    // ALTER TABLE ADD COLUMN errors (duplicate column) are caught and ignored.
+    version: 4,
+    statements: tursoMessagingV4Statements,
+    allowPartial: true,
   },
 ];
 
@@ -409,13 +429,31 @@ export async function ensureSchema() {
           );
 
           if (!applied.rowCount) {
-            await database.batch([
-              ...migration.statements.map(text => ({ text })),
-              {
-                text: 'INSERT INTO functiongram_migrations(version) VALUES(?)',
-                values: [migration.version],
-              },
-            ]);
+            if (migration.allowPartial) {
+              // ALTER TABLE ADD COLUMN statements fail when the column already
+              // exists. Run each statement individually and swallow the
+              // duplicate-column error so the migration still completes.
+              for (const stmt of migration.statements) {
+                try {
+                  await database.query(stmt);
+                } catch (err) {
+                  const msg = String(err instanceof Error ? err.message : err);
+                  if (!msg.includes('duplicate column')) throw err;
+                }
+              }
+              await database.query(
+                'INSERT INTO functiongram_migrations(version) VALUES(?)',
+                [migration.version],
+              );
+            } else {
+              await database.batch([
+                ...migration.statements.map(text => ({ text })),
+                {
+                  text: 'INSERT INTO functiongram_migrations(version) VALUES(?)',
+                  values: [migration.version],
+                },
+              ]);
+            }
           }
         }
 
@@ -443,8 +481,19 @@ export async function ensureSchema() {
           );
 
           if (!applied.rowCount) {
-            for (const statement of migration.statements) {
-              await client.query(statement);
+            if (migration.allowPartial) {
+              for (const statement of migration.statements) {
+                try {
+                  await client.query(statement);
+                } catch (err) {
+                  const msg = String(err instanceof Error ? err.message : err);
+                  if (!msg.includes('duplicate column')) throw err;
+                }
+              }
+            } else {
+              for (const statement of migration.statements) {
+                await client.query(statement);
+              }
             }
 
             await client.query(

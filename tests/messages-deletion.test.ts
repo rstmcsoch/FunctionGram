@@ -239,8 +239,10 @@ test('the ownership query itself only ever removes the sender’s own row', asyn
 
 test('the destructive action is only offered for the sender’s own messages', async () => {
   const messages = readFileSync(path.join(process.cwd(), 'components/social/messages.tsx'), 'utf8');
-  const button = messages.slice(messages.indexOf('className="message-delete"') - 200, messages.indexOf('className="message-delete"'));
-  assert.match(button, /m\.sender_id === me\.id/, 'the Delete button is gated on the sender');
+  // The Delete action in the action menu is gated on the sender.
+  assert.match(messages, /flags\.messageDeletion && !m\.pending && m\.sender_id === me\.id/, 'the Delete action is gated on the sender');
+  // isMine is derived from the sender.
+  assert.match(messages, /const isMine = m\.sender_id === me\.id/, 'isMine derives from sender_id');
   assert.match(messages, /if \(message\.sender_id !== me\.id\) return;/, 'the handler refuses an incoming message too');
   // The request carries nothing but the message id.
   assert.match(messages, /action: "delete_message", id: message\.id/, 'the client sends only the id');
