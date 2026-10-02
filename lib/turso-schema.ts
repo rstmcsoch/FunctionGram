@@ -2,6 +2,172 @@
 // This is intentionally separate from postgres-schema.ts.
 // Better Auth core tables are NOT created here; Better Auth will manage them.
 
+/**
+ * Messaging tables shared by the base schema and the messaging upgrade.
+ *
+ * These were originally only listed inside `tursoSchemaStatements`
+ * (migration 1). A database that applied migration 1 *before* they existed
+ * never received them, because a recorded migration version is skipped on
+ * every later start. They are therefore exported separately and replayed by
+ * `tursoMessagingV13Statements` as well: every statement is
+ * `CREATE ... IF NOT EXISTS`, so a fresh database pays for them once and an
+ * existing database receives exactly the objects it is missing.
+ */
+export const tursoMessagingTableStatements: string[] = [
+  // Message reactions: separate from post reactions to avoid mixing concerns.
+  `
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, user_id, emoji)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_message
+  ON message_reactions(message_id)
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_user
+  ON message_reactions(user_id)
+  `,
+
+  // Message pins: conversation-scoped, max 5 per conversation.
+  `
+  CREATE TABLE IF NOT EXISTS message_pins (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    conversation_key TEXT NOT NULL,
+    pinned_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (pinned_by) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_pins_conversation
+  ON message_pins(conversation_key, created_at DESC)
+  `,
+
+  // Saved messages: private to user.
+  `
+  CREATE TABLE IF NOT EXISTS saved_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, user_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_saved_messages_user
+  ON saved_messages(user_id, created_at DESC)
+  `,
+
+  // Conversation state: per-user metadata for each 1:1 conversation.
+  `
+  CREATE TABLE IF NOT EXISTS conversation_state (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    other_user_id TEXT NOT NULL,
+    is_pinned INTEGER NOT NULL DEFAULT 0,
+    is_muted INTEGER NOT NULL DEFAULT 0,
+    mute_until INTEGER,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    is_favorite INTEGER NOT NULL DEFAULT 0,
+    marked_unread INTEGER NOT NULL DEFAULT 0,
+    theme TEXT NOT NULL DEFAULT 'default',
+    disappearing_duration INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(user_id, other_user_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_conversation_state_user
+  ON conversation_state(user_id, is_pinned DESC, updated_at DESC)
+  `,
+
+  // Typing state: ephemeral, for realtime typing indicators.
+  `
+  CREATE TABLE IF NOT EXISTS typing_state (
+    user_id TEXT NOT NULL,
+    other_user_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+
+    PRIMARY KEY(user_id, other_user_id),
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE
+  )
+  `,
+
+  // User presence: lightweight heartbeat for online/last-seen.
+  `
+  CREATE TABLE IF NOT EXISTS user_presence (
+    user_id TEXT PRIMARY KEY NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    is_online INTEGER NOT NULL DEFAULT 0,
+
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+  )
+  `,
+
+  // View-once media tracking.
+  `
+  CREATE TABLE IF NOT EXISTS view_once_state (
+    message_id TEXT PRIMARY KEY NOT NULL,
+    consumed_at INTEGER,
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+  )
+  `,
+
+  // Reports for messages (separate from post/profile reports).
+  `
+  CREATE TABLE IF NOT EXISTS message_reports (
+    id TEXT PRIMARY KEY NOT NULL,
+    message_id TEXT NOT NULL,
+    reporter_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (reporter_id) REFERENCES profiles(id) ON DELETE CASCADE,
+
+    UNIQUE(message_id, reporter_id)
+  )
+  `,
+
+  `
+  CREATE INDEX IF NOT EXISTS idx_message_reports_status
+  ON message_reports(status, created_at DESC)
+  `,
+];
+
 export const tursoSchemaStatements: string[] = [
   `
   CREATE TABLE IF NOT EXISTS profiles (
@@ -725,160 +891,10 @@ export const tursoSchemaStatements: string[] = [
   END
   `,
 
-  // ---- Complete messaging system tables (migration 4) ----
-
-  // Message reactions: separate from post reactions to avoid mixing concerns.
-  `
-  CREATE TABLE IF NOT EXISTS message_reactions (
-    id TEXT PRIMARY KEY NOT NULL,
-    message_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    emoji TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
-
-    UNIQUE(message_id, user_id, emoji)
-  )
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_message_reactions_message
-  ON message_reactions(message_id)
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_message_reactions_user
-  ON message_reactions(user_id)
-  `,
-
-  // Message pins: conversation-scoped, max 5 per conversation.
-  `
-  CREATE TABLE IF NOT EXISTS message_pins (
-    id TEXT PRIMARY KEY NOT NULL,
-    message_id TEXT NOT NULL,
-    conversation_key TEXT NOT NULL,
-    pinned_by TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (pinned_by) REFERENCES profiles(id) ON DELETE CASCADE,
-
-    UNIQUE(message_id)
-  )
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_message_pins_conversation
-  ON message_pins(conversation_key, created_at DESC)
-  `,
-
-  // Saved messages: private to user.
-  `
-  CREATE TABLE IF NOT EXISTS saved_messages (
-    id TEXT PRIMARY KEY NOT NULL,
-    message_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
-
-    UNIQUE(message_id, user_id)
-  )
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_saved_messages_user
-  ON saved_messages(user_id, created_at DESC)
-  `,
-
-  // Conversation state: per-user metadata for each 1:1 conversation.
-  `
-  CREATE TABLE IF NOT EXISTS conversation_state (
-    id TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL,
-    other_user_id TEXT NOT NULL,
-    is_pinned INTEGER NOT NULL DEFAULT 0,
-    is_muted INTEGER NOT NULL DEFAULT 0,
-    mute_until INTEGER,
-    is_archived INTEGER NOT NULL DEFAULT 0,
-    is_favorite INTEGER NOT NULL DEFAULT 0,
-    marked_unread INTEGER NOT NULL DEFAULT 0,
-    theme TEXT NOT NULL DEFAULT 'default',
-    disappearing_duration INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
-
-    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
-    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE,
-
-    UNIQUE(user_id, other_user_id)
-  )
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_conversation_state_user
-  ON conversation_state(user_id, is_pinned DESC, updated_at DESC)
-  `,
-
-  // Typing state: ephemeral, for realtime typing indicators.
-  `
-  CREATE TABLE IF NOT EXISTS typing_state (
-    user_id TEXT NOT NULL,
-    other_user_id TEXT NOT NULL,
-    started_at INTEGER NOT NULL,
-
-    PRIMARY KEY(user_id, other_user_id),
-
-    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE,
-    FOREIGN KEY (other_user_id) REFERENCES profiles(id) ON DELETE CASCADE
-  )
-  `,
-
-  // User presence: lightweight heartbeat for online/last-seen.
-  `
-  CREATE TABLE IF NOT EXISTS user_presence (
-    user_id TEXT PRIMARY KEY NOT NULL,
-    last_seen_at INTEGER NOT NULL,
-    is_online INTEGER NOT NULL DEFAULT 0,
-
-    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
-  )
-  `,
-
-  // View-once media tracking.
-  `
-  CREATE TABLE IF NOT EXISTS view_once_state (
-    message_id TEXT PRIMARY KEY NOT NULL,
-    consumed_at INTEGER,
-
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-  )
-  `,
-
-  // Reports for messages (separate from post/profile reports).
-  `
-  CREATE TABLE IF NOT EXISTS message_reports (
-    id TEXT PRIMARY KEY NOT NULL,
-    message_id TEXT NOT NULL,
-    reporter_id TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    details TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'new',
-
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (reporter_id) REFERENCES profiles(id) ON DELETE CASCADE,
-
-    UNIQUE(message_id, reporter_id)
-  )
-  `,
-
-  `
-  CREATE INDEX IF NOT EXISTS idx_message_reports_status
-  ON message_reports(status, created_at DESC)
-  `,
+  // ---- Complete messaging system tables ----
+  // Defined above so the messaging upgrade migration can replay them on
+  // databases that applied migration 1 before these tables existed.
+  ...tursoMessagingTableStatements,
 ];
 
 /**
@@ -973,4 +989,99 @@ export const tursoMessagingV4Statements: string[] = [
   `ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE messages ADD COLUMN view_once_consumed INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE messages ADD COLUMN delivered_at INTEGER`,
+];
+
+/**
+ * Migration 13: messaging completeness upgrade.
+ *
+ * Version numbers 5–12 are reserved for the administrative-schema phases that
+ * `lib/postgres-schema.ts` defines (and that `tests/admin.test.ts` asserts), so
+ * the messaging upgrade deliberately does not occupy 5: taking it would create
+ * a duplicate version the moment those phases are registered.
+ *
+ * This migration repairs three separate defects at once:
+ *
+ *  1. **Tables that never reached an existing database.** The messaging tables
+ *     were only listed in migration 1, which a deployed database had already
+ *     recorded. They are replayed here (idempotently) so an upgrade produces
+ *     the same schema as a fresh install.
+ *  2. **Columns migration 4 could report as applied while they were absent.**
+ *     Its `allowPartial` handling swallowed statement errors and then recorded
+ *     the version, so a partially upgraded database was marked complete. The
+ *     same `ALTER TABLE ... ADD COLUMN` statements are replayed here and the
+ *     runner now checks `PRAGMA table_info` per column instead of guessing
+ *     from an error message.
+ *  3. **Columns the finished messaging features need**: `expires_at` for
+ *     disappearing messages, the asset key and original filename for real
+ *     media, voice and document messages, sticker identifiers and shared
+ *     profile references.
+ *
+ * Every statement is libSQL/SQLite-compatible: no `ANY(...)`, no PostgreSQL
+ * casts, no `ILIKE`, no interval syntax.
+ */
+export const tursoMessagingV13Statements: string[] = [
+  // (1) Replay the messaging tables so an existing database receives them.
+  ...tursoMessagingTableStatements,
+
+  // (2) Replay migration 4's message columns; the runner skips columns that
+  //     already exist and applies only the missing ones.
+  ...tursoMessagingV4Statements,
+
+  // (3) New columns.
+  //
+  // Conversation-scoped reads deliberately do NOT add a denormalized
+  // conversation key. Both directions of a 1:1 thread are served by the
+  // existing `idx_messages_sender_recipient_time(sender_id, recipient_id,
+  // created_at)` through SQLite's OR optimization, and a key column would have
+  // to be backfilled by rewriting every message row on a live database while
+  // still being omittable by any future INSERT. Fewer moving parts, and no
+  // migration that can silently leave a row unsearchable.
+  //
+  // Disappearing messages: absolute expiry, computed once at send time from
+  // the sender's conversation preference. Query-time filtering enforces it, so
+  // no scheduled job is required.
+  `ALTER TABLE messages ADD COLUMN expires_at INTEGER`,
+  // Real attachments reference an `assets` row; the binary never lives in the
+  // message table. `media_url` stays as the resolvable location.
+  `ALTER TABLE messages ADD COLUMN media_key TEXT`,
+  `ALTER TABLE messages ADD COLUMN media_filename TEXT`,
+  // Stickers are local identifiers validated server-side, not uploaded media.
+  `ALTER TABLE messages ADD COLUMN sticker_id TEXT`,
+  // Profile sharing stores only the reference; the profile itself is resolved
+  // through the normal visibility rules at read time.
+  `ALTER TABLE messages ADD COLUMN shared_profile_id TEXT`,
+
+  // The original filename of an uploaded document or voice note. Stored on the
+  // asset rather than supplied per message, so the value shown in a file card
+  // and the one used in a download header are the sender's own upload metadata
+  // and cannot be replaced by a later request.
+  `ALTER TABLE assets ADD COLUMN filename TEXT`,
+
+  // Per-account read-receipt privacy. This is deliberately separate from
+  // `messages.read_at`: the server always records that the recipient read a
+  // message (unread counts and archive behaviour depend on it), and this flag
+  // only decides whether the *sender* is shown the Seen state.
+  `ALTER TABLE conversation_state ADD COLUMN read_receipts INTEGER NOT NULL DEFAULT 1`,
+  // "Clear chat" hides earlier messages for one participant without deleting
+  // anything: messages created before this timestamp are filtered out.
+  `ALTER TABLE conversation_state ADD COLUMN cleared_before INTEGER`,
+
+  // Delivery acknowledgement: one partial index serves the "mark everything
+  // from this sender to me as delivered" update without touching read rows.
+  `CREATE INDEX IF NOT EXISTS idx_messages_undelivered
+   ON messages(recipient_id, sender_id) WHERE delivered_at IS NULL`,
+
+  // Unread counts per conversation, used by the conversation list and the
+  // Unread filter.
+  `CREATE INDEX IF NOT EXISTS idx_messages_unread
+   ON messages(recipient_id, sender_id) WHERE read_at IS NULL`,
+
+  // Expiry filtering for disappearing messages.
+  `CREATE INDEX IF NOT EXISTS idx_messages_expires
+   ON messages(expires_at) WHERE expires_at IS NOT NULL`,
+
+  // The other participant's preference row (read receipts) is looked up by
+  // (other_user_id, user_id), which the existing per-user index cannot serve.
+  `CREATE INDEX IF NOT EXISTS idx_conversation_state_other
+   ON conversation_state(other_user_id, user_id)`,
 ];
