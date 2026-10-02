@@ -1,4 +1,5 @@
 import { seed } from './seed';
+import { database } from './postgres';
 
 /**
  * Demo seeding used to run inside `bootstrap()`, so with the seed switch
@@ -17,7 +18,18 @@ export function publishReady() {
 
 export function ensureDemoSeed(): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
-    seedPromise ??= Promise.resolve();
+    seedPromise ??= (async () => {
+      const store = database();
+      // Keep the production database free of bundled demo identities/content.
+      // These statements also create/disable the seed-control row so an older
+      // isolate cannot recreate the profiles after this cleanup.
+      await store.prepare(
+        'INSERT INTO admin_demo_seed_control(id,enabled) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET enabled=0'
+      ).run();
+      await store.prepare('DELETE FROM profiles WHERE is_demo=1').run();
+    })().catch(error => {
+      console.error('Production demo cleanup failed', error instanceof Error ? error.message : 'Unknown error');
+    });
     return seedPromise;
   }
   seedPromise ??= seed().catch(error => {
