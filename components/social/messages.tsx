@@ -277,7 +277,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
       cancelled = true;
       controller.abort();
       cancelInFlight();
-      void request("/api/social", { action: "set_typing", id: recipient, typing: false }, t).catch(() => {});
+      void request("/api/social", { action: "set_typing", id: recipient, active: false, other_user_id: recipient }, t).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipient]);
@@ -336,7 +336,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   const broadcastTyping = useCallback(() => {
     if (isTyping) return;
     setIsTyping(true);
-    void request("/api/social", { action: "set_typing", id: recipient, typing: true }, t).catch(() => {});
+    void request("/api/social", { action: "set_typing", id: recipient, active: true, other_user_id: recipient }, t).catch(() => {});
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => setIsTyping(false), 3000);
   }, [recipient, isTyping, t]);
@@ -344,7 +344,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   const clearTyping = useCallback(() => {
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     setIsTyping(false);
-    void request("/api/social", { action: "set_typing", id: recipient, typing: false }, t).catch(() => {});
+    void request("/api/social", { action: "set_typing", id: recipient, active: false, other_user_id: recipient }, t).catch(() => {});
   }, [recipient, t]);
 
   /* ---------------------------------------------------------------- */
@@ -369,20 +369,21 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   /*  Pagination, jump and highlight                                   */
   /* ---------------------------------------------------------------- */
 
-  const loadOlder = useCallback(async (): Promise<Message[]> => {
-    if (!olderCursor || loadingOlder) return messagesRef.current;
+  const loadOlder = useCallback(async (cursorOverride?: string | null): Promise<{ items: Message[]; nextCursor: string | null }> => {
+    const cursor = cursorOverride ?? olderCursor;
+    if (!cursor || loadingOlder) return { items: messagesRef.current, nextCursor: cursor ?? null };
     setLoadingOlder(true);
     try {
       const page = await request<{ items: Message[]; next_cursor: string | null }>(
-        "/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50&cursor=" + encodeURIComponent(olderCursor), undefined, t);
+        "/api/social?messages=" + encodeURIComponent(recipient) + "&limit=50&cursor=" + encodeURIComponent(cursor), undefined, t);
       const older = [...page.items].reverse().filter(item => !messagesRef.current.some(existing => existing.id === item.id));
       setMessages(current => [...older, ...current]);
       messagesRef.current = [...older, ...messagesRef.current];
       setOlderCursor(page.next_cursor);
-      return messagesRef.current;
+      return { items: older, nextCursor: page.next_cursor };
     } catch (e) {
       toast.error((e as Error).message);
-      return messagesRef.current;
+      return { items: [], nextCursor: cursor };
     } finally { setLoadingOlder(false); }
   }, [loadingOlder, olderCursor, recipient, t]);
 
@@ -406,10 +407,15 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
       return true;
     };
     if (flash()) return;
-    for (let page = 0; page < 10; page += 1) {
-      if (!olderCursor) break;
-      const loaded = await loadOlder();
-      if (loaded.some(item => item.id === messageId)) { requestAnimationFrame(() => flash()); return; }
+    let cursor: string | null = olderCursor;
+    for (let page = 0; page < 10 && cursor; page += 1) {
+      const loaded = await loadOlder(cursor);
+      if (loaded.items.some(item => item.id === messageId) || flash()) {
+        requestAnimationFrame(() => flash());
+        return;
+      }
+      if (loaded.nextCursor === cursor) break;
+      cursor = loaded.nextCursor;
     }
     toast(unavailableText || t("messages.original_message_unavailable"));
   }, [loadOlder, olderCursor, t]);
