@@ -431,14 +431,15 @@ h1,h2,h3,p{margin:0}
 }
 
 /* avatars */
-.avatar{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;transition:transform .18s var(--ease);border:1px solid var(--border)}
-.avatar img{width:100%;height:100%;object-fit:cover}
-.avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em}
+/* avatars — the container owns the geometry, the source image only fills it */
+.avatar{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:var(--avatar-size,42px);height:var(--avatar-size,42px);aspect-ratio:1/1;min-width:0;min-height:0;padding:0;border-radius:50%;background:var(--muted);overflow:hidden;vertical-align:middle;border:1px solid var(--border);transition:transform .18s var(--ease)}
+.avatar img{display:block;flex:0 0 auto;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;object-position:50% 50%}
+.avatar-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(140deg,#f8e7ed,#fbdce8);color:#b13058;font-weight:700;font-size:1.35em;line-height:1}
 [data-theme=dark] .avatar-initial{background:linear-gradient(140deg,#3a2029,#33202c);color:#ff7497}
 .avatar-ring{padding:3px;background:conic-gradient(from 200deg,#ffbe49,#f74774 45%,#e931a9 75%,#b83dff);border:0}
 .avatar-ring img,.avatar-ring .avatar-initial{border:3px solid var(--background);border-radius:50%;width:100%;height:100%}
 .story-seen .avatar-ring{background:var(--input)}
-.avatar-button{display:flex;flex-shrink:0;border-radius:50%}
+.avatar-button{display:inline-flex;flex:0 0 auto;padding:0;border:0;background:none;border-radius:50%;overflow:hidden}
 button:hover>.avatar{transform:scale(1.04)}
 
 /* ============================================================
@@ -1139,6 +1140,10 @@ div[data-slot=dialog-content].post-viewer {
 .unread-total{font-size:12.5px;font-weight:650;color:var(--primary);background:var(--accent);border-radius:14px;padding:2px 9px;min-width:20px;text-align:center}
 .conversation-list .search-field{min-height:40px}
 .conversation-list>h3{font-size:12.5px;font-weight:650;text-transform:uppercase;letter-spacing:.7px;color:var(--muted-foreground);padding:8px 8px 2px}
+/* Messages avatars are container-owned circles: the shared .avatar box already
+   fixes the geometry from --avatar-size, and these contexts must never let a
+   flex parent, a wrapper or a source image's natural size change it. */
+.conversation .avatar,.chat-panel .avatar{flex:0 0 auto;aspect-ratio:1/1;border-radius:50%;overflow:hidden}
 .conversation{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:14px;text-align:left;width:100%;transition:background var(--motion-fast)}
 .conversation:hover{background:var(--muted)}
 .conversation.selected{background:var(--accent)}
