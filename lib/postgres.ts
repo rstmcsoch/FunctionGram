@@ -90,6 +90,18 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     version: 13,
     statements: tursoMessagingV13Statements,
   },
+  {
+    // One-time production cleanup of the bundled demo community. The seed is
+    // disabled first so a cold-start isolate cannot recreate the rows after
+    // this migration removes them. Profile deletion cascades through posts,
+    // comments, reactions, follows, messages, notifications and other
+    // profile-owned records as defined by the schema.
+    version: 14,
+    statements: [
+      'UPDATE admin_demo_seed_control SET enabled=0 WHERE id=1',
+      'DELETE FROM profiles WHERE is_demo=1',
+    ],
+  },
 ];
 
 /** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not
