@@ -412,6 +412,19 @@ test('delivery state is read from the server, not assumed', () => {
   assert.match(chatInfo, /flags\.readReceipts &&/, 'and follows its flag');
 });
 
+test('typing requests use the server action vocabulary and cleanup semantics', () => {
+  assert.match(messages, /action: "set_typing", id: recipient, active: true, other_user_id: recipient/, 'typing start uses the server field');
+  assert.match(messages, /action: "set_typing", id: recipient, active: false, other_user_id: recipient/, 'typing clear uses the server field');
+  assert.doesNotMatch(messages, /action: "set_typing", id: recipient, typing:/, 'stale client-only typing key is not sent');
+});
+
+test('older-message jumps advance the pagination cursor instead of replaying one page', () => {
+  assert.match(messages, /const loadOlder = useCallback\(async \(cursorOverride\?: string \| null\)/, 'older-page loader accepts a cursor override');
+  assert.match(messages, /let cursor: string \| null = olderCursor;/, 'jump keeps its own mutable cursor');
+  assert.match(messages, /const loaded = await loadOlder\(cursor\);/, 'jump fetches using the current cursor');
+  assert.match(messages, /cursor = loaded\.nextCursor;/, 'jump advances to the next server cursor');
+});
+
 test('polling is bounded, cancellable and pauses with the tab', () => {
   assert.match(messages, /const THREAD_POLL_MS = 5000;/, 'the open thread polls every five seconds');
   assert.match(messages, /const LIST_POLL_MS = 15000;/, 'the list polls more slowly');
