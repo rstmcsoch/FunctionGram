@@ -51,7 +51,24 @@ export async function userDetail(db: QueryExecutor, id: string) {
     (SELECT COUNT(*) FROM session WHERE "userId"=$1 AND "expiresAt">now()) AS sessions`, [id]);
   // NEVER return session tokens, account password hashes or OAuth credentials.
   const { rows: sessions } = await db.query('SELECT id,"createdAt","expiresAt","ipAddress","userAgent" FROM session WHERE "userId"=$1 AND "expiresAt">now() ORDER BY "createdAt" DESC LIMIT 50', [id]);
-  return { user, counts, sessions };
+  // Messaging restrictions are read-only here: changing them belongs to the
+  // Communications panel, which owns the confirmation and audit flow.
+  const { rows: [messaging] } = await db.query(`SELECT
+    COALESCE((SELECT dm_disabled FROM admin_message_controls WHERE profile_id=$1),false) AS dm_disabled,
+    COALESCE((SELECT send_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS send_disabled,
+    COALESCE((SELECT receive_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS receive_disabled,
+    COALESCE((SELECT suspended_until FROM admin_message_restrictions WHERE profile_id=$1),0) AS suspended_until`, [id]);
+  // `suspended` is resolved on the server so the page never compares clock
+  // values while rendering.
+  const messagingState = {
+    dm_disabled: messaging?.dm_disabled === true,
+    send_disabled: messaging?.send_disabled === true,
+    receive_disabled: messaging?.receive_disabled === true,
+    suspended_until: Number(messaging?.suspended_until || 0),
+    // Resolved on the server so the page never compares clock values while rendering.
+    suspended: Number(messaging?.suspended_until || 0) > Date.now(),
+  };
+  return { user, counts, sessions, messaging: messagingState };
 }
 export async function dashboard(db: QueryExecutor) {
   // Turso/libSQL stores these Better Auth timestamps as Unix milliseconds and

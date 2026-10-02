@@ -617,6 +617,22 @@ export const tursoSchemaStatements: string[] = [
   `,
 
   `
+  CREATE TABLE IF NOT EXISTS admin_message_restrictions (
+    profile_id TEXT PRIMARY KEY NOT NULL,
+    send_disabled INTEGER NOT NULL DEFAULT 0,
+    receive_disabled INTEGER NOT NULL DEFAULT 0,
+    suspended_until INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+
+    FOREIGN KEY (profile_id)
+      REFERENCES profiles(id)
+      ON DELETE CASCADE
+  )
+  `,
+
+  `
   CREATE TABLE IF NOT EXISTS admin_notification_templates (
     kind TEXT PRIMARY KEY NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -744,4 +760,30 @@ export const tursoIndexStatements: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_saved_collections_owner ON saved_collections(owner_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id)`,
   `CREATE INDEX IF NOT EXISTS idx_profiles_created ON profiles(created_at) WHERE deleted_at IS NULL`,
+];
+
+/**
+ * Migration 3: granular per-account messaging restrictions.
+ *
+ * Kept separate from `tursoSchemaStatements` so an environment that already
+ * applied version 1 still receives the table: every statement is
+ * `CREATE ... IF NOT EXISTS`, which is a no-op where the object already
+ * exists and therefore safe to replay on any dialect.
+ */
+export const tursoMessagingUpgradeStatements: string[] = [
+  `CREATE TABLE IF NOT EXISTS admin_message_restrictions (
+    profile_id TEXT PRIMARY KEY NOT NULL,
+    send_disabled INTEGER NOT NULL DEFAULT 0,
+    receive_disabled INTEGER NOT NULL DEFAULT 0,
+    suspended_until INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+
+    FOREIGN KEY (profile_id)
+      REFERENCES profiles(id)
+      ON DELETE CASCADE
+  )`,
+  // `profile_id` is the primary key, so every lookup the messaging policy
+  // performs is already served by that index and no second one is added.
 ];

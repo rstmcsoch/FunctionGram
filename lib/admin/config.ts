@@ -23,6 +23,9 @@ export const SETTINGS_DEFAULTS = {
   'theme.defaultTheme': 'system',
   'upload.maxFileMb': 20,
   'upload.dailyQuotaMb': 250,
+  'messages.maxLength': 2000,
+  'messages.rateWindowSeconds': 60,
+  'messages.rateMaxMessages': 30,
 };
 export type Settings = typeof SETTINGS_DEFAULTS;
 export type SettingKey = keyof Settings;

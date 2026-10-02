@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { claimTransactionalEmail } from '../email';
-import { AdminError } from './validation';
+import { AdminError, validateSetting } from './validation';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
+import { DEFAULT_MESSAGING, type MessagingPolicy } from '../messaging-policy';
 
 export const NOTIFICATION_KINDS = ['like', 'comment', 'follow', 'tag', 'broadcast'] as const;
 export type NotificationKind = typeof NOTIFICATION_KINDS[number];
@@ -121,6 +122,159 @@ export async function setDirectMessageControl(pool: PoolLike, actorId: string, i
     else await db.query('DELETE FROM admin_message_controls WHERE profile_id=$1', [profileId]);
     await insertAudit(db, actor, { action: 'messages.userControl', targetType: 'user', targetId: profileId, before: before || { dm_disabled: false }, after: { dm_disabled: input.disabled, reason: input.disabled ? reason : '' }, reason: reason || undefined });
     return { ok: true, profileId, disabled: input.disabled };
+  });
+}
+
+// --------------------- global messaging limits (settings) --------------------
+/** Keys an administrator may write from the Communications panel. */
+export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages'] as const;
+export type MessagingSettingKey = typeof MESSAGING_SETTING_KEYS[number];
+export type MessagingLimits = MessagingPolicy;
+const POLICY_KEY: Record<MessagingSettingKey, keyof MessagingPolicy> = {
+  'messages.maxLength': 'maxLength',
+  'messages.rateWindowSeconds': 'rateWindowSeconds',
+  'messages.rateMaxMessages': 'rateMaxMessages',
+};
+
+/** Current limits, always the stored value or the shipped default. */
+export function readMessagingLimits(settings: Record<string, unknown>): MessagingLimits {
+  const number = (key: MessagingSettingKey) => {
+    const value = Number(settings[key]);
+    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]];
+  };
+  return {
+    maxLength: Math.max(1, number('messages.maxLength') || DEFAULT_MESSAGING.maxLength),
+    rateWindowSeconds: Math.max(0, number('messages.rateWindowSeconds')),
+    rateMaxMessages: Math.max(1, number('messages.rateMaxMessages') || DEFAULT_MESSAGING.rateMaxMessages),
+  };
+}
+
+/**
+ * Persist the messaging limits.
+ *
+ * Every key goes through the shared `validateSetting` registry, so the same
+ * bounds that guard the API also guard the Admin Panel, and each write is
+ * audited with its previous value. `messages.manage` is enough: these are
+ * messaging policy, not general platform settings.
+ */
+export async function saveMessagingLimits(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
+  const next: Partial<Record<MessagingSettingKey, number>> = {};
+  for (const key of MESSAGING_SETTING_KEYS) {
+    if (input[key] === undefined) continue;
+    const value = typeof input[key] === 'string' ? Number(input[key]) : input[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw new AdminError('Enter a whole number for every messaging limit.');
+    next[key] = validateSetting(key, value) as number;
+  }
+  if (!Object.keys(next).length) throw new AdminError('Choose at least one messaging limit to change.');
+  return transaction(pool, async db => {
+    const actor = await authorizeAdmin(db, actorId);
+    requirePermission(actor, 'messages.manage');
+    for (const [key, value] of Object.entries(next) as [MessagingSettingKey, number][]) {
+      const { rows: [row] } = await db.query('SELECT value FROM app_settings WHERE key=$1', [key]);
+      const before = row ? JSON.parse(String(row.value)) : DEFAULT_MESSAGING[POLICY_KEY[key]];
+      await db.query(`INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES($1,$2,$3,$4)
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at,updated_by=EXCLUDED.updated_by`,
+        [key, JSON.stringify(value), Date.now(), actor.userId]);
+      await insertAudit(db, actor, { action: 'settings.write', targetType: 'setting', targetId: key, before, after: value });
+    }
+    return { ok: true, saved: Object.keys(next) } as const;
+  });
+}
+
+// ------------------- per-account messaging restrictions ----------------------
+export type MessageRestriction = {
+  profile_id: string;
+  name: string;
+  email: string;
+  username: string;
+  dm_disabled: boolean;
+  send_disabled: boolean;
+  receive_disabled: boolean;
+  suspended_until: number;
+  reason: string;
+};
+
+/** Accounts matching a search term with their complete messaging state. */
+export async function listMessageRestrictions(db: QueryExecutor, queryInput: unknown): Promise<MessageRestriction[]> {
+  const q = text(queryInput, 100, 'account search');
+  if (q.length < 2) return [];
+  const pattern = '%' + q.replace(/[\\%_]/g, '\\$&') + '%';
+  const { rows } = await db.query(`SELECT u.id,u.name,u.email,p.username,
+      COALESCE(c.dm_disabled,false) AS dm_disabled,COALESCE(c.reason,'') AS control_reason,
+      COALESCE(r.send_disabled,false) AS send_disabled,COALESCE(r.receive_disabled,false) AS receive_disabled,
+      COALESCE(r.suspended_until,0) AS suspended_until,COALESCE(r.reason,'') AS restriction_reason
+    FROM "user" u JOIN profiles p ON p.id=u.id
+    LEFT JOIN admin_message_controls c ON c.profile_id=p.id
+    LEFT JOIN admin_message_restrictions r ON r.profile_id=p.id
+    WHERE p.deleted_at IS NULL AND (u.id ILIKE $1 OR u.email ILIKE $1 OR u.name ILIKE $1 OR p.username ILIKE $1)
+    ORDER BY u."createdAt" DESC,u.id LIMIT 30`, [pattern]);
+  return rows.map(row => ({
+    profile_id: String(row.id),
+    name: String(row.name || ''),
+    email: String(row.email || ''),
+    username: String(row.username || ''),
+    dm_disabled: row.dm_disabled === true || row.dm_disabled === 1,
+    send_disabled: row.send_disabled === true || row.send_disabled === 1,
+    receive_disabled: row.receive_disabled === true || row.receive_disabled === 1,
+    suspended_until: Number(row.suspended_until || 0),
+    reason: String(row.restriction_reason || row.control_reason || ''),
+  }));
+}
+
+/** How many accounts currently carry a messaging restriction (Analytics). */
+export async function countMessageRestrictions(db: QueryExecutor) {
+  const { rows: [row] } = await db.query(`SELECT
+      (SELECT COUNT(*) FROM admin_message_controls WHERE dm_disabled=true) AS dm_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE send_disabled=true) AS send_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE receive_disabled=true) AS receive_disabled,
+      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>$1) AS suspended`);
+  return {
+    dmDisabled: Number(row?.dm_disabled || 0),
+    sendDisabled: Number(row?.send_disabled || 0),
+    receiveDisabled: Number(row?.receive_disabled || 0),
+    suspended: Number(row?.suspended || 0),
+  };
+}
+
+/**
+ * Set the send/receive/suspension policy for one account.
+ *
+ * `suspendedUntil` accepts a timestamp or an ISO string; null (or 0) lifts the
+ * suspension. Clearing every switch removes the row entirely, so an account
+ * with no restriction has no row at all.
+ */
+export async function setMessageRestriction(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
+  const profileId = text(input.profileId, 200, 'account ID', true);
+  const reason = text(input.reason ?? '', 500, 'reason');
+  const send = input.send === undefined ? false : input.send;
+  const receive = input.receive === undefined ? false : input.receive;
+  if (typeof send !== 'boolean' || typeof receive !== 'boolean') throw new AdminError('Send and receive must each be on or off.');
+  if (input.confirmation !== profileId) throw new AdminError('Type the exact account ID to confirm.');
+  if ((send || receive) && reason.length < 3) throw new AdminError('A restriction needs a reason of at least 3 characters.');
+  const suspendedUntil = optionalTime(input.suspendedUntil, 'suspension end');
+  if (suspendedUntil !== null && suspendedUntil <= Date.now()) throw new AdminError('Choose a suspension end in the future.');
+  const restricted = send || receive || suspendedUntil !== null;
+  if (restricted && reason.length < 3) throw new AdminError('A restriction needs a reason of at least 3 characters.');
+  return transaction(pool, async db => {
+    const actor = await authorizeAdmin(db, actorId);
+    requirePermission(actor, 'messages.manage');
+    const { rows: [profile] } = await db.query('SELECT id FROM profiles WHERE id=$1 AND deleted_at IS NULL FOR UPDATE', [profileId]);
+    if (!profile) throw new AdminError('Active profile not found.', 404);
+    const { rows: [before] } = await db.query('SELECT send_disabled,receive_disabled,suspended_until,reason FROM admin_message_restrictions WHERE profile_id=$1 FOR UPDATE', [profileId]);
+    const after = { send, receive, suspended_until: suspendedUntil ?? 0, reason: restricted ? reason : '' };
+    if (restricted) {
+      await db.query(`INSERT INTO admin_message_restrictions(profile_id,send_disabled,receive_disabled,suspended_until,reason,updated_at,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT(profile_id) DO UPDATE SET send_disabled=EXCLUDED.send_disabled,receive_disabled=EXCLUDED.receive_disabled,suspended_until=EXCLUDED.suspended_until,reason=EXCLUDED.reason,updated_at=EXCLUDED.updated_at,updated_by=EXCLUDED.updated_by`,
+        [profileId, send, receive, after.suspended_until, after.reason, Date.now(), actor.userId]);
+    } else {
+      await db.query('DELETE FROM admin_message_restrictions WHERE profile_id=$1', [profileId]);
+    }
+    await insertAudit(db, actor, {
+      action: 'messages.restriction', targetType: 'user', targetId: profileId,
+      before: before ? { send_disabled: before.send_disabled === true, receive_disabled: before.receive_disabled === true, suspended_until: Number(before.suspended_until || 0), reason: String(before.reason || '') } : null,
+      after, reason: reason || undefined,
+    });
+    return { ok: true, profileId, ...after };
   });
 }
 

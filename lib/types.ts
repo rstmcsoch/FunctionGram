@@ -6,5 +6,5 @@ export type Message={id:string;sender_id:string;recipient_id:string;body:string;
 export type Notification={id:string;actor_id:string;kind:string;post_id:string|null;created_at:number;read_at:number|null;username:string;avatar:string;media:string|null;media_type:string|null;template_text?:string;message_text?:string|null;broadcast_id?:string|null};
 export type SavedCollection={id:string;name:string;created_at:number;post_ids:string[]};
 export type StoryViewer={username:string;name:string;avatar:string};
-export type SocialData={features?:import('./features').Flags;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
+export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
 export type SearchResults={people:Person[];posts:Post[]};

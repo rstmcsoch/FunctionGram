@@ -56,6 +56,9 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
     case 'theme.defaultTheme': valid = ['system', 'light', 'dark'].includes(value as string); break;
     case 'upload.maxFileMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100; break;
     case 'upload.dailyQuotaMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10000; break;
+    case 'messages.maxLength': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 4000; break;
+    case 'messages.rateWindowSeconds': valid = typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 86400; break;
+    case 'messages.rateMaxMessages': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000; break;
   }
   if (!valid) throw new AdminError('Invalid setting value.');
   return value as Settings[SettingKey];

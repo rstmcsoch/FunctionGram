@@ -254,6 +254,7 @@ export const LABEL_DEFAULTS = {
   "messages.load_earlier_messages": "Load earlier messages",
   "messages.start_of_this_conversation": "Start of this conversation",
   "messages.sending": "Sending…",
+  "messages.seen": "Seen",
   "messages.delete_message": "Delete message",
   "messages.delete": "Delete",
   "messages.a_little_space_for_yourself": "A little space for yourself",

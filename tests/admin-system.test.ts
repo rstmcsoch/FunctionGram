@@ -29,13 +29,21 @@ async function fixture() {
 }
 const DAY=86_400_000;
 
-test('migration 12 is additive, idempotent, registered after Phase 10 and preserves the explicit demo-seed switch', async () => {
+test('migrations 12 and 13 are additive, idempotent and replayable on an existing deployment', async () => {
   const { pg, pool } = await fixture();
   try {
-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,12);
-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
+    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,13);
+    const messaging = DATABASE_MIGRATIONS.at(-1)!;
+    assert.equal(messaging.statements, (await import('../lib/turso-schema')).tursoMessagingUpgradeStatements);
+    // Replaying version 13 over a schema that already has the table is a no-op,
+    // which is what lets an existing deployment take the upgrade safely.
+    for (const sql of messaging.statements) await pool.query(sql);
+    for (const sql of messaging.statements) await pool.query(sql);
+    assert.equal((await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions')).rows[0].n,0);
+    const system = DATABASE_MIGRATIONS.find(item => item.version === 12)!;
+    assert.equal(system.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
     await pool.query('UPDATE admin_demo_seed_control SET enabled=false WHERE id=1');
-    for (const sql of DATABASE_MIGRATIONS.at(-1)!.statements) await pool.query(sql);
+    for (const sql of system.statements) await pool.query(sql);
     assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
     const overview=await systemOverview(pool);
     assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,12);

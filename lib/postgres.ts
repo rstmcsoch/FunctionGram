@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -54,6 +54,13 @@ export const DATABASE_MIGRATIONS = [
     // batch, so an existing deployment pays one request once per environment.
     version: 2,
     statements: tursoIndexStatements,
+  },
+  {
+    // Granular per-account messaging restrictions. CREATE TABLE IF NOT EXISTS
+    // is idempotent on both libSQL and PostgreSQL, so an environment that
+    // already received the table with the base schema pays nothing here.
+    version: 3,
+    statements: tursoMessagingUpgradeStatements,
   },
 ];
 

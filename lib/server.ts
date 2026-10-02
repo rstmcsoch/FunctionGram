@@ -1,5 +1,6 @@
 import {AdminError} from './admin/validation';
 import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
+import { readMessagingPolicy } from './messaging-policy';
 import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
 import {displayCounterColumns} from './counters';
 import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
@@ -234,7 +235,8 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
     viewer?notifications(viewer,25):Promise.resolve({results:[]}),
     viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
   ]);
-  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
+  const messaging=await readMessagingPolicy();
+  return {features:policy.flags,messaging,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
 }
 
 /* ------------------------------ lightweight activity ------------------------------ */
@@ -243,12 +245,12 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
  * message count in one response, never the full notification join. */
 export async function activity(viewer:string){
   const policy=await featurePolicy(viewer);
-  if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags};
+  if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags,messaging:await readMessagingPolicy()};
   const [notifs,unread]=await Promise.all([
     policy.flags.notifications?notifications(viewer,10):Promise.resolve({results:[]}),
     policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
   ]);
-  return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags};
+  return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags,messaging:await readMessagingPolicy()};
 }
 
 /* ---------------------------- conversation (messages) ---------------------------- */
