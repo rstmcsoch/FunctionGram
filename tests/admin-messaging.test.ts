@@ -28,7 +28,7 @@ import { getTursoDb } from '../lib/turso';
 import { ensureSchema, getPool } from '../lib/postgres';
 import { db } from '../lib/server';
 import { validateFeatures, DEFAULT_FEATURES } from '../lib/features';
-import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy } from '../lib/messaging-policy';
+import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy, requirePrivateRecipientAllowed } from '../lib/messaging-policy';
 import { saveSetting } from '../lib/admin/core';
 import {
   MESSAGING_SETTING_KEYS, countMessageRestrictions,
@@ -140,6 +140,7 @@ beforeEach(async () => {
     'messages.maxLength': DEFAULT_MESSAGING.maxLength,
     'messages.rateWindowSeconds': DEFAULT_MESSAGING.rateWindowSeconds,
     'messages.rateMaxMessages': DEFAULT_MESSAGING.rateMaxMessages,
+    'messages.privateFollowersOnly': DEFAULT_MESSAGING.privateFollowersOnly,
   });
   await writeFeatures(DEFAULT_FEATURES);
 });
@@ -160,6 +161,7 @@ test('the messaging limits are registered settings with safe defaults', () => {
   assert.equal(defaults.maxLength, 2000);
   assert.equal(defaults.rateWindowSeconds, 60);
   assert.equal(defaults.rateMaxMessages, 30);
+  assert.equal(defaults.privateFollowersOnly, false, 'private accounts are open to everyone by default');
   // Malformed or hostile stored values never widen the policy. A zero window
   // is the one legitimate "off" value, so it is asserted separately.
   for (const value of [0, -1, 5000, 1.5, 'abc', null, {}]) {
@@ -170,18 +172,24 @@ test('the messaging limits are registered settings with safe defaults', () => {
     assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': value }).rateWindowSeconds, 60, `window ${JSON.stringify(value)} falls back`);
   }
   assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': 0 }).rateWindowSeconds, 0, 'a zero window disables the quota');
-  assert.deepEqual(messagingPolicy({ 'messages.maxLength': '40', 'messages.rateWindowSeconds': '0', 'messages.rateMaxMessages': '7' }), { maxLength: 40, rateWindowSeconds: 0, rateMaxMessages: 7 });
+  assert.deepEqual(messagingPolicy({ 'messages.maxLength': '40', 'messages.rateWindowSeconds': '0', 'messages.rateMaxMessages': '7' }), { maxLength: 40, rateWindowSeconds: 0, rateMaxMessages: 7, privateFollowersOnly: false });
 });
 
 test('saving messaging limits persists every key, audits each one and rejects out-of-range values', async () => {
   const result = await saveMessagingLimits(pool, owner.id, {
-    'messages.maxLength': 40, 'messages.rateWindowSeconds': 120, 'messages.rateMaxMessages': 7,
+    'messages.maxLength': 40, 'messages.rateWindowSeconds': 120, 'messages.rateMaxMessages': 7, 'messages.privateFollowersOnly': true,
   });
   assert.deepEqual(result.saved, [...MESSAGING_SETTING_KEYS]);
   assert.equal(await stored('messages.maxLength'), 40);
   assert.equal(await stored('messages.rateWindowSeconds'), 120);
   assert.equal(await stored('messages.rateMaxMessages'), 7);
-  assert.deepEqual(readMessagingLimits({ 'messages.maxLength': await stored('messages.maxLength'), 'messages.rateWindowSeconds': await stored('messages.rateWindowSeconds'), 'messages.rateMaxMessages': await stored('messages.rateMaxMessages') }), { maxLength: 40, rateWindowSeconds: 120, rateMaxMessages: 7 });
+  assert.equal(await stored('messages.privateFollowersOnly'), true);
+  assert.deepEqual(readMessagingLimits({
+    'messages.maxLength': await stored('messages.maxLength'),
+    'messages.rateWindowSeconds': await stored('messages.rateWindowSeconds'),
+    'messages.rateMaxMessages': await stored('messages.rateMaxMessages'),
+    'messages.privateFollowersOnly': await stored('messages.privateFollowersOnly'),
+  }), { maxLength: 40, rateWindowSeconds: 120, rateMaxMessages: 7, privateFollowersOnly: true });
   const writes = await audit('settings.write');
   // Audit values are stored as JSON text, exactly as the audit viewer reads them.
   assert.ok(writes.some(row => row.target_id === 'messages.maxLength' && Number(row.after) === 40), 'the length change is audited');
@@ -308,6 +316,42 @@ test('the API enforces the configured message length', async () => {
   assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'x'.repeat(40) })).status, 200, 'the configured limit is exactly reachable');
 });
 
+test('private accounts can be limited to their existing followers', async () => {
+  // Off by default: anyone may message a private account.
+  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
+  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'open by default' })).status, 200);
+  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
+
+  await saveMessagingLimits(pool, owner.id, { 'messages.privateFollowersOnly': true });
+  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
+  const gated = await api(alice, { action: 'message', id: bob.id, body: 'must be refused' });
+  assert.equal(gated.status, 403, 'a non-follower is refused');
+  assert.match(String(gated.data.error), /only accepts messages from accounts it follows/i);
+  const stored = await pool.query('SELECT id FROM messages WHERE sender_id=? AND body=?', [alice.id, 'must be refused']);
+  assert.equal(stored.rows.length, 0, 'nothing was written');
+
+  // The existing follow graph is the only gate: following opens it again.
+  await pool.query('INSERT INTO follows(follower_id,followee_id) VALUES(?,?)', [alice.id, bob.id]);
+  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'now a follower' })).status, 200);
+  await pool.query('DELETE FROM follows WHERE follower_id=? AND followee_id=?', [alice.id, bob.id]);
+
+  // A saved note to oneself is never gated, and lifting the switch reopens it.
+  assert.equal((await api(bob, { action: 'message', id: bob.id, body: 'note to self' })).status, 200);
+  await saveMessagingLimits(pool, owner.id, { 'messages.privateFollowersOnly': false });
+  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'open again' })).status, 200);
+  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
+
+  // A malformed stored value must never open the gate.
+  await pool.query("INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES('messages.privateFollowersOnly','\"yes\"',1,'t') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+  assert.equal(messagingPolicy({ 'messages.privateFollowersOnly': 'yes' }).privateFollowersOnly, false, 'a non-boolean falls back to off');
+  await pool.query('DELETE FROM app_settings WHERE key=?', ['messages.privateFollowersOnly']);
+  // The gate itself, called directly with a private recipient and no follow row.
+  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
+  await assert.rejects(() => requirePrivateRecipientAllowed(db(), alice.id, bob.id), /only accepts messages from accounts it follows/i);
+  await assert.doesNotReject(() => requirePrivateRecipientAllowed(db(), bob.id, bob.id), 'a saved note to oneself is never gated');
+  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
+});
+
 test('the API enforces the send quota and 0 disables it', async () => {
   await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 3600, 'messages.rateMaxMessages': 1 });
   assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'first' })).status, 200);
@@ -319,7 +363,7 @@ test('the API enforces the send quota and 0 disables it', async () => {
 
   await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 0 });
   assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'third' })).status, 200, 'a zero window switches the quota off');
-  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 60, 'messages.rateMaxMessages': 30 });
+  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 60, 'messages.rateMaxMessages': 30, 'messages.privateFollowersOnly': false });
 });
 
 test('each messaging feature switch is enforced by the API, not only by the UI', async () => {

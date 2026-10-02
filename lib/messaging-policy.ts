@@ -15,12 +15,15 @@ export type MessagingPolicy = {
   rateWindowSeconds: number;
   /** Maximum sends inside the window. */
   rateMaxMessages: number;
+  /** When on, a private account only accepts messages from its followers. */
+  privateFollowersOnly: boolean;
 };
 
 export const DEFAULT_MESSAGING: MessagingPolicy = {
   maxLength: 2000,
   rateWindowSeconds: 60,
   rateMaxMessages: 30,
+  privateFollowersOnly: false,
 };
 
 export const MESSAGING_LIMITS = {
@@ -32,8 +35,10 @@ export const MESSAGING_LIMITS = {
 const integer = (value: unknown, min: number, max: number) =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
 
+type NumericPolicyKey = 'maxLength' | 'rateWindowSeconds' | 'rateMaxMessages';
+
 /** Coerce one stored value, falling back to the default on anything invalid. */
-function bounded(value: unknown, key: keyof MessagingPolicy): number {
+function bounded(value: unknown, key: NumericPolicyKey): number {
   const limit = MESSAGING_LIMITS[key];
   const fallback: number = DEFAULT_MESSAGING[key];
   if (value === undefined || value === null || value === '') return fallback;
@@ -46,6 +51,12 @@ export function messagingPolicy(settings: Record<string, unknown>): MessagingPol
     maxLength: bounded(settings['messages.maxLength'], 'maxLength'),
     rateWindowSeconds: bounded(settings['messages.rateWindowSeconds'], 'rateWindowSeconds'),
     rateMaxMessages: bounded(settings['messages.rateMaxMessages'], 'rateMaxMessages'),
+    // A malformed value must never open the gate: anything that is not an
+    // explicit true falls back to the shipped default.
+    privateFollowersOnly: settings['messages.privateFollowersOnly'] === true
+      || settings['messages.privateFollowersOnly'] === 1
+      || settings['messages.privateFollowersOnly'] === 'true'
+      || settings['messages.privateFollowersOnly'] === '1',
   };
 }
 
@@ -112,6 +123,37 @@ export type MessageRestrictions = {
  * same pass. The check always runs on the server: the Admin Panel only decides
  * *what* the policy is, never whether it applies.
  */
+export interface MessageRecipientDb {
+  prepare(sql: string): {
+    bind(...values: unknown[]): { first<T>(): Promise<T | null> };
+  };
+}
+
+/**
+ * Private accounts may be limited to their followers.
+ *
+ * The follow graph already exists (`follows`), so this reuses it instead of
+ * introducing a second relationship model. Saved notes to oneself are always
+ * allowed: the sender is the recipient.
+ */
+export async function requirePrivateRecipientAllowed(
+  db: MessageRecipientDb,
+  senderId: string,
+  recipientId: string,
+) {
+  if (senderId === recipientId) return;
+  const recipient = await db
+    .prepare('SELECT is_private FROM profiles WHERE id=? AND deleted_at IS NULL')
+    .bind(recipientId)
+    .first<{ is_private: number }>();
+  if (!recipient || recipient.is_private !== 1) return;
+  const follows = await db
+    .prepare('SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?')
+    .bind(senderId, recipientId)
+    .first();
+  if (!follows) throw new AdminError('This account only accepts messages from accounts it follows.', 403);
+}
+
 export async function inspectMessageRestrictions(
   db: { prepare(sql: string): { bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> } } },
   senderId: string,

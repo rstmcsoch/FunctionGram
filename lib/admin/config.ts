@@ -26,6 +26,7 @@ export const SETTINGS_DEFAULTS = {
   'messages.maxLength': 2000,
   'messages.rateWindowSeconds': 60,
   'messages.rateMaxMessages': 30,
+  'messages.privateFollowersOnly': false,
 };
 export type Settings = typeof SETTINGS_DEFAULTS;
 export type SettingKey = keyof Settings;

@@ -127,25 +127,31 @@ export async function setDirectMessageControl(pool: PoolLike, actorId: string, i
 
 // --------------------- global messaging limits (settings) --------------------
 /** Keys an administrator may write from the Communications panel. */
-export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages'] as const;
+export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages', 'messages.privateFollowersOnly'] as const;
 export type MessagingSettingKey = typeof MESSAGING_SETTING_KEYS[number];
 export type MessagingLimits = MessagingPolicy;
 const POLICY_KEY: Record<MessagingSettingKey, keyof MessagingPolicy> = {
   'messages.maxLength': 'maxLength',
   'messages.rateWindowSeconds': 'rateWindowSeconds',
   'messages.rateMaxMessages': 'rateMaxMessages',
+  'messages.privateFollowersOnly': 'privateFollowersOnly',
 };
 
 /** Current limits, always the stored value or the shipped default. */
 export function readMessagingLimits(settings: Record<string, unknown>): MessagingLimits {
   const number = (key: MessagingSettingKey) => {
     const value = Number(settings[key]);
-    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]];
+    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]] as number;
+  };
+  const flag = (key: MessagingSettingKey) => {
+    const value = settings[key];
+    return typeof value === 'boolean' ? value : DEFAULT_MESSAGING[POLICY_KEY[key]] as boolean;
   };
   return {
     maxLength: Math.max(1, number('messages.maxLength') || DEFAULT_MESSAGING.maxLength),
     rateWindowSeconds: Math.max(0, number('messages.rateWindowSeconds')),
     rateMaxMessages: Math.max(1, number('messages.rateMaxMessages') || DEFAULT_MESSAGING.rateMaxMessages),
+    privateFollowersOnly: flag('messages.privateFollowersOnly'),
   };
 }
 
@@ -158,12 +164,16 @@ export function readMessagingLimits(settings: Record<string, unknown>): Messagin
  * messaging policy, not general platform settings.
  */
 export async function saveMessagingLimits(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
-  const next: Partial<Record<MessagingSettingKey, number>> = {};
+  const next: Partial<Record<MessagingSettingKey, number | boolean>> = {};
   for (const key of MESSAGING_SETTING_KEYS) {
-    if (input[key] === undefined) continue;
-    const value = typeof input[key] === 'string' ? Number(input[key]) : input[key];
-    if (typeof value !== 'number' || !Number.isFinite(value)) throw new AdminError('Enter a whole number for every messaging limit.');
-    next[key] = validateSetting(key, value) as number;
+    const raw = input[key];
+    if (raw === undefined) continue;
+    // Boolean switches arrive as booleans; numeric limits tolerate a numeric
+    // string so a form field never has to parse it first. `validateSetting`
+    // then applies the same bounds the API uses.
+    const value = typeof raw === 'boolean' ? raw : typeof raw === 'string' ? Number(raw) : raw;
+    if (typeof value !== 'number' && typeof value !== 'boolean') throw new AdminError('Enter a whole number for every messaging limit.');
+    next[key] = validateSetting(key, value) as number | boolean;
   }
   if (!Object.keys(next).length) throw new AdminError('Choose at least one messaging limit to change.');
   return transaction(pool, async db => {

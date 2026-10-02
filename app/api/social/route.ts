@@ -12,7 +12,7 @@ import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
 import { unsendMessage } from '@/lib/server';
-import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota } from '@/lib/messaging-policy';
+import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota,requirePrivateRecipientAllowed } from '@/lib/messaging-policy';
 import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
 import type {MediaOption} from '@/lib/types';
 export const maxDuration=60;
@@ -242,6 +242,9 @@ export async function POST(request:Request){
     // this is the enforcement.
     const restrictions=await inspectMessageRestrictions(database,user,recipientId);
     if(restrictions.blocked)throw new AppError(restrictions.reason,403);
+    // Optional follower gate for private accounts, reusing the existing
+    // follow graph rather than a second relationship model.
+    if(messaging.privateFollowersOnly)await requirePrivateRecipientAllowed(database,user,recipientId);
     // A block cuts off the blocked person's messages to the blocker.
     if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
     const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
