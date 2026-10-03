@@ -168,6 +168,8 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   const fileInput = useRef<HTMLInputElement>(null);
   const sequence = useRef(0);
   const messagesRef = useRef<OutgoingMessage[]>([]);
+  const sendLock = useRef(false);
+  const stickToBottom = useRef(true);
   const cancelInFlight = useCallback(() => { sequence.current += 1; }, []);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -213,8 +215,11 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
       // A response for a conversation the reader has left is dropped: stale
       // async results must never land in another thread.
       if (version !== sequence.current || signal?.aborted) return;
-      setMessages(current => mergeIncoming([...page.items].reverse(), current));
-      setOlderCursor(page.next_cursor);
+      setMessages(current => {
+        const next = mergeIncoming([...page.items].reverse(), current);
+        return sameThread(next, current) ? current : next;
+      });
+      setOlderCursor(current => current && messagesRef.current.length > page.items.length ? current : page.next_cursor);
       setError("");
       setLoading(false);
       if (state) setConvState(state);
@@ -261,6 +266,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
     setOtherTyping(false);
     setHighlight(null);
     setError("");
+    stickToBottom.current = true;
     setRecipient(peerId);
     setMobileChat(true);
     setActiveRowMenu(null);
@@ -357,13 +363,42 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
     // list is already gated on the same length, so no state has to be cleared.
     if (term.length < 2) return;
     const controller = new AbortController();
-    void request<Person[]>("/api/social?messages_search=" + encodeURIComponent(term), undefined, t, controller.signal)
-      .then(items => setSearchHits(items))
-      .catch(() => {});
-    return () => controller.abort();
+    const timer = setTimeout(() => {
+      void request<Person[]>("/api/social?messages_search=" + encodeURIComponent(term), undefined, t, controller.signal)
+        .then(items => setSearchHits(items))
+        .catch(() => {});
+    }, 200);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [query, t]);
 
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages.length]);
+  // Keep the latest message in view without scrolling the page. Loading earlier
+  // history must not yank the reader back to the bottom.
+  useEffect(() => {
+    const node = thread.current;
+    if (!node || !stickToBottom.current) return;
+    node.scrollTop = node.scrollHeight;
+  }, [messages.length]);
+
+  // The layout viewport does not shrink when the mobile keyboard opens, so the
+  // composer would sit underneath it. Track the covered strip and let CSS pin
+  // the thread above whichever of the dock or the keyboard is lower.
+  useEffect(() => {
+    const root = document.documentElement;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--keyboard-inset", covered + "px");
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      root.style.removeProperty("--keyboard-inset");
+    };
+  }, []);
 
   /* ---------------------------------------------------------------- */
   /*  Pagination, jump and highlight                                   */
@@ -443,7 +478,8 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   /** Send text (or a reply), optimistically, with a real rollback. */
   const send = async () => {
     const text = body.trim();
-    if ((!text && !replyTo) || busy) return;
+    if (!text || busy || sendLock.current) return;
+    sendLock.current = true;
     const targetRecipient = recipient;
     const version = sequence.current;
     const caption = text;
@@ -479,7 +515,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
       setMessages(value => value.filter(item => item.id !== optimistic.id));
       setBody(caption);
       toast.error((e as Error).message);
-    } finally { setBusy(false); }
+    } finally { sendLock.current = false; setBusy(false); }
   };
 
   /**
@@ -864,6 +900,40 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
 
   useEffect(() => () => { stopTimer(); releaseMicrophone(); }, []);
 
+  const popoverOpen = emojiOpen || attachOpen || stickerOpen || gifOpen || shareOpen || activeActionMenu !== null || activeRowMenu !== null || reactionPickerMessage !== null;
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setEmojiOpen(false);
+      setAttachOpen(false);
+      setStickerOpen(false);
+      setGifOpen(false);
+      setShareOpen(false);
+      setActiveActionMenu(null);
+      setActiveRowMenu(null);
+      setReactionPickerMessage(null);
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest(".emoji-picker, .emoji-anchor, .attach-menu, .attach-anchor, .sticker-picker, .gif-picker, .share-picker, .message-action-menu, .message-action-trigger, .row-menu, .row-menu-trigger, .reaction-picker")) return;
+      setEmojiOpen(false);
+      setAttachOpen(false);
+      setStickerOpen(false);
+      setGifOpen(false);
+      setShareOpen(false);
+      setActiveActionMenu(null);
+      setActiveRowMenu(null);
+      setReactionPickerMessage(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [popoverOpen]);
+
   /* ---------------------------------------------------------------- */
   /*  View once                                                        */
   /* ---------------------------------------------------------------- */
@@ -1175,7 +1245,10 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
         )}
 
         {/* ---- Thread ---- */}
-        <div ref={thread} className={"chat-content" + themeClass}>
+        <div ref={thread} className={"chat-content" + themeClass} onScroll={event => {
+          const node = event.currentTarget;
+          stickToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+        }}>
           {loading ? (
             <div className="loading-row"><Busy /></div>
           ) : messages.length ? (<>
@@ -1460,6 +1533,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
                 onKeyUp={event => setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length)}
                 onClick={event => setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length)}
                 onBlur={() => { if (isTyping) clearTyping(); }}
+                enterKeyHint="send"
               />
 
               {/* View once applies to a photo or a video, chosen before picking. */}
@@ -1512,6 +1586,18 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
  * Polling must not drop an optimistic message that is still in flight, and must
  * not duplicate a message that arrived while the request was open.
  */
+function sameThread(next: OutgoingMessage[], current: OutgoingMessage[]): boolean {
+  if (next.length !== current.length) return false;
+  for (let i = 0; i < next.length; i += 1) {
+    const a = next[i];
+    const b = current[i];
+    if (a.id !== b.id || a.pending !== b.pending || a.body !== b.body || a.read_at !== b.read_at || a.delivered_at !== b.delivered_at || a.edited_at !== b.edited_at || a.saved !== b.saved || a.view_once_consumed !== b.view_once_consumed) return false;
+    const reactions = (list: OutgoingMessage) => (list.reactions || []).map(item => item.user_id + ":" + item.emoji).join(",");
+    if (reactions(a) !== reactions(b)) return false;
+  }
+  return true;
+}
+
 function mergeIncoming(incoming: Message[], current: OutgoingMessage[]): OutgoingMessage[] {
   if (!current.length) return incoming as OutgoingMessage[];
   const pending = current.filter(item => item.pending);
