@@ -7,7 +7,7 @@ import { PageHead } from '@/components/admin/page-head';
 import { AutoBadge } from '@/components/admin/badge';
 
 const labels:Record<string,string>={
- 'admin.access':'Open admin panel','dashboard.read':'View dashboard','content.read':'Read content','content.moderate':'Hide or unhide content','users.read':'Read accounts','users.manage':'Manage non-role account actions','roles.manage':'Grant or revoke roles','settings.manage':'Manage site settings and moderation policy','media.manage':'Manage media','moderation.read':'Read reports','moderation.triage':'Assign, note, dismiss or hide reports','moderation.accounts':'Apply account safety restrictions','moderation.rates':'Inspect and clear rate limits','audit.read':'Read and export audit history','security.read':'Read security policy',
+ 'admin.access':'Open admin panel','dashboard.read':'View dashboard','content.read':'Read content','content.moderate':'Hide or unhide content','users.read':'Read accounts','users.manage':'Manage non-role account actions','users.delete':'Delete or restore accounts','roles.manage':'Grant or revoke roles','settings.manage':'Manage site settings and moderation policy','media.manage':'Manage media','moderation.read':'Read reports','moderation.triage':'Assign, note, dismiss or hide reports','moderation.accounts':'Apply account safety restrictions','moderation.rates':'Inspect and clear rate limits','audit.read':'Read and export audit history','security.read':'Read security policy',
 };
 export default async function SecurityPage(){
  const actor=await requireAdminPage(),pool=await getPool();
