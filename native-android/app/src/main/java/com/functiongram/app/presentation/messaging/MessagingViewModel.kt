@@ -77,6 +77,23 @@ class MessagingViewModel(
         loadThread(summary.peerId, cursor = null, prepend = false)
     }
 
+    fun openPeer(peerId: String, title: String) {
+        if (peerId.isBlank()) return
+        _state.update {
+            it.copy(
+                openPeerId = peerId,
+                openTitle = title.ifBlank { "Conversation" },
+                threadStatus = ScreenStatus.Loading,
+                messages = emptyList(),
+                nextCursor = null,
+                threadMessage = null,
+                sendMessage = null,
+                viewer = null,
+            )
+        }
+        loadThread(peerId, cursor = null, prepend = false)
+    }
+
     fun closeThread() {
         threadGeneration++
         threadJob?.cancel()

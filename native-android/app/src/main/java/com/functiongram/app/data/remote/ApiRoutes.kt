@@ -97,6 +97,51 @@ object ApiRoutes {
         return base + "&cursor=" + encode(cursor)
     }
 
+    /** `GET /api/social?person=` accepts an account id or a username. */
+    fun person(origin: String, idOrUsername: String): String {
+        require(validResourceId(idOrUsername)) { "Please complete the required fields." }
+        return social(origin) + "?person=" + encode(idOrUsername)
+    }
+
+    /**
+     * Posts for one account. The query value is the account id, after the
+     * username route has been resolved. This is not a `/profile` path.
+     */
+    fun profilePosts(origin: String, authorId: String): String {
+        require(validResourceId(authorId)) { "Invalid profile." }
+        return social(origin) + "?profile=" + encode(authorId)
+    }
+
+    /** `GET /api/social?search=`. The server rejects a term longer than 80. */
+    fun search(origin: String, term: String): String {
+        val trimmed = term.trim()
+        require(trimmed.isNotEmpty() && trimmed.length <= 80) { "Please check the length of your text." }
+        return social(origin) + "?search=" + encode(trimmed)
+    }
+
+    /** People directory. Not a search, and not gated by the search flag. */
+    fun people(origin: String, limit: Int = 40, offset: Int = 0): String {
+        val bounded = limit.coerceIn(1, 60)
+        val boundedOffset = offset.coerceIn(0, 100_000)
+        return social(origin) + "?people=1&limit=" + bounded + "&offset=" + boundedOffset
+    }
+
+    fun notifications(origin: String): String = social(origin) + "?notifications=1"
+
+    fun relations(origin: String, id: String, kind: String): String {
+        require(validResourceId(id)) { "Invalid profile." }
+        require(kind == "followers" || kind == "following") { "Invalid relationship." }
+        return social(origin) + "?relations=" + encode(id) + "&kind=" + kind
+    }
+
+    fun savedPosts(origin: String): String = social(origin) + "?saved=1"
+
+    fun collections(origin: String): String = social(origin) + "?collections=1"
+
+    fun changeEmail(origin: String): String = auth(origin, "change-email")
+
+    fun deleteUser(origin: String): String = auth(origin, "delete-user")
+
     private fun encode(value: String): String =
         java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 

@@ -43,6 +43,13 @@ object FeedCodec {
         return FeedCall.Ok(posts)
     }
 
+    /** Posts nested inside another JSON object, such as search. Absent means none. */
+    fun nestedPosts(element: JsonElement?): FeedCall<List<FeedPost>> {
+        if (element == null || element is JsonNull) return FeedCall.Ok(emptyList())
+        val parsed = posts(element) ?: return unreadable(200)
+        return FeedCall.Ok(parsed)
+    }
+
     fun following(status: Int, body: String): FeedCall<FollowingPage> {
         if (status !in 200..299) return FeedCall.Err(failure(status, body))
         val root = parseObject(body) ?: return unreadable(status)
