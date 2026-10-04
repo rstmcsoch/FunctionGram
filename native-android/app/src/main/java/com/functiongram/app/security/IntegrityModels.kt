@@ -61,7 +61,8 @@ object IntegrityEvaluator {
 object ReleaseCertificatePin {
     /**
      * SHA-256 fingerprints of a production signing certificate.
-     * Empty until a real release keystore exists. Do not invent one.
+     * Empty until a real production certificate exists. Do not invent one,
+     * and do not paste the Android debug certificate or a local proof key here.
      * An empty set keeps the verdict informational.
      */
     val sha256Hex: Set<String> = emptySet()

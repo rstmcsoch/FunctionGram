@@ -64,3 +64,9 @@ android/local.properties
 /native-android/app/build/
 /native-android/local.properties
 /native-android/.idea/
+
+# Native Android release signing. Never commit keystores or passwords.
+*.jks
+*.keystore
+keystore.properties
+**/keystore.properties
