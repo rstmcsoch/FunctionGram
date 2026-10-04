@@ -13,6 +13,10 @@ object ApiRoutes {
     const val MEDIA = "/api/media"
     const val MESSAGE_ATTACHMENT = "/api/message-attachment"
     const val MESSAGE_MEDIA = "/api/message-media"
+    const val SIGN_IN_EMAIL = "sign-in/email"
+    const val GET_SESSION = "get-session"
+    const val SIGN_OUT = "sign-out"
+    const val VERIFY_TOTP = "two-factor/verify-totp"
 
     fun health(origin: String): String = join(origin, HEALTH)
 
