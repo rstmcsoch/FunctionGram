@@ -2,6 +2,7 @@ package com.functiongram.app.presentation.messaging
 
 import com.functiongram.app.data.messaging.ChatMessage
 import com.functiongram.app.data.messaging.ConversationSummary
+import com.functiongram.app.data.policy.ServerFeatures
 
 enum class ScreenStatus {
     Idle,
@@ -27,6 +28,7 @@ class PhotoViewerState(
 
 data class MessagingUiState(
     val viewerId: String = "",
+    val features: ServerFeatures = ServerFeatures(),
     val listStatus: ScreenStatus = ScreenStatus.Loading,
     val conversations: List<ConversationSummary> = emptyList(),
     val unreadTotal: Int = 0,

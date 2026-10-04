@@ -54,3 +54,5 @@ No account was created, changed, or deleted. Guest browsing was on, so some read
 - A post opened from search does not load its comment thread.
 - Email change and account deletion only start the existing email confirmation. They were not called against the live service.
 - Highlights, tagging grids, and the dock Saved destination are not screens here.
+
+Feature-policy / admin flag consumption for the shell is Phase 9. See `POLICY.md`.

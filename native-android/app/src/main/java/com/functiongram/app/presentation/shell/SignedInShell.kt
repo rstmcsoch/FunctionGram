@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.functiongram.app.data.auth.PublicProfile
 import com.functiongram.app.data.directory.DirectoryFlags
+import com.functiongram.app.data.policy.FeaturePolicy
+import com.functiongram.app.data.policy.ServerFeatures
 import com.functiongram.app.data.directory.DirectoryRepository
 import com.functiongram.app.data.feed.FeedRepository
 import com.functiongram.app.data.messaging.MessagingRepository
@@ -57,6 +59,15 @@ fun SignedInShell(
     val session: ShellSessionViewModel = viewModel(factory = ShellSessionViewModel.factory(directory))
     val sessionState by session.state.collectAsStateWithLifecycle()
     val flags = sessionState.shell?.flags ?: DirectoryFlags()
+    androidx.compose.runtime.LaunchedEffect(flags) {
+        val current = ShellCatalog.destination(selectedId) ?: ShellDestination.HOME
+        if (!ShellCatalog.allows(current, flags)) {
+            selectedId = ShellDestination.HOME.id
+            profileLookup = null
+            settingsOpen = false
+            createOpen = false
+        }
+    }
     val selfLookup = sessionState.shell?.me?.username?.takeIf { it.isNotBlank() } ?: viewerId
 
     BackHandler(enabled = settingsOpen || profileLookup != null) {
@@ -68,12 +79,19 @@ fun SignedInShell(
 
     FunctionGramShell(
         selected = selected,
-        onSelect = {
-            profileLookup = null
-            settingsOpen = false
-            selectedId = it.id
+        onSelect = { destination ->
+            if (ShellCatalog.allows(destination, flags)) {
+                profileLookup = null
+                settingsOpen = false
+                selectedId = destination.id
+            }
         },
-        onCreate = { createOpen = true },
+        onCreate = {
+            if (ShellCatalog.allowsCreate(flags)) {
+                createOpen = true
+            }
+        },
+        features = flags,
     ) { padding ->
         when {
             settingsOpen -> {
@@ -100,10 +118,12 @@ fun SignedInShell(
                         onBack = { profileLookup = null },
                         onOpenProfile = { profileLookup = it },
                         onMessage = { id, title ->
-                            messagePeer = id
-                            messageTitle = title
-                            profileLookup = null
-                            selectedId = ShellDestination.MESSAGES.id
+                            if (FeaturePolicy.canOpenMessages(flags)) {
+                                messagePeer = id
+                                messageTitle = title
+                                profileLookup = null
+                                selectedId = ShellDestination.MESSAGES.id
+                            }
                         },
                         onSettings = { settingsOpen = true },
                     )
@@ -112,14 +132,24 @@ fun SignedInShell(
             else -> when (selected) {
                 ShellDestination.MESSAGES -> {
                     Box(Modifier.fillMaxSize().padding(padding)) {
-                        MessagingRoute(
-                            repository = messaging,
-                            viewerId = viewerId,
-                            shellBottom = padding.calculateBottomPadding(),
-                            pendingPeerId = messagePeer,
-                            pendingTitle = messageTitle,
-                            onPendingPeerConsumed = { messagePeer = null },
-                        )
+                        if (!FeaturePolicy.canOpenMessages(flags)) {
+                            Text(
+                                text = FeaturePolicy.FEATURE_OFF,
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            MessagingRoute(
+                                repository = messaging,
+                                viewerId = viewerId,
+                                shellBottom = padding.calculateBottomPadding(),
+                                features = flags,
+                                pendingPeerId = messagePeer,
+                                pendingTitle = messageTitle,
+                                onPendingPeerConsumed = { messagePeer = null },
+                            )
+                        }
                     }
                 }
                 ShellDestination.HOME -> {
@@ -134,7 +164,16 @@ fun SignedInShell(
                 }
                 ShellDestination.REELS -> {
                     Box(Modifier.fillMaxSize().padding(padding)) {
-                        ReelsRoute(repository = feed)
+                        if (!flags.reels) {
+                            Text(
+                                text = FeaturePolicy.FEATURE_OFF,
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            ReelsRoute(repository = feed)
+                        }
                     }
                 }
                 ShellDestination.SEARCH -> DirectoryGate(sessionState.status, sessionState.message, session::refresh, padding) {
@@ -165,9 +204,11 @@ fun SignedInShell(
                         onBack = null,
                         onOpenProfile = { profileLookup = it },
                         onMessage = { id, title ->
-                            messagePeer = id
-                            messageTitle = title
-                            selectedId = ShellDestination.MESSAGES.id
+                            if (FeaturePolicy.canOpenMessages(flags)) {
+                                messagePeer = id
+                                messageTitle = title
+                                selectedId = ShellDestination.MESSAGES.id
+                            }
                         },
                         onSettings = { settingsOpen = true },
                     )

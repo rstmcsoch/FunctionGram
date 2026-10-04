@@ -57,6 +57,8 @@ import com.functiongram.app.data.messaging.MessageMediaRef
 import com.functiongram.app.data.messaging.MessagingCodec
 import com.functiongram.app.data.messaging.MessagingCopy
 import com.functiongram.app.data.messaging.MessagingRepository
+import com.functiongram.app.data.policy.FeaturePolicy
+import com.functiongram.app.data.policy.ServerFeatures
 import com.functiongram.app.presentation.ui.FgErrorState
 import com.functiongram.app.presentation.ui.FgInlineMessage
 import com.functiongram.app.presentation.ui.FgLoading
@@ -71,6 +73,7 @@ fun MessagingRoute(
     repository: MessagingRepository,
     viewerId: String,
     shellBottom: Dp,
+    features: ServerFeatures = ServerFeatures(),
     pendingPeerId: String? = null,
     pendingTitle: String = "",
     onPendingPeerConsumed: () -> Unit = {},
@@ -80,6 +83,7 @@ fun MessagingRoute(
         factory = MessagingViewModel.factory(repository, viewerId),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(features) { viewModel.applyFeatures(features) }
     LaunchedEffect(pendingPeerId) {
         val peer = pendingPeerId ?: return@LaunchedEffect
         viewModel.openPeer(peer, pendingTitle)
@@ -117,13 +121,16 @@ fun MessagingRoute(
         } else {
             ThreadScreen(
                 state = state,
+                photoAllowed = FeaturePolicy.canSendPhoto(state.features),
                 onBack = viewModel::closeThread,
                 onRetry = viewModel::retryThread,
                 onEarlier = viewModel::loadEarlier,
                 onDraft = viewModel::onDraft,
                 onSend = viewModel::sendText,
                 onPhoto = {
-                    picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                    if (FeaturePolicy.canSendPhoto(state.features)) {
+                        picker.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                    }
                 },
                 onOpenPhoto = viewModel::openPhoto,
             )
@@ -268,6 +275,7 @@ private fun ConversationRow(item: ConversationSummary, onClick: () -> Unit) {
 @Composable
 private fun ThreadScreen(
     state: MessagingUiState,
+    photoAllowed: Boolean,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onEarlier: () -> Unit,
@@ -347,6 +355,7 @@ private fun ThreadScreen(
         Composer(
             draft = state.draft,
             sending = state.sending,
+            photoAllowed = photoAllowed,
             onDraft = onDraft,
             onSend = onSend,
             onPhoto = onPhoto,
@@ -409,6 +418,7 @@ private fun MessageBubble(message: ChatMessage, mine: Boolean, onOpenPhoto: () -
 private fun Composer(
     draft: String,
     sending: Boolean,
+    photoAllowed: Boolean,
     onDraft: (String) -> Unit,
     onSend: () -> Unit,
     onPhoto: () -> Unit,
@@ -419,8 +429,10 @@ private fun Composer(
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        IconButton(onClick = onPhoto, enabled = !sending) {
-            Icon(Icons.Outlined.Image, contentDescription = "Send a photo")
+        if (photoAllowed) {
+            IconButton(onClick = onPhoto, enabled = !sending) {
+                Icon(Icons.Outlined.Image, contentDescription = "Send a photo")
+            }
         }
         androidx.compose.material3.OutlinedTextField(
             value = draft,

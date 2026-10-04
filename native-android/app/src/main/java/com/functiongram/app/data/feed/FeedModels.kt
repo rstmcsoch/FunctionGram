@@ -48,14 +48,11 @@ data class FeedPost(
     val highlighted: Boolean,
 )
 
-data class FeedFlags(
-    val stories: Boolean = false,
-    val reels: Boolean = false,
-    val follow: Boolean = false,
-    val comments: Boolean = false,
-    val likes: Boolean = false,
-    val saves: Boolean = false,
-)
+/**
+ * Feed-facing alias for the admin feature document.
+ * Prefer [com.functiongram.app.data.policy.ServerFeatures] for new call sites.
+ */
+typealias FeedFlags = com.functiongram.app.data.policy.ServerFeatures
 
 /**
  * Public story settings from `bootstrap.stories`.

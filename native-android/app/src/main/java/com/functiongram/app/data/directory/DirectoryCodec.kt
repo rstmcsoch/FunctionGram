@@ -1,5 +1,7 @@
 package com.functiongram.app.data.directory
 
+import com.functiongram.app.data.policy.ServerFeatures
+
 import com.functiongram.app.data.feed.FeedCall
 import com.functiongram.app.data.feed.FeedCodec
 import com.functiongram.app.data.feed.FeedCopy
@@ -187,24 +189,7 @@ object DirectoryCodec {
         )
     }
 
-    private fun flags(element: JsonElement?): DirectoryFlags {
-        val objectItem = element as? JsonObject ?: return DirectoryFlags()
-        return DirectoryFlags(
-            search = flag(objectItem["search"]),
-            notifications = flag(objectItem["notifications"]),
-            follow = flag(objectItem["follow"]),
-            privateAccounts = flag(objectItem["privateAccounts"]),
-            uploads = flag(objectItem["uploads"]),
-            saves = flag(objectItem["saves"]),
-            reels = flag(objectItem["reels"]),
-            stories = flag(objectItem["stories"]),
-            reports = flag(objectItem["reports"]),
-            messages = flag(objectItem["messages"]),
-            tagging = flag(objectItem["tagging"]),
-            comments = flag(objectItem["comments"]),
-            guestBrowsing = flag(objectItem["guestBrowsing"]),
-        )
-    }
+    private fun flags(element: JsonElement?): DirectoryFlags = ServerFeatures.parse(element)
 
     private fun firstMedia(element: JsonElement?): String? {
         val raw = when (element) {

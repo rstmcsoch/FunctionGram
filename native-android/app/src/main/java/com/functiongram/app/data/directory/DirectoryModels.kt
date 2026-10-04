@@ -23,21 +23,11 @@ data class DirectoryPerson(
     val blocked: Boolean,
 )
 
-data class DirectoryFlags(
-    val search: Boolean = false,
-    val notifications: Boolean = false,
-    val follow: Boolean = false,
-    val privateAccounts: Boolean = false,
-    val uploads: Boolean = false,
-    val saves: Boolean = false,
-    val reels: Boolean = false,
-    val stories: Boolean = false,
-    val reports: Boolean = false,
-    val messages: Boolean = false,
-    val tagging: Boolean = false,
-    val comments: Boolean = false,
-    val guestBrowsing: Boolean = false,
-)
+/**
+ * Directory-facing alias for the admin feature document.
+ * Prefer [com.functiongram.app.data.policy.ServerFeatures] for new call sites.
+ */
+typealias DirectoryFlags = com.functiongram.app.data.policy.ServerFeatures
 
 data class AccountShell(
     val flags: DirectoryFlags,

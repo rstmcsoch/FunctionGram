@@ -81,8 +81,8 @@ android {
         applicationId = "com.functiongram.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.8.0-phase8"
+        versionCode = 9
+        versionName = "0.9.0-phase9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
