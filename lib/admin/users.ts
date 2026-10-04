@@ -2,6 +2,7 @@ import type { PoolLike } from '../postgres';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { AdminError } from './validation';
 import { requirePermission } from './permissions';
+import { assertCanGrant } from './role-matrix';
 
 export const USER_ACTIONS = ['ban','unban','promote','promoteModerator','demote','signout','verify','delete','restore','resetPassword'] as const;
 export type UserAction = typeof USER_ACTIONS[number];
@@ -20,15 +21,21 @@ export async function changeUser(pool: PoolLike, actorId: string, input: UserCom
     await db.query('SELECT pg_advisory_xact_lock(67291007)');
     const actor = await authorizeAdmin(db, actorId);
     requirePermission(actor,'users.manage');
-    const { rows: [target] } = await db.query('SELECT id,email,role,banned,"banReason","banExpires","emailVerified",deleted_at FROM "user" WHERE id=$1 FOR UPDATE', [command.id]);
+    const { rows: [target] } = await db.query('SELECT id,email,role,banned,"banReason","banExpires","emailVerified",deleted_at,"twoFactorEnabled" FROM "user" WHERE id=$1 FOR UPDATE', [command.id]);
     if (!target) throw new AdminError('Account not found.', 404);
     if (command.confirmation !== target.email) throw new AdminError('Type the exact account email to confirm.');
     if (actorId === target.id && !['signout','resetPassword'].includes(command.action)) throw new AdminError('You cannot change your own account here.', 403);
     if (target.role === 'owner' && actorId !== target.id) throw new AdminError('Owner accounts are protected. Use reviewed out-of-band recovery if access is lost.', 403);
-    if ((['promote','promoteModerator','demote'].includes(command.action) || ['admin','moderator'].includes(target.role)) && actor.role !== 'owner' && actorId !== target.id) throw new AdminError('Only an owner can manage administrator accounts or grant roles.', 403);
-    if (['promote','promoteModerator','demote'].includes(command.action) && actor.role !== 'owner') throw new AdminError('Only an owner can grant or revoke administrator roles.', 403);
+    if (command.action === 'delete') requirePermission(actor, 'users.delete');
+    if (command.action === 'promote') assertCanGrant(actor.role, actor.permissions, 'admin');
+    if (command.action === 'promoteModerator') assertCanGrant(actor.role, actor.permissions, 'moderator');
+    if (command.action === 'demote') {
+      if (target.role === 'admin') assertCanGrant(actor.role, actor.permissions, 'admin');
+      else if (target.role === 'moderator') assertCanGrant(actor.role, actor.permissions, 'moderator');
+    }
+    if (['admin','moderator'].includes(target.role) && actor.role !== 'owner' && !(actor.role === 'admin' && target.role === 'moderator')) throw new AdminError('Only an owner can manage administrator accounts or grant roles.', 403);
+    if (['promote','promoteModerator'].includes(command.action) && (target.role !== 'user' || !target.emailVerified || target.banned || !target.twoFactorEnabled)) throw new AdminError('Verify the email, enable two-factor authentication, and unban the account before granting a role.');
     if (target.deleted_at != null && command.action !== 'restore') throw new AdminError('Restore this account before making other changes.');
-    if (['promote','promoteModerator'].includes(command.action) && (target.role !== 'user' || !target.emailVerified || target.banned)) throw new AdminError('Verify and unban a regular account before granting an administrator role.');
     if (command.action === 'demote' && !['admin','moderator'].includes(target.role)) throw new AdminError('Choose an admin or moderator account to revoke.');
     if (command.action === 'resetPassword') {
       const { rows } = await db.query(`SELECT id FROM admin_audit_log WHERE action='users.resetPassword' AND target_id=$1 AND created_at>$2 LIMIT 1`, [target.id, Date.now()-60000]);

@@ -3,7 +3,8 @@ import {MIB} from '../media-config';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
 import { AdminError } from './validation';
-import { requirePermission } from './permissions';
+import { requirePermission, hasPermission } from './permissions';
+import { queueDeletion } from './roles';
 import { contentConfirmationName } from './content-label';
 import { checkReelDuration, storyVideoLimit } from '../reel-duration';
 import { inPlaceholders } from '../sql';
@@ -109,7 +110,8 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   if(resource==='comments'&&['pin','unpin','expire','highlight','counters'].includes(action))throw new AdminError('This operation is only for posts.');
   const initialActor=await authorizeAdmin(pool,actorId,action==='purge');
   requirePermission(initialActor,'content.moderate');
-  if(initialActor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
+  if(initialActor.role==='moderator'&&!['hide','unhide','delete'].includes(action))throw new AdminError('Moderators can hide content or request deletion. They cannot edit details.',403);
+  if(['edit','counters','pin','unpin','expire','highlight'].includes(action))requirePermission(initialActor,'content.edit');
   // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
   // compare the row again under lock so a concurrent edit cannot be overwritten.
   let original:Record<string,unknown>|undefined,patch:Record<string,unknown>|undefined;
@@ -121,7 +123,15 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   return transaction(pool,async db=>{
     const actor=await authorizeAdmin(db,actorId,action==='purge');
     requirePermission(actor,'content.moderate');
-    if(actor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
+    if(actor.role==='moderator'&&!['hide','unhide','delete'].includes(action))throw new AdminError('Moderators can hide content or request deletion. They cannot edit details.',403);
+    if(action==='delete'&&!hasPermission(actor.role,'content.delete',actor.permissions)){
+      requirePermission(actor,'content.deleteRequest');
+      if(!reason)throw new AdminError('A reason is required before a moderator can request deletion.');
+      const queued=await queueDeletion(db,actor.userId,resource,String(ids[0]),reason);
+      await insertAudit(db,actor,{action:'content.delete.request',targetType:resource,targetId:String(ids[0]),after:queued,reason});
+      return {ok:true,queued:true,executeAt:queued.executeAt,changed:0};
+    }
+    if(action==='purge'||action==='delete')requirePermission(actor,'content.delete');
     if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
     if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
     // Always lock in ID order to avoid deadlocks between overlapping bulk selections.

@@ -10,6 +10,7 @@ import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
 import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
+import { ROLE_TABLES } from './admin/role-matrix';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -133,6 +134,10 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     statements: [
       "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
     ],
+  },
+  {
+    version: 19,
+    statements: ROLE_TABLES,
   },
 ];
 

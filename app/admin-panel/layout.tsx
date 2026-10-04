@@ -33,7 +33,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const actor = await requireAdminPage();
   const groups: AdminNavGroup[] = [];
   for (const item of navigation) {
-    if (!hasPermission(actor.role, item.permission)) continue;
+    if (!hasPermission(actor.role, item.permission, actor.permissions) && !(item.permission === 'settings.manage' && hasPermission(actor.role, 'settings.read', actor.permissions))) continue;
     const group = groups.find(entry => entry.label === item.group) ?? (groups.push({ label: item.group, hint: item.hint, items: [] }), groups[groups.length - 1]);
     group.items.push({ label: item.label, href: ADMIN_BASE_PATH + item.path, icon: item.icon, match: item.path ? 'prefix' : 'exact' });
   }

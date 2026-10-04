@@ -7,6 +7,7 @@ import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
 import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
 import { checkReelDuration, storyVideoLimit } from '@/lib/reel-duration';
 import { AdminError } from '@/lib/admin/validation';
+import { activeHold } from '@/lib/admin/roles';
 import { visibleComment, visiblePost } from '@/lib/content-visibility';
 import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
@@ -273,6 +274,8 @@ export async function POST(request:Request){
   if(action==='message'&&input.post_id)requireFeature(policy,'shares');
   if(!policy.flags.tagging){if(action==='update_post')delete input.tagged_users;else if(Array.isArray(input.tagged_users)&&input.tagged_users.length)requireFeature(policy,'tagging');}
   if(action==='profile'&&!policy.flags.uploads){const existing=await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>();if(input.avatar!==undefined&&input.avatar!==existing?.avatar)requireFeature(policy,'uploads');input.avatar=existing?.avatar||'';}
+  const holdKind=action==='comment'?'comment':action==='reaction'&&input.kind==='like'?'like':action==='create_post'?'upload':null;
+  if(holdKind){const hold=await activeHold(await getPool(),user,holdKind);if(hold)throw new AppError('This action is paused by moderation until the hold expires.',403);}
   const id=typeof input.id==='string'?clean(input.id,100):'';const now=Date.now();
   if(action==='reaction'){
     const kind=clean(input.kind,20,true);if(!['like','save','seen','hidden'].includes(kind)||typeof input.active!=='boolean')throw new AppError('Invalid action.');

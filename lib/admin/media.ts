@@ -2,7 +2,8 @@ import type {PoolLike,QueryExecutor} from '../postgres';
 import {localDevDatabase} from '../postgres';
 import {transaction,authorizeAdmin,insertAudit} from './core';
 import {AdminError} from './validation';
-import {requirePermission} from './permissions';
+import {requirePermission,hasPermission} from './permissions';
+import {queueDeletion} from './roles';
 import {MEDIA_LOCK,readMediaConfig,checkUploadInput} from '../media-policy';
 import {localAssetPath} from '../media-storage';
 import {del} from '@vercel/blob';
@@ -52,6 +53,14 @@ export async function changeMedia(pool:PoolLike,actorId:string,body:Record<strin
   let status=asset.status,deleted=asset.deleted_at,origin=asset.trash_origin;
   if(action==='quarantine'){if(status!=='ready')throw new AdminError('Choose a ready asset.');status='quarantined';}
   if(action==='release'){if(status!=='quarantined'||!asset.verified)throw new AdminError('Only previously verified media can be released. Failed uploads must be replaced.');const c=await readMediaConfig(db);checkUploadInput({...c,enabled:true},Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);status='ready';}
+  if(action==='trash'&&!hasPermission(actor.role,'media.delete',actor.permissions)){
+    requirePermission(actor,'content.deleteRequest');
+    if(!reason)throw new AdminError('A reason is required before a moderator can request deletion.');
+    const queued=await queueDeletion(db,actor.userId,'asset',key,reason);
+    await insertAudit(db,actor,{action:'media.delete.request',targetType:'asset',targetId:key,after:queued,reason});
+    return {key,blob_url:'',source_blob_url:'',status:'pending-deletion'};
+  }
+  if(['trash','purge'].includes(action))requirePermission(actor,'media.delete');
   if(action==='trash'){if(!['ready','quarantined'].includes(status)||asset.referenced)throw new AdminError('Only unreferenced ready/quarantined assets can be trashed.');origin=status;status='trash';deleted=Date.now();}
   if(action==='restore'){if(status!=='trash'||Date.now()-Number(deleted)>30*86400000)throw new AdminError('Restore is available for 30 days after trashing.',409);status=origin==='quarantined'?'quarantined':'ready';deleted=null;}
   if(action==='purge'){if(!['trash','purging'].includes(status)||asset.referenced)throw new AdminError('Permanent deletion requires unreferenced trashed media.');status='purging';}

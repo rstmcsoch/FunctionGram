@@ -37,9 +37,10 @@ test('only owners grant roles; grants require exact target email, reason, and a 
  const {db,pool}=await fixture();try{
   const command={action:'promoteModerator' as const,id:'target',confirmation:'target@example.test',reason:'Trusted moderation work',expires:null};
   await assert.rejects(changeUser(pool,'moderator',command),{status:403});
-  await assert.rejects(changeUser(pool,'admin',command),{status:403});
+  await assert.rejects(changeUser(pool,'admin',{...command,action:'promote'}),{status:403});
   await assert.rejects(changeUser(pool,'owner',{...command,confirmation:'wrong@example.test'}),{status:400});
   await assert.rejects(changeUser(pool,'owner',{...command,reason:''}),{status:400});
+  await pool.query('UPDATE "user" SET "twoFactorEnabled"=true WHERE id=\'target\'');
   await changeUser(pool,'owner',command);
   assert.equal((await pool.query('SELECT role FROM "user" WHERE id=\'target\'')).rows[0].role,'moderator');
   assert.equal((await pool.query("SELECT action FROM admin_audit_log WHERE target_id='target'")).rows[0].action,'users.promoteModerator');
