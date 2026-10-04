@@ -57,3 +57,10 @@ next-env.d.ts
 # Android local build files
 android/local.properties
 *.swp
+
+# Native Android (Phase 1). The Capacitor wrapper under android/ is unchanged.
+/native-android/.gradle/
+/native-android/build/
+/native-android/app/build/
+/native-android/local.properties
+/native-android/.idea/
