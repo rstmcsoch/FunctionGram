@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- The native client speaks HTTPS to the public API only. -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
