@@ -35,7 +35,7 @@ export function UserActions({ id, email, actions }: { id: string; email: string;
       <form onSubmit={submit} className="admin-confirm">
         <DialogDescription>This action affects {email}. Type the exact email to confirm.</DialogDescription>
         {selected === 'verify' && <p>Only verify after independently confirming ownership of this email.</p>}
-        {['promote','promoteModerator','demote'].includes(String(selected))&&<p>Only an owner may grant or revoke roles. A role change requires an audit reason, exact account email, email verification and enabled two-factor authentication before admin access becomes available.</p>}
+        {['promote','promoteModerator','demote'].includes(String(selected))&&<p>Granting or revoking a role uses your existing control-panel two-factor session. The account only needs a verified email. Two-factor is not a separate requirement for that user.</p>}
         <label>Confirmation email<input autoComplete="off" value={confirmation} onChange={e => setConfirmation(e.target.value)} maxLength={320} required /></label>
         <label>Reason {selected === 'ban' ? '(required)' : '(optional)'}<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={500} required={['ban','promote','promoteModerator','demote'].includes(String(selected))} /></label>
         {selected === 'ban' && <label>Ban until (your local time; blank means indefinite)<input type="datetime-local" value={expires} onChange={e => setExpires(e.target.value)} /></label>}

@@ -2,7 +2,8 @@ import type {PoolLike,QueryExecutor} from '../postgres';
 import {localDevDatabase} from '../postgres';
 import {transaction,authorizeAdmin,insertAudit} from './core';
 import {AdminError} from './validation';
-import {requirePermission} from './permissions';
+import {requirePermission,hasPermission} from './permissions';
+import {queueDeletion} from './roles';
 import {MEDIA_LOCK,readMediaConfig,checkUploadInput} from '../media-policy';
 import {localAssetPath} from '../media-storage';
 import {del} from '@vercel/blob';
@@ -28,7 +29,7 @@ export async function mediaReport(db:QueryExecutor,input:Record<string,unknown>=
  const [summaryResult,totalResult,itemsResult,ownersResult,expiredResult,pendingResult]=await Promise.all([
   db.query(`SELECT COUNT(*) assets,COALESCE(SUM(size+source_retained_bytes),0) bytes,COALESCE(SUM(source_retained_bytes),0) retained_source_bytes,COUNT(*) FILTER(WHERE status='quarantined') quarantined,COUNT(*) FILTER(WHERE status='trash') trashed FROM assets`),
   db.query('SELECT COUNT(*) total '+from,values),
-  db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset('a',db)} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET ${values.length+1}`,itemValues),
+  db.query(`SELECT a.key,a.owner_id,a.storage_owner,a.mime,a.size,a.source_retained_bytes,a.created_at,a.status,a.reason,a.deleted_at,a.verified,a.width,a.height,a.duration,${referencedAsset('a',db)} referenced ${from} ORDER BY ${filter.sort==='largest'?'a.size+a.source_retained_bytes':'a.created_at'} DESC,a.key LIMIT 50 OFFSET $${values.length+1}`,itemValues),
   db.query(`SELECT COALESCE(storage_owner,owner_id) owner_id,COUNT(*) assets,SUM(size+source_retained_bytes) bytes FROM assets GROUP BY COALESCE(storage_owner,owner_id) ORDER BY bytes DESC,owner_id LIMIT 25 OFFSET $1`,ownerValues),
   db.query(`SELECT key,owner_id,expected_size,mime,created_at FROM upload_claims WHERE completed=false AND created_at<$1 AND (processing_at IS NULL OR processing_at<$2) ORDER BY created_at,key LIMIT 25 OFFSET $3`,[now-3600000,now-300000,(filter.page-1)*25]),
   db.query(`SELECT COUNT(*) reservations,COALESCE(SUM(expected_size),0) reserved_bytes FROM upload_claims WHERE completed=false AND (created_at>$1 OR processing_at>$2)`,[now-3600000,now-300000])
@@ -52,6 +53,14 @@ export async function changeMedia(pool:PoolLike,actorId:string,body:Record<strin
   let status=asset.status,deleted=asset.deleted_at,origin=asset.trash_origin;
   if(action==='quarantine'){if(status!=='ready')throw new AdminError('Choose a ready asset.');status='quarantined';}
   if(action==='release'){if(status!=='quarantined'||!asset.verified)throw new AdminError('Only previously verified media can be released. Failed uploads must be replaced.');const c=await readMediaConfig(db);checkUploadInput({...c,enabled:true},Math.max(Number(asset.size),Number(asset.source_size||0)),asset.mime);status='ready';}
+  if(action==='trash'&&!hasPermission(actor.role,'media.delete',actor.permissions)){
+    requirePermission(actor,'content.deleteRequest');
+    if(!reason)throw new AdminError('A reason is required before a moderator can request deletion.');
+    const queued=await queueDeletion(db,actor.userId,'asset',key,reason);
+    await insertAudit(db,actor,{action:'media.delete.request',targetType:'asset',targetId:key,after:queued,reason});
+    return {key,blob_url:'',source_blob_url:'',status:'pending-deletion'};
+  }
+  if(['trash','purge'].includes(action))requirePermission(actor,'media.delete');
   if(action==='trash'){if(!['ready','quarantined'].includes(status)||asset.referenced)throw new AdminError('Only unreferenced ready/quarantined assets can be trashed.');origin=status;status='trash';deleted=Date.now();}
   if(action==='restore'){if(status!=='trash'||Date.now()-Number(deleted)>30*86400000)throw new AdminError('Restore is available for 30 days after trashing.',409);status=origin==='quarantined'?'quarantined':'ready';deleted=null;}
   if(action==='purge'){if(!['trash','purging'].includes(status)||asset.referenced)throw new AdminError('Permanent deletion requires unreferenced trashed media.');status='purging';}
