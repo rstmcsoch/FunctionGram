@@ -47,6 +47,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermissi
   ],
 };
 
+export const DEFAULT_ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermission[]>> = ROLE_PERMISSIONS;
+
 export function hasPermission(role: AdminRole, permission: AdminPermission) {
   return ROLE_PERMISSIONS[role].includes(permission);
 }
