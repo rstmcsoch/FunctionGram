@@ -1108,7 +1108,7 @@ export const tursoMessagingV17Statements: string[] = [
 ];
 
 
-/** Convergence migration for Android device push tokens (migration 21). */
+/** Convergence migration for native Android device push tokens (migration 21). */
 export const tursoPushTokenStatements: string[] = [
   `CREATE TABLE IF NOT EXISTS device_push_tokens (
     token TEXT PRIMARY KEY NOT NULL,
