@@ -44,5 +44,5 @@ export type { Sticker } from './stickers';
 import type { ChatTheme } from './messaging';
 export type UserPresence={user_id:string;last_seen_at:number;is_online:number};
 export type StoryViewer={username:string;name:string;avatar:string};
-export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
+export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;stories?:import('./story-playback').PublicStorySettings;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
 export type SearchResults={people:Person[];posts:Post[]};

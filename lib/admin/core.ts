@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
 import { AdminError, validateSetting } from './validation';
+import { inPlaceholders } from '../sql';
 import { requirePermission } from './permissions';
 
 export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) => Promise<T>): Promise<T> {
@@ -65,7 +66,7 @@ export async function bootstrapAdmin(pool: PoolLike, userId: string, verifiedSes
 export async function loadSettings(db: QueryExecutor): Promise<Settings> {
   const result: Record<string, unknown> = { ...SETTINGS_DEFAULTS };
   const keys = Object.keys(SETTINGS_DEFAULTS);
-  const placeholders = keys.map(() => '?').join(',');
+  const placeholders = inPlaceholders(keys.length);
   const { rows } = await db.query(
     `SELECT key,value FROM app_settings WHERE key IN (${placeholders})`,
     keys,
