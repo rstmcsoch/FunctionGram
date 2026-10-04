@@ -3,7 +3,7 @@ export const ADMIN_BASE_PATH = '/admin-panel';
 export const ADMIN_BOOTSTRAP_ENV = 'ADMIN_BOOTSTRAP_EMAIL';
 export const ADMIN_ROLES = ['owner', 'admin', 'moderator'] as const;
 export type AdminRole = typeof ADMIN_ROLES[number];
-export type AdminActor = { userId: string; email: string; role: AdminRole };
+export type AdminActor = { userId: string; email: string; role: AdminRole; permissions?: readonly import('./permissions').AdminPermission[] };
 
 // Foundation registry only. Later phases wire these into the public app.
 // No secrets, bootstrap state, role policy or audit-disable switch belongs here.
