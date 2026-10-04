@@ -1,0 +1,177 @@
+diff --git a/lib/verification.ts b/lib/verification.ts
+--- a/lib/verification.ts
++++ b/lib/verification.ts
+@@ -34,6 +34,21 @@
+   return createHash('sha256').update(code).digest('hex');
+ }
+ 
++export async function ensureVerificationSchema(db: QueryExecutor) {
++  for (const statement of VERIFICATION_TABLES) {
++    try { await db.query(statement); }
++    catch (error) {
++      const message = error instanceof Error ? error.message : String(error);
++      if (!/duplicate column|already exists/i.test(message)) throw error;
++    }
++  }
++}
++
++function plainNumber(value: unknown) {
++  const number = Number(value ?? 0);
++  return Number.isFinite(number) ? number : 0;
++}
++
+ export async function saveConfig(pool: PoolLike, actorId: string, input: unknown, reason: string) {
+   if (!reason.trim()) throw new AdminError('A reason is required.');
+   const config = parseConfig(input);
+@@ -186,6 +201,7 @@
+ }
+ 
+ export async function overview(db: QueryExecutor) {
++  await ensureVerificationSchema(db);
+   const now = Date.now();
+   const due = (await db.query(`SELECT id,profile_id,batch FROM verification_pending WHERE status='pending' AND execute_at<=$1`, [now])).rows;
+   for (const row of due) {
+@@ -199,9 +215,15 @@
+     (SELECT COUNT(*) FROM profiles WHERE verification_batch='golden') golden,
+     (SELECT COUNT(*) FROM profiles WHERE verification_batch='blue') blue,
+     (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='grey') grey_pending,
+-    (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='golden') golden_pending`)).rows[0];
++    (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='golden') golden_pending`)).rows[0] || {};
+   const privilege = (await db.query('SELECT actor_id,expires_at FROM verification_privilege WHERE expires_at>$1', [Date.now()])).rows;
+-  return { config: eligible.config, eligible: eligible.users, pending, counts, privilege, finalizedNow: due.map(row => row.id) };
++  return {
++    config: eligible.config,
++    eligible: eligible.users.map(user => ({ id: String(user.id), username: String(user.username), email: String(user.email || ''), posts: plainNumber(user.posts) })),
++    pending: pending.map(row => ({ id: String(row.id), profile_id: String(row.profile_id), batch: String(row.batch), requested_by: String(row.requested_by || ''), created_at: plainNumber(row.created_at), execute_at: plainNumber(row.execute_at), status: String(row.status) })),
++    counts: { blue: plainNumber(counts.blue), grey: plainNumber(counts.grey), golden: plainNumber(counts.golden), grey_pending: plainNumber(counts.grey_pending), golden_pending: plainNumber(counts.golden_pending) },
++    privilege: privilege.map(row => ({ actor_id: String(row.actor_id), expires_at: plainNumber(row.expires_at) })),
++  };
+ }
+ 
+ export async function submitApplication(pool: PoolLike, profileId: string, body: Record<string, unknown>) {
+diff --git a/components/admin/verification.tsx b/components/admin/verification.tsx
+--- a/components/admin/verification.tsx
++++ b/components/admin/verification.tsx
+@@ -14,8 +14,12 @@
+ export function VerificationDesk({ role, data }: { role: string; data: Desk }) {
+   const router = useRouter();
+   const owner = role === 'owner';
+-  const [age, setAge] = useState(data.config.minAgeDays);
+-  const [posts, setPosts] = useState(data.config.minPosts);
++  const eligible = data.eligible || [];
++  const pending = data.pending || [];
++  const privilege = data.privilege || [];
++  const counts = data.counts || { blue: 0, grey: 0, golden: 0, grey_pending: 0, golden_pending: 0 };
++  const [age, setAge] = useState(data.config?.minAgeDays ?? 30);
++  const [posts, setPosts] = useState(data.config?.minPosts ?? 3);
+   const [reason, setReason] = useState('');
+   const [emailCode, setEmailCode] = useState('');
+   const [stepCode, setStepCode] = useState('');
+@@ -33,8 +37,8 @@
+ 
+   return <>
+     <section className="admin-card"><h2>Overview</h2>
+-      <p>Blue {Number(data.counts?.blue || 0)} · Grey {Number(data.counts?.grey || 0)} · Golden {Number(data.counts?.golden || 0)} · Grey pending {Number(data.counts?.grey_pending || 0)} · Golden pending {Number(data.counts?.golden_pending || 0)}</p>
+-      <p>{data.privilege?.length ? `Privileged window open until ${new Date(Number(data.privilege[0].expires_at)).toISOString()}` : 'Grey/Golden privileged window is closed.'}</p>
++      <p>Blue {Number(counts.blue || 0)} · Grey {Number(counts.grey || 0)} · Golden {Number(counts.golden || 0)} · Grey pending {Number(counts.grey_pending || 0)} · Golden pending {Number(counts.golden_pending || 0)}</p>
++      <p>{privilege.length ? `Privileged window open until ${new Date(Number(privilege[0].expires_at)).toISOString()}` : 'Grey/Golden privileged window is closed.'}</p>
+     </section>
+     <section className="admin-card"><h2>Blue criteria</h2>
+       <p>Eligible accounts are not verified until an admin or owner finalizes Blue. This form is disabled for admins.</p>
+@@ -43,7 +47,7 @@
+       <button className="admin-button" type="button" disabled={!owner} onClick={async () => { try { await post({ action: 'saveConfig', config: { minAgeDays: age, minPosts: posts }, reason: reason || 'Update Blue criteria' }); setMessage('Blue criteria saved.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Save failed.'); } }}>Save Blue rules</button>
+     </section>
+     <section className="admin-card"><h2>Eligible for Blue</h2>
+-      <ul>{data.eligible.map(user => <li key={user.id}><label><input type="checkbox" checked={selected.includes(user.id)} onChange={() => setSelected(current => current.includes(user.id) ? current.filter(id => id !== user.id) : [...current, user.id])} /> {user.username} · {user.email} · {user.posts} posts</label></li>)}{!data.eligible.length && <li>No eligible accounts.</li>}</ul>
++      <ul>{eligible.map(user => <li key={user.id}><label><input type="checkbox" checked={selected.includes(user.id)} onChange={() => setSelected(current => current.includes(user.id) ? current.filter(id => id !== user.id) : [...current, user.id])} /> {user.username} · {user.email} · {user.posts} posts</label></li>)}{!eligible.length && <li>No eligible accounts.</li>}</ul>
+       <button className="admin-button admin-primary" type="button" onClick={async () => { try { await post({ action: 'finalizeBlue', ids: selected, reason: reason || 'Finalize Blue' }); setMessage('Blue finalized for eligible accounts.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Blue failed.'); } }}>Finalize Blue</button>
+     </section>
+     <section className="admin-card"><h2>Grey and Golden</h2>
+@@ -57,7 +61,7 @@
+       <button className="admin-button admin-primary" type="button" onClick={async () => { try { await post({ action: 'assign', batch, ids: query.split(/[\s,]+/).filter(Boolean), reason: reason || 'Assign batch' }); setMessage('Submitted into the 48-hour review window.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Assign failed.'); } }}>Assign selected</button>
+     </section>
+     <section className="admin-card"><h2>48-hour review</h2>
+-      <ul>{data.pending.map(item => <li key={item.id}><label><input type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /> {item.batch} · {item.profile_id} · until {new Date(Number(item.execute_at)).toISOString()}</label></li>)}{!data.pending.length && <li>No pending Grey or Golden assignments.</li>}</ul>
++      <ul>{pending.map(item => <li key={item.id}><label><input type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /> {item.batch} · {item.profile_id} · until {new Date(Number(item.execute_at)).toISOString()}</label></li>)}{!pending.length && <li>No pending Grey or Golden assignments.</li>}</ul>
+       <button className="admin-button" type="button" onClick={async () => { try { await post({ action: 'cancel', ids: selected, reason: reason || 'Stop assignment' }); setMessage('Selected assignments stopped.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Cancel failed.'); } }}>Stop selected</button>
+       {message && <p role="status">{message}</p>}
+       <label>Reason<textarea value={reason} onChange={event => setReason(event.target.value)} /></label>
+diff --git a/app/admin-panel/verification/page.tsx b/app/admin-panel/verification/page.tsx
+--- a/app/admin-panel/verification/page.tsx
++++ b/app/admin-panel/verification/page.tsx
+@@ -6,9 +6,17 @@
+ 
+ export default async function VerificationPage() {
+   const actor = await requireAdminPage();
+-  const data = await overview(await getPool());
+-  return <>
+-    <PageHead breadcrumb="Control room / Verification" title="Verification" intro="Blue, Grey, and Golden. Names stay those three words. Grey and Golden stay cancellable for 48 hours and need a fresh 2-hour privileged check." />
+-    <VerificationDesk role={actor.role} data={data as never} />
+-  </>;
++  try {
++    const data = await overview(await getPool());
++    return <>
++      <PageHead breadcrumb="Control room / Verification" title="Verification" intro="Blue, Grey, and Golden. Names stay those three words. Grey and Golden stay cancellable for 48 hours and need a fresh 2-hour privileged check." />
++      <VerificationDesk role={actor.role} data={data} />
++    </>;
++  } catch (error) {
++    const message = error instanceof Error ? error.message : 'Verification could not be loaded.';
++    return <>
++      <PageHead breadcrumb="Control room / Verification" title="Verification" intro="The verification desk could not be loaded." />
++      <section className="admin-card"><h2>Verification could not load</h2><p>{message}</p></section>
++    </>;
++  }
+ }
+diff --git a/app/api/admin/verification/route.ts b/app/api/admin/verification/route.ts
+--- a/app/api/admin/verification/route.ts
++++ b/app/api/admin/verification/route.ts
+@@ -1,13 +1,14 @@
+ import { adminRoute } from '@/lib/admin/route';
+ import { adminBody } from '@/lib/admin/body';
+ import { getPool } from '@/lib/postgres';
+-import { assignPrivileged, cancelPending, confirmPrivilege, eligibleBlue, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, saveConfig } from '@/lib/verification';
++import { assignPrivileged, cancelPending, confirmPrivilege, eligibleBlue, ensureVerificationSchema, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, saveConfig } from '@/lib/verification';
+ 
+ export const runtime = 'nodejs';
+ export const dynamic = 'force-dynamic';
+ 
+ export const GET = adminRoute(async () => {
+   const pool = await getPool();
++  await ensureVerificationSchema(pool);
+   await finalizeDueTransactional(pool);
+   return Response.json(await overview(pool));
+ }, 'security.read');
+diff --git a/tests/verification-batches.test.ts b/tests/verification-batches.test.ts
+--- a/tests/verification-batches.test.ts
++++ b/tests/verification-batches.test.ts
+@@ -3,7 +3,7 @@
+ import { PGlite } from '@electric-sql/pglite';
+ import * as schema from '../lib/postgres-schema';
+ import { serializedPool } from '../lib/serialized-pool';
+-import { VERIFICATION_TABLES, assignPrivileged, confirmPrivilege, finalizeBlue, finalizeDueTransactional, issuePrivilege, REVIEW_MS, PRIVILEGE_MS } from '../lib/verification';
++import { VERIFICATION_TABLES, assignPrivileged, confirmPrivilege, ensureVerificationSchema, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, REVIEW_MS, PRIVILEGE_MS } from '../lib/verification';
+ 
+ async function fixture() {
+   const db = new PGlite();
+@@ -25,6 +25,21 @@
+   return { db, pool };
+ }
+ 
++test('verification desk loads even when the batch tables are missing', async () => {
++  const db = new PGlite();
++  for (const statement of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminCommsUpgradeStatements]) await db.exec(statement);
++  const pool = serializedPool({ storageDialect: 'postgres', async query(sql, values) {
++    const result = await db.query(sql, values);
++    return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
++  } });
++  try {
++    const desk = await overview(pool);
++    assert.deepEqual(desk.counts, { blue: 0, grey: 0, golden: 0, grey_pending: 0, golden_pending: 0 });
++    assert.equal(Array.isArray(desk.eligible), true);
++    await ensureVerificationSchema(pool);
++  } finally { await db.close(); }
++});
++
+ test('Blue is not automatic, Grey needs a 2-hour window, and the 48-hour review can be finalized', async () => {
+   const { db, pool } = await fixture();
+   try {
