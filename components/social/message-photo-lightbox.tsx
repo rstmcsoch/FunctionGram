@@ -27,7 +27,6 @@ export function MessagePhotoLightbox({
   onClose: () => void;
 }) {
   const t = useLabels();
-  const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [zoom, setZoom] = useState(MIN_ZOOM);
   const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
@@ -37,7 +36,6 @@ export function MessagePhotoLightbox({
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setMounted(true);
     const frame = requestAnimationFrame(() => setVisible(true));
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -111,7 +109,7 @@ export function MessagePhotoLightbox({
     setZoomClamped(zoom + delta);
   };
 
-  if (!mounted) return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
