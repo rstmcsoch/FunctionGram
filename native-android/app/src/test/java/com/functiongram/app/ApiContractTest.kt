@@ -44,5 +44,29 @@ class ApiContractTest {
             "https://functiongram.vercel.app/api/media/photo-key",
             ApiRoutes.media(origin, "photo-key"),
         )
+        assertEquals(
+            "https://functiongram.vercel.app/api/message-attachment",
+            ApiRoutes.messageAttachment(origin),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/message-media/msg-1",
+            ApiRoutes.messageMedia(origin, "msg-1"),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?conversations=all&limit=100",
+            ApiRoutes.conversations(origin),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?messages=peer-1&limit=50",
+            ApiRoutes.thread(origin, "peer-1"),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?offset=0",
+            ApiRoutes.feedOffset(origin, 0),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?reels=1&offset=0",
+            ApiRoutes.reelsFeed(origin, 0),
+        )
     }
 }
