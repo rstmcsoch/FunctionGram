@@ -36,7 +36,7 @@ const FOCUSABLE = 'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"]
 export function AdminNav({ groups, wordmark, account }: {
   groups: AdminNavGroup[];
   wordmark: string;
-  account: { email: string; role: string; userId: string };
+  account: { email: string; role: string };
 }) {
   const pathname = usePathname() || '';
   const [open, setOpen] = useState(false);
@@ -145,7 +145,7 @@ export function AdminNav({ groups, wordmark, account }: {
       </nav>
       <ThemeToggle />
       <div className="admin-account">
-        <Avatar seed={account.userId || account.email} email={account.email} size={40} />
+        <Avatar seed={account.email} email={account.email} size={40} />
         <span className="admin-account-body">
           <span className="admin-account-email" title={account.email}>{account.email}</span>
           <Badge tone={toneFor(account.role)}>{account.role}</Badge>

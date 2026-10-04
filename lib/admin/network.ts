@@ -34,11 +34,14 @@ export function parseAdminIpAllowlist(value: string | undefined): Cidr[] {
 }
 
 export function requestClientIp(headers: Headers): Address | null {
-  // On Vercel / a reverse proxy, these headers must be overwritten by the
-  // trusted edge. Prefer its single-address headers; only then use the first
-  // forwarded address. Never trust a client-provided value as an allow rule.
-  const candidate = headers.get('x-real-ip') || headers.get('x-vercel-forwarded-for') ||
-    headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  // Vercel appends the real client address to x-vercel-forwarded-for and
+  // overwrites x-real-ip. The left-most x-forwarded-for hop is whatever the
+  // browser sent, so it must never decide an allowlist match. A missing
+  // trusted address fails closed once a policy is configured.
+  const vercelChain = headers.get('x-vercel-forwarded-for');
+  const candidate = vercelChain
+    ? vercelChain.split(',').map(item => item.trim()).filter(Boolean).at(-1)
+    : headers.get('x-real-ip')?.split(',')[0]?.trim();
   if (!candidate || !ipaddr.isValid(candidate)) return null;
   try { return normalized(ipaddr.parse(candidate)); } catch { return null; }
 }
