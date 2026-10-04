@@ -80,8 +80,8 @@ export function ProfileGrid({ id, tab, posts, onPost, onCreate, own }: {
 
 /* ------------------------------------ home ------------------------------------ */
 
-export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCreateStory, feedPosts, following, onLoadFollowing, actions, moreLoading, onLoadMore, follow, followPending, navigate, onEdit, onAbout }: {
-  data: SocialData; feedTab: string; setFeedTab: (tab: string) => void; stories: Post[]; onOpenStory: (index: number) => void; onCreateStory: () => void;
+export function HomeView({ data, feedTab, setFeedTab, stories, showStoryTray, onOpenStory, onCreateStory, feedPosts, following, onLoadFollowing, actions, moreLoading, onLoadMore, follow, followPending, navigate, onEdit, onAbout }: {
+  data: SocialData; feedTab: string; setFeedTab: (tab: string) => void; stories: Post[]; showStoryTray: boolean; onOpenStory: (authorId: string) => void; onCreateStory: () => void;
   feedPosts: Post[]; following: { posts: Post[]; hasMore: boolean; loading: boolean }; onLoadFollowing: (offset: number) => void;
   actions: Parameters<typeof PostCard>[0]["actions"]; moreLoading: boolean; onLoadMore: () => void;
   follow: (person: Person) => void; followPending: Set<string>; navigate: (view: string, id?: string) => void; onEdit: () => void; onAbout: () => void;
@@ -104,7 +104,7 @@ export function HomeView({ data, feedTab, setFeedTab, stories, onOpenStory, onCr
             <Feature name="follow"><TabsTrigger value="following">{t("action.following")}</TabsTrigger></Feature>
           </TabsList>
         </Tabs>
-        <Feature name="stories"><Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} /></Feature>
+        {showStoryTray && <Feature name="stories"><Stories stories={stories} me={data.me} onOpen={onOpenStory} onCreate={onCreateStory} /></Feature>}
         <div className="feed-posts">
           {visiblePosts.map((post, index) => <PostCard key={post.id} post={post} actions={actions} priority={index < 2} />)}
           {!visiblePosts.length && (isFollowing && !following.loading
@@ -546,23 +546,42 @@ export function NotificationsView({ notifications, posts, openPost, onProfile }:
 
 /* ----------------------------------- profile ----------------------------------- */
 
-export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreate, onEdit, follow, followPending, onShare, onRelations, onMessage, onReport, onBlock }: {
+export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreate, onEdit, follow, followPending, onShare, onRelations, onMessage, onReport, onBlock, storyRing = false, onOpenStory }: {
   profile: Person; me: Person | null; tab: string; setTab: (value: string) => void; posts: Post[];
   openPost: (post: Post) => void; onCreate: () => void; onEdit: () => void; follow: (person: Person) => void;
   followPending: Set<string>; onShare: () => void; onRelations: (person: Person, kind: "followers" | "following") => void; onMessage: (person: Person) => void;
   onReport: (person: Person) => void; onBlock: (person: Person) => void;
+  storyRing?: boolean; onOpenStory?: (authorId: string, stories: Post[]) => void;
 }) {
   const t=useLabels();
   const own = profile.id === me?.id;
+  const [storyPosts, setStoryPosts] = useState<Post[] | null>(null);
+  useEffect(() => {
+    if (!storyRing) return;
+    let active = true;
+    void request<Post[]>("/api/social?profile=" + encodeURIComponent(profile.id), undefined, t)
+      .then(items => { if (active) setStoryPosts(items.filter(item => item.kind === "story" && (!item.expires_at || item.expires_at > Date.now()))); })
+      .catch(() => { if (active) setStoryPosts([]); });
+    return () => { active = false; };
+  }, [profile.id, storyRing, t]);
+  const activeStories = storyRing && storyPosts ? storyPosts : [];
+  const hasStory = activeStories.length > 0;
+  const storiesSeen = hasStory && activeStories.every(item => item.seen);
+  const openStory = () => { if (hasStory) onOpenStory?.(profile.id, activeStories); };
   return (
     <section className="profile-view">
       <div className="profile-top">
-        <Avatar person={profile} size={128} className="profile-avatar" />
+        <span className={storiesSeen ? "story-seen" : ""}>
+          <Avatar person={profile} size={128} className="profile-avatar" ring={hasStory} onClick={hasStory ? openStory : undefined} />
+        </span>
         <div className="profile-info">
           <div className="profile-title">
             <h1>{profile.username}</h1>
-            {profile.is_demo !== 1 && <BadgeCheck className="verified-badge" aria-label={t("views.verified")} />}
+            {profile.verification_batch === 'blue' && <BadgeCheck className="verified-badge batch-blue" aria-label={t("verification.batch_blue")} />}
+            {profile.verification_batch === 'grey' && <BadgeCheck className="verified-badge batch-grey" aria-label={t("verification.batch_grey")} />}
+            {profile.verification_batch === 'golden' && <BadgeCheck className="verified-badge batch-golden" aria-label={t("verification.batch_golden")} />}
             {profile.is_private ? <span className="sample-label private-label" title={t("settings.private_account")}><Lock size={11} />{t("views.private")}</span> : null}
+            {hasStory && <button className="secondary-button" onClick={openStory}>{t("stories.view_story")}</button>}
             {own ? (
               <>
                 <button className="secondary-button" onClick={onEdit}>{t("create.edit_profile")}</button>

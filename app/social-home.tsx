@@ -13,7 +13,13 @@ import RstmcApp from '@/components/social/app';
 export async function SocialHome({ initialUsername }: { initialUsername?: string } = {}){
  const t=await getTranslator();
  const missing=missingConfiguration();
- if(missing.length)return <main className="setup-page"><section className="setup-card"><span className="brand">{t("page.rstmc")}<span>{t("page._")}</span></span><p className="eyebrow">{t("page.functiongram_deployment_preview")}</p><h1>{t("page.a_home_for_your_moments_")}</h1><p>{t("page.the_app_has_been_prepared_for_vercel_its_database_media_storage_o")}</p><p>{t("page.project_owner_connect_neon_postgresql_a_public_vercel_blob_store_")}</p><ul>{missing.map(key=><li key={key}><code>{key}</code></li>)}</ul><p>{t("page.the_existing_rstmc_site_is_a_separate_deployment_its_accounts_and")}</p></section></main>;
+ if(missing.length){
+  console.error('FunctionGram configuration incomplete', missing.join(','));
+  return <main className="setup-page"><section className="setup-card"><span className="brand">{t("page.rstmc")}<span>{t("page._")}</span></span><p className="eyebrow">{t("page.functiongram_deployment_preview")}</p><h1>{t("page.a_home_for_your_moments_")}</h1><p>{t("page.the_app_has_been_prepared_for_vercel_its_database_media_storage_o")}</p><p>{t("page.project_owner_connect_neon_postgresql_a_public_vercel_blob_store_")}</p><p>{t("page.the_existing_rstmc_site_is_a_separate_deployment_its_accounts_and")}</p></section></main>;
+ }
+ // `identity()`, `featurePolicy()` and `publicAppearance()` are each resolved
+ // once per request (request-scoped memoization), so the Admin Panel authority
+ // check and the client shell reuse them instead of repeating the work.
  // Appearance does not need the viewer. Resolve it in parallel with identity
  // so a cold Turso hop is not paid twice before the first branch.
  const [viewer,appearance]=await Promise.all([identity(),publicAppearance()]);

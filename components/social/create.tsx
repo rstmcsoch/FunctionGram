@@ -16,8 +16,22 @@ export const CATEGORIES = ["For you", "Travel", "Nature", "Photography", "Archit
 
 const emptyOption = (type: string): MediaOption => ({ ratio: "original", fit: type.startsWith("video/") ? "contain" : "cover", alt: "" });
 
-export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated }: {
+function localVideoDuration(file: File): Promise<number | null> {
+  if (!file.type.startsWith("video/")) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const done = (value: number | null) => { URL.revokeObjectURL(url); video.removeAttribute("src"); resolve(value); };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => done(Number.isFinite(video.duration) ? video.duration : null);
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
+
+export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated, storyVideoMaxSeconds = 15, storyHours = 24 }: {
   kind: "post" | "story" | "reel"; me: Person; people: Person[]; onClose: () => void; onCreated: () => Promise<void>;
+  storyVideoMaxSeconds?: number; storyHours?: number;
 }) {
   const t=useLabels();
   const mediaPolicy=useMediaPolicy();
@@ -46,6 +60,18 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
       setError(t("create.videos_must_be_shared_on_their_own")); return;
     }
     if (kind === "story" && items.length + files.length > 1) { setError(t("create.a_story_uses_a_single_photo_or_video")); return; }
+    if (kind === "story") {
+      const cap = Math.min(15, Math.max(1, storyVideoMaxSeconds));
+      for (const file of items) {
+        if (!file.type.startsWith("video/")) continue;
+        const duration = await localVideoDuration(file);
+        if (duration != null && duration > cap + 0.05) {
+          setError(t("stories.video_max_seconds", { seconds: cap }));
+          if (input.current) input.current.value = "";
+          return;
+        }
+      }
+    }
     setBusy(t("create.uploading"));
     try {
       const added: Draft[] = [];
@@ -95,10 +121,12 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
   };
 
   const stepLabel = step === 1 ? t("create.select_media") : step === 2 ? t("create.preview") : t("create.details");
+  const storyCap = Math.min(15, Math.max(1, storyVideoMaxSeconds));
+  const storyFile = files[0];
 
   return (
     <Modal open onClose={() => { if (!busy) onClose(); }} title={t("create.create") + (kind === "reel" ? t("create.a_reel") : kind === "story" ? t("create.a_story") : t("create.a_post"))}
-      description={t("create.step") + step + t("create.stepOf") + stepLabel} className="create-modal">
+      description={kind === "story" ? t("stories.story_preview") : t("create.step") + step + t("create.stepOf") + stepLabel} className={"create-modal" + (kind === "story" ? " story-create-modal" : "")}>
       <Tabs value={kind} onValueChange={value => { setKind(value as typeof kind); setFiles([]); setOptions([]); setTags([]); setTagQuery(""); setStep(1); setError(""); }}>
         <TabsList variant="line" className="product-tabs">
           <TabsTrigger value="post"><ImagePlus size={17} />{t("create.post")}</TabsTrigger>
@@ -107,14 +135,43 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
         </TabsList>
       </Tabs>
 
-      <div className="create-steps" aria-hidden="true">
+      {kind !== "story" && <div className="create-steps" aria-hidden="true">
         <span className={step >= 1 ? "done" : ""} /><span className={step >= 2 ? "done" : ""} /><span className={step >= 3 ? "done" : ""} />
-      </div>
+      </div>}
 
       <form onSubmit={publish} className="create-form">
-        <input ref={input} type="file" accept={accept} multiple={kind === "post"} onChange={e => void choose(e.target.files)} className="sr-only" aria-label={t("create.upload_photos_or_video")} />
+        {kind !== "story" && <input ref={input} type="file" accept={accept} multiple={kind === "post"} onChange={e => void choose(e.target.files)} className="sr-only" aria-label={t("create.upload_photos_or_video")} />}
 
-        {step === 1 && (
+        {kind === "story" && (
+          <div className="story-create">
+            <input ref={input} type="file" accept={accept} onChange={e => void choose(e.target.files)} className="sr-only" aria-label={t("stories.pick_photo_or_video")} />
+            {!storyFile ? (
+              <button type="button" className="upload-drop story-stage-empty" onClick={() => input.current?.click()} disabled={!!busy}
+                onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void choose(e.dataTransfer.files); }}>
+                <span className="upload-icons"><Camera /><Film /></span>
+                <strong>{busy || t("stories.story_preview")}</strong>
+                <span>{t("stories.pick_photo_or_video")}</span>
+                <span className="primary-button">{busy ? <Busy /> : t("create.select_from_your_device")}</span>
+              </button>
+            ) : (
+              <>
+                <div className="story-stage">
+                  {storyFile.type.startsWith("video/")
+                    ? <video src={storyFile.url} autoPlay muted loop playsInline />
+                    : <img src={storyFile.url} alt={t("stories.story_preview")} />}
+                </div>
+                <textarea className="story-create-caption" aria-label={t("stories.optional_caption")} placeholder={t("stories.optional_caption")} maxLength={2200} rows={2} value={caption} onChange={e => setCaption(e.target.value)} />
+                <p className="form-hint">{t("stories.disappears_after_hours", { hours: storyHours })}{" "}{t("stories.video_max_seconds", { seconds: storyCap })}</p>
+                <div className="create-preview-actions">
+                  <button type="button" className="secondary-button" onClick={() => { setFiles([]); setOptions([]); setCaption(""); setError(""); }}><Upload size={16} />{t("create.replace")}</button>
+                  <button className="primary-button" disabled={!!busy}>{busy ? <><Busy />{busy}{t("create.symbol")}</> : t("stories.share_story")}</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {kind !== "story" && step === 1 && (
           <button type="button" className="upload-drop" onClick={() => input.current?.click()} disabled={!!busy}
             onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void choose(e.dataTransfer.files); }}>
             <span className="upload-icons"><ImagePlus /><Film /></span>
@@ -125,7 +182,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
           </button>
         )}
 
-        {step === 2 && (
+        {kind !== "story" && step === 2 && (
           <div className="create-preview">
             <div className="upload-previews">
               {files.map((file, index) => (
@@ -171,7 +228,7 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
           </div>
         )}
 
-        {step === 3 && (
+        {kind !== "story" && step === 3 && (
           <div className="create-details">
             <div className="user-line">
               <Avatar person={me} size={36} />
@@ -183,20 +240,17 @@ export function CreateDialog({ kind: initialKind, me, people, onClose, onCreated
               <MapPin size={18} />
               <input placeholder={t("create.add_location")} aria-label={t("create.add_location")} maxLength={100} value={location} onChange={e => setLocation(e.target.value)} />
             </label>
-            {kind !== "story" && (
-              <label className="location-input category-input">
-                <TrendingUp size={18} />
-                <select aria-label={t("create.choose_a_category")} value={category} onChange={e => setCategory(e.target.value)}>
-                  {CATEGORIES.map(name => <option key={name} value={name}>{t.text(name)}</option>)}
-                </select>
-              </label>
-            )}
+            <label className="location-input category-input">
+              <TrendingUp size={18} />
+              <select aria-label={t("create.choose_a_category")} value={category} onChange={e => setCategory(e.target.value)}>
+                {CATEGORIES.map(name => <option key={name} value={name}>{t.text(name)}</option>)}
+              </select>
+            </label>
             <Feature name="tagging"><TagPicker people={people} me={me} tags={tags} onChange={setTags} tagQuery={tagQuery} setTagQuery={setTagQuery} /></Feature>
-            {kind === "story" && <p className="form-hint">{t("create.your_story_will_disappear_after_24_hours_people_can_reply_to_it_i")}</p>}
             {kind === "reel" && <p className="form-hint">{t("create.reels_appear_in_the_reels_feed_with_their_original_frame_size")}</p>}
             <div className="create-preview-actions">
               <button type="button" className="secondary-button" onClick={() => setStep(2)}><ChevronLeft size={16} />{t("create.back")}</button>
-              <button className="primary-button" disabled={!!busy}>{busy ? <><Busy />{busy}{t("create.symbol")}</> : t("app.share") + t(kind==="reel"?"kind.reel":kind==="story"?"kind.story":"kind.post")}</button>
+              <button className="primary-button" disabled={!!busy}>{busy ? <><Busy />{busy}{t("create.symbol")}</> : t("app.share") + t(kind==="reel"?"kind.reel":"kind.post")}</button>
             </div>
           </div>
         )}

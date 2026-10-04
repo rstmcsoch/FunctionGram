@@ -13,7 +13,7 @@ import {processMedia,readBounded} from '../lib/media-processing';
 import {checkAssets,commitMediaUse,readMediaConfig} from '../lib/media-policy';
 import {changeMedia,purgeMedia,mediaReport,reconcileReservation,mediaFilters} from '../lib/admin/media';
 import {localAssetPath} from '../lib/media-storage';
-const db=new PGlite();const pool=serializedPool({async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
+const db=new PGlite();const pool=serializedPool({storageDialect:'postgres',async query(sql,values){const r=await db.query(sql,values);return {rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows??r.rows.length};}});
 const legacyKey=crypto.randomUUID();
 async function user(id:string,role='user'){await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified") VALUES($1,$1,$2,$3,true)',[id,id+'@example.test',role]);await pool.query("INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,'','',0,1)",[id]);}
 async function config(patch:Partial<typeof DEFAULT_MEDIA>={}){const value={...DEFAULT_MEDIA,...patch};await saveSetting(pool,'admin','media.config',JSON.stringify(value));return value;}
@@ -29,10 +29,16 @@ before(async()=>{
  photo=await sharp({create:{width:2400,height:1200,channels:3,background:'#fc1234'}}).jpeg().toBuffer();
 });
 after(async()=>{await db.close();});
-test('migration 8 is additive, repeatable and present in both runtime registries',async()=>{
+test('migration 8 media columns exist in Turso schema and legacy Phase 8 is not a separate registry entry',async()=>{
  const row=(await pool.query('SELECT * FROM assets WHERE key=$1',[legacyKey])).rows[0];assert.equal(row.size,100);assert.equal(row.status,'ready');assert.equal(row.storage_owner,'member');assert.equal(row.verified,true);const claim=(await pool.query('SELECT completed,completed_at FROM upload_claims WHERE key=$1',[legacyKey])).rows[0];assert.equal(claim.completed,true);assert.equal(claim.completed_at,1);
- const migration=DATABASE_MIGRATIONS.find(row=>row.version===8);assert.ok(migration);assert.equal(migration.statements,schema.mediaUpgradeStatements);
- const target=new PGlite();try{await target.query('CREATE TABLE functiongram_migrations(version integer PRIMARY KEY,applied_at timestamptz DEFAULT now())');for(let pass=0;pass<2;pass++)for(const item of DATABASE_MIGRATIONS){for(const sql of item.statements)await target.exec(sql);await target.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING',[item.version]);}const rows=await target.query('SELECT version FROM functiongram_migrations ORDER BY version');assert.deepEqual((rows.rows as {version:number}[]).map(row=>row.version),DATABASE_MIGRATIONS.map(row=>row.version));}finally{await target.close();}
+ assert.equal(DATABASE_MIGRATIONS.find(row=>row.version===8),undefined);
+ const {createTursoFixture,TURSO_MIGRATION_VERSIONS}=await import('./support/turso-db');
+ const fixture=await createTursoFixture();
+ try{
+  assert.deepEqual(TURSO_MIGRATION_VERSIONS,[1,2,3,4,13,14,15,16,17,18,19,20]);
+  const cols=(await fixture.pool.query('PRAGMA table_info(assets)')).rows.map(row=>String(row.name));
+  for(const column of ['status','storage_owner','verified','source_retained_bytes','trash_origin'])assert.ok(cols.includes(column),column);
+ }finally{await fixture.close();}
 });
 test('media settings are strict and inherit Phase 1 limits until a new config is explicitly published',()=>{
  assert.equal(mediaConfig({'upload.maxFileMb':50,'upload.dailyQuotaMb':100}).maxFileMb,50);

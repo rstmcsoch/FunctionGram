@@ -14,10 +14,10 @@ const blankDraft=():RestrictionDraft=>({send:false,receive:false,until:'',reason
 const toLocalInput=(value:number)=>{if(!value)return '';const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 type EmailState={paused:boolean;daily_cap:number;sent_today:number;remaining:number};
 type Announcement={id:string;title:string;body:string;href:string|null;tone:string;starts_at:number|null;ends_at:number|null;dismissible:boolean;audience:string;published:boolean;created_at:number};
-const tabs=[['messages','Messages'],['controls','DM controls'],['restrictions','Message restrictions'],['limits','Messaging limits'],['templates','Notification templates'],['broadcast','In-app broadcast'],['email','Email'],['announcements','Announcements'],['pages','CMS pages']] as const;
+const tabGroups=[['Inbox',[['messages','Messages']]],['Controls',[['controls','DM controls'],['restrictions','Restrictions'],['limits','Limits']]],['Outreach',[['templates','Templates'],['broadcast','Broadcast'],['email','Email'],['announcements','Announcements']]],['Pages',[['pages','CMS pages']]]] as const;
 export function CommunicationCenter(){
  const [tab,setTab]=useState<string>('messages');
- return <><div className="admin-tabs" role="tablist" aria-label="Communication tools">{tabs.map(([value,label])=><button type="button" role="tab" aria-selected={tab===value} className={tab===value?'active':''} key={value} onClick={()=>setTab(value)}>{label}</button>)}</div>
+ return <><div className="admin-tab-groups" aria-label="Communication tools">{tabGroups.map(([group,items])=><div key={group} className="admin-tab-group"><p>{group}</p><div className="admin-tabs" role="tablist" aria-label={group}>{items.map(([value,label])=><button type="button" role="tab" aria-selected={tab===value} className={tab===value?'active':''} key={value} onClick={()=>setTab(value)}>{label}</button>)}</div></div>)}</div>
   {tab==='messages'&&<MessageInspector/>}{tab==='controls'&&<DirectMessageControls/>}{tab==='restrictions'&&<MessageRestrictionControls/>}{tab==='limits'&&<MessagingLimitsEditor/>}{tab==='templates'&&<NotificationTemplateEditor/>}{tab==='broadcast'&&<BroadcastEditor/>}{tab==='email'&&<EmailCampaignEditor/>}{tab==='announcements'&&<AnnouncementEditor/>}{tab==='pages'&&<CmsPageManager/>}
  </>;
 }

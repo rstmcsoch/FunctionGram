@@ -504,7 +504,7 @@ test('Phase 3 hides story highlights, viewer lists and message references; priva
 
 test('Phase 3 trash profile hides people and their content; story defaults and reel pause apply server-side',async()=>{
  const pool=await getPool();const {saveSetting}=await import('../lib/admin/core');
- await pool.query('UPDATE "user" SET role=\'admin\' WHERE id=$1',[carol.id]);
+ await pool.query('UPDATE "user" SET role=\'owner\' WHERE id=$1',[carol.id]);
  try{
   await pool.query('UPDATE profiles SET deleted_at=$1 WHERE id=$2',[Date.now(),bob.id]);
   assert.equal((await api(null,null,'?person='+bob.id)).data,null);
