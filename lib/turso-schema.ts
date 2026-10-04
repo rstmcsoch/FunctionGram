@@ -271,6 +271,7 @@ export const tursoSchemaStatements: string[] = [
     source_retained_bytes INTEGER NOT NULL DEFAULT 0,
     verified INTEGER NOT NULL DEFAULT 1,
     storage_owner TEXT,
+    trash_origin TEXT NOT NULL DEFAULT 'ready',
 
     FOREIGN KEY (owner_id)
       REFERENCES profiles(id)
@@ -1106,9 +1107,13 @@ export const tursoMessagingV17Statements: string[] = [
   `ALTER TABLE view_once_state ADD COLUMN served_at INTEGER`,
 ];
 
+
 /**
- * Migration 18: optional Android device tokens.
- * Rows are account-scoped. Nothing in this schema sends a push.
+ * Migration 21: converge the main schema with the native Android push stack.
+ *
+ * Kept separate from migration 18 because the Android branch historically used
+ * version 18 for device_push_tokens while main uses version 18 for trash_origin.
+ * The additive trash_origin statement is already guarded by the migration runner.
  */
 export const tursoPushTokenStatements: string[] = [
   `CREATE TABLE IF NOT EXISTS device_push_tokens (
