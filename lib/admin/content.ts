@@ -5,7 +5,7 @@ import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
 import { AdminError } from './validation';
 import { requirePermission } from './permissions';
 import { contentConfirmationName } from './content-label';
-import { checkReelDuration } from '../reel-duration';
+import { checkReelDuration, storyVideoLimit } from '../reel-duration';
 import { inPlaceholders } from '../sql';
 
 export type ContentResource = 'posts' | 'comments';
@@ -88,7 +88,10 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
   if(aspects!==null&&(!Array.isArray(aspects)||aspects.length!==media.length||aspects.some(r=>typeof r!=='number'||!Number.isFinite(r)||r<0.2||r>5)))throw new AdminError('Provide one valid aspect ratio (0.2–5) per item, or clear all.');
   if(Array.isArray(aspects)&&!aspects.length)aspects=null;
   const settings=await loadSettings(db);
-  if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
+  if(video){
+    const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0,kind==='story'?storyVideoLimit(settings['content.storyVideoMaxSeconds']):0].filter(n=>n>0);
+    if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB,kind==='story'?'Stories':'Reels');
+  }
   const expires=input.expires_at===undefined?(kind==='story'&&row.kind!=='story'?Date.now()+settings['content.storyHours']*3600000:row.expires_at):input.expires_at;
   if(expires!==null&&(typeof expires!=='number'||!Number.isSafeInteger(expires)||expires<0||expires>8640000000000000))throw new AdminError('Invalid expiry.');
   return {caption,location,category,kind,media:JSON.stringify(media),media_options:JSON.stringify(options),aspects:aspects?JSON.stringify(aspects):null,tagged_users:JSON.stringify(tags),media_type:video?'video':'image',expires_at:expires};
