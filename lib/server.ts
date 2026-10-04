@@ -167,7 +167,7 @@ export function buildFeedQuery(viewer:string|null,limit=40,offset=0,filter:FeedF
   if(filter.search){const term=searchPattern(filter.search);conditions.push("(p.caption LIKE ? ESCAPE '\\' OR p.location LIKE ? ESCAPE '\\' OR a.username LIKE ? ESCAPE '\\')");filterArgs.push(term,term,term);}
   if(filter.category&&filter.category!=='For you'){conditions.push('p.category=?');filterArgs.push(filter.category);}
   if(filter.discovery){conditions.push("p.kind!='story'");}
-  if(filter.reels){conditions.push("p.kind='reel'");}
+  if(filter.reels){conditions.push("(p.kind='reel' OR (p.media_type='video' AND p.kind='post'))");}
   if(filter.following){conditions.push('(p.author_id IN (SELECT followee_id FROM follows WHERE follower_id=?) OR p.author_id=?)');filterArgs.push(v,v);}
   if(filter.hashtag){const hashtag=searchPattern('#'+filter.hashtag);conditions.push("LOWER(p.caption) LIKE LOWER(?) ESCAPE '\\'");filterArgs.push(hashtag);}
   const extra=conditions.length?' AND '+conditions.join(' AND '):'';
