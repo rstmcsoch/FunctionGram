@@ -20,6 +20,11 @@ import com.functiongram.app.security.IntegritySnapshotCodec
 import com.functiongram.app.security.PackageIdentitySignal
 import com.functiongram.app.security.ReleaseHardening
 import com.functiongram.app.presentation.directory.DevicePreferences
+import com.functiongram.app.push.AndroidPushSnapshot
+import com.functiongram.app.push.DeepLinkInbox
+import com.functiongram.app.push.FcmBridge
+import com.functiongram.app.push.OkHttpPushApi
+import com.functiongram.app.push.PushCoordinator
 import com.functiongram.app.security.toSnapshot
 
 class FunctionGramApplication : Application() {
@@ -37,6 +42,11 @@ class FunctionGramApplication : Application() {
 
     lateinit var devicePreferences: DevicePreferences
         private set
+
+    lateinit var pushCoordinator: PushCoordinator
+        private set
+
+    val deepLinks = DeepLinkInbox()
 
     override fun onCreate() {
         super.onCreate()
@@ -61,6 +71,8 @@ class FunctionGramApplication : Application() {
         feedRepository = OkHttpFeedRepository(origin, http.okHttp())
         directoryRepository = OkHttpDirectoryRepository(origin, http.okHttp())
         devicePreferences = DevicePreferences(this)
+        pushCoordinator = PushCoordinator(OkHttpPushApi(origin, http.okHttp()), AndroidPushSnapshot(this))
+        FcmBridge.install(pushCoordinator::onToken)
     }
 
     companion object {

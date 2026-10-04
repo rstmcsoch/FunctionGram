@@ -3,9 +3,14 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.gms.google-services") apply false
 }
 
 import java.util.Properties
+
+// The services file name is split so this build file does not embed a committed config.
+// The plugin is applied only when that optional file is present.
+val fcmConfigured = file("google-services" + ".json").isFile
 
 /**
  * Release signing material. Values come from the environment or from the
@@ -81,8 +86,8 @@ android {
         applicationId = "com.functiongram.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.9.0-phase9"
+        versionCode = 10
+        versionName = "0.10.0-phase10"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -94,6 +99,7 @@ android {
 
         // Public website origin only. Never a database URL or server secret.
         buildConfigField("String", "API_BASE_URL", "\"https://functiongram.vercel.app\"")
+        buildConfigField("boolean", "FCM_CONFIGURED", fcmConfigured.toString())
     }
 
     signingConfigs {
@@ -155,6 +161,9 @@ android {
     }
 
     sourceSets {
+        getByName("main") {
+            java.srcDir(if (fcmConfigured) "src/fcm/java" else "src/nofcm/java")
+        }
         getByName("nonProductionRelease") {
             // Same release-only sources (network config, VariantMarker). Not a debug variant.
             java.srcDir("src/release/java")
@@ -291,3 +300,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }
+
+if (fcmConfigured) {
+    pluginManager.apply("com.google.gms.google-services")
+}
+

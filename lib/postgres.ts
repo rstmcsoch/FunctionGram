@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements, tursoPushTokenStatements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -125,6 +125,11 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     // serve marker. Both are libSQL/SQLite DDL: no PostgreSQL syntax.
     version: 17,
     statements: tursoMessagingV17Statements,
+  },
+  {
+    // Optional Android device tokens. Idempotent CREATE TABLE. No Firebase credential is read.
+    version: 18,
+    statements: tursoPushTokenStatements,
   },
 ];
 

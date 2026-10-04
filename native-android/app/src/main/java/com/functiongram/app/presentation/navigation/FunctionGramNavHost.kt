@@ -22,13 +22,15 @@ import com.functiongram.app.presentation.auth.AuthPhase
 import com.functiongram.app.presentation.auth.AuthViewModel
 import com.functiongram.app.presentation.auth.SignInRoute
 import com.functiongram.app.presentation.shell.SignedInShell
+import com.functiongram.app.push.DeepLinkInbox
+import com.functiongram.app.push.PushLifecycle
 import com.functiongram.app.presentation.splash.SplashReveal
 import com.functiongram.app.presentation.theme.SystemBarIcons
 import com.functiongram.app.presentation.ui.FgLoading
 
 @Composable
-fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository, feed: FeedRepository, directory: DirectoryRepository, preferences: DevicePreferences, darkTheme: Boolean) {
-    val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(repository))
+fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository, feed: FeedRepository, directory: DirectoryRepository, preferences: DevicePreferences, darkTheme: Boolean, deepLinks: DeepLinkInbox, push: PushLifecycle) {
+    val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(repository, push))
     val state by viewModel.state.collectAsStateWithLifecycle()
     val navController = rememberNavController()
     SystemBarIcons(light = !darkTheme || !state.splashFinished)
@@ -65,6 +67,9 @@ fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingR
                     feed = feed,
                     directory = directory,
                     preferences = preferences,
+                    pendingLink = deepLinks.pending,
+                    onLinkHandled = deepLinks::consume,
+                    onNotificationsEnabled = push::onNotificationsEnabled,
                 )
             }
         }

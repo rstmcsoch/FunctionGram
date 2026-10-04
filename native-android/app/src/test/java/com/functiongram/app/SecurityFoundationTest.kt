@@ -233,7 +233,7 @@ class SecurityFoundationTest {
         val names = (0 until permissions.length).map {
             (permissions.item(it) as Element).getAttributeNS(androidNs, "name")
         }
-        assertEquals(listOf("android.permission.INTERNET"), names)
+        assertEquals(listOf("android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS"), names)
         val application = doc.getElementsByTagName("application").item(0) as Element
         assertEquals("false", application.getAttributeNS(androidNs, "allowBackup"))
         assertEquals("false", application.getAttributeNS(androidNs, "usesCleartextTraffic"))
