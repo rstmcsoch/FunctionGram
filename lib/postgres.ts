@@ -230,6 +230,7 @@ function isTursoDatabase() {
 function cleanEnv(value: string | undefined) {
   if (!value) return undefined;
   const cleaned = value.trim().replace(/^['"]+|['"]+$/g, '').trim();
+  return cleaned || undefined;
 }
 
 // libSQL cannot take undefined or boolean args.
