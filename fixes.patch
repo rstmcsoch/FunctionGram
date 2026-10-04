@@ -1,0 +1,1909 @@
+
+
+
+----
+From 57420e2a4423cd314cd1cba715f8f4bd9842bfb0 Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 03:44:27 +0000
+Subject: [PATCH 1/2] feat(admin): complete Admin Panel control over every
+messaging feature
+
+Every user-facing messaging behaviour now has an Admin Panel control, and
+every control is enforced on the server as well as in the UI.
+
+Availability switches (Features, reusing the existing rollout editor):
+messages        global direct-message switch (already existed)
+messageDeletion unsend control + the delete_message API action
+messageSearch   conversation search + the messages_search query
+readReceipts    the seen marker + the read_messages action
+emojiPicker     the composer's emoji control
+
+Global limits (Communications -> Messaging limits, stored in app_settings
+through the existing validateSetting registry):
+messages.maxLength          1-4000 characters, default 2000
+messages.rateWindowSeconds  0-86400, 0 disables the quota
+messages.rateMaxMessages    1-1000 sends inside the window
+
+Per-account restrictions (Communications -> Message restrictions):
+admin_message_restrictions adds send_disabled, receive_disabled and
+suspended_until on top of the existing admin_message_controls switch.
+Registered as migration 3 with CREATE TABLE IF NOT EXISTS so an existing
+deployment takes the upgrade and a fresh one pays nothing.
+
+Server enforcement lives in lib/messaging-policy.ts and app/api/social:
+the length ceiling, the sliding-window send quota, and the per-account
+restriction verdict are all resolved per request. The previous
+admin_message_controls lookup used PostgreSQL array syntax that libSQL
+cannot parse, so the global DM switch was never actually enforced on the
+deployed runtime; it now runs through the same code path.
+
+Client mirroring: the composer honours the configured length, and the
+delete, search, emoji and seen controls are removed from the DOM when their
+switch is off rather than hidden with CSS.
+
+Analytics reports messages sent, active conversations and the current
+restriction counts; the Users detail page shows an account's messaging
+state read-only, pointing at Communications for changes.
+
+tests/admin-messaging.test.ts drives the real admin functions and the real
+public API against a real libSQL database with real signed-in accounts:
+persistence, audit, authorization, validation, the API chain for every
+switch and limit, a forged client flag, and migration replay.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+app/admin-panel/users/[id]/page.tsx |   3 +-
+app/api/admin/comms/route.ts        |  20 +-
+app/api/social/route.ts             |  16 +-
+app/globals.css                     |   3 +
+components/admin/analytics.tsx      |   8 +
+components/admin/communications.tsx |  42 ++-
+components/admin/features.tsx       |   2 +-
+components/social/app.tsx           |   5 +-
+components/social/messages.tsx      |  24 +-
+lib/admin/analytics.ts              |  29 ++
+lib/admin/communications.ts         | 156 +++++++++-
+lib/admin/config.ts                 |   3 +
+lib/admin/label-defaults.ts         |   1 +
+lib/admin/queries.ts                |  19 +-
+lib/admin/validation.ts             |   3 +
+lib/features.ts                     |  17 +-
+lib/messaging-policy.ts             | 149 +++++++++
+lib/postgres-schema.ts              |   1 +
+lib/postgres.ts                     |   9 +-
+lib/server.ts                       |   8 +-
+lib/turso-schema.ts                 |  42 +++
+lib/types.ts                        |   2 +-
+tests/admin-messaging.test.ts       | 453 ++++++++++++++++++++++++++++
+tests/admin-system.test.ts          |  16 +-
+tests/admin-users.test.ts           |   2 +-
+25 files changed, 996 insertions(+), 37 deletions(-)
+create mode 100644 lib/messaging-policy.ts
+create mode 100644 tests/admin-messaging.test.ts
+
+diff --git a/app/admin-panel/users/[id]/page.tsx b/app/admin-panel/users/[id]/page.tsx
+index 94adff9..c74e132 100644
+--- a/app/admin-panel/users/[id]/page.tsx
++++ b/app/admin-panel/users/[id]/page.tsx
+@@ -22,7 +22,8 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
+const date = (value: unknown) => new Date(String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
+return <><PageHead breadcrumb="Control room / Account detail" title={user.name} avatar={<Avatar name={user.name} handle={user.username} email={user.email} seed={id} size={64} />} intro={<span className="admin-identity-meta">{user.email}<AutoBadge>{user.role}</AutoBadge>{user.username && <span className="admin-handle">@{user.username}</span>}<AutoBadge>{user.emailVerified ? 'Verified' : 'Unverified'}</AutoBadge>{user.deleted_at != null && <AutoBadge>In trash</AutoBadge>}</span>} />
+<div className="admin-detail"><Drawer title="Profile & access"><dl><dt>Username</dt><dd>{user.username || 'No profile yet'}</dd><dt>Bio</dt><dd>{user.bio || '—'}</dd><dt>Website</dt><dd>{user.website || '—'}</dd><dt>Profile visibility</dt><dd>{user.is_private ? 'Private' : 'Public'}</dd><dt>Email verified</dt><dd>{user.emailVerified ? 'Yes' : 'No'}</dd><dt>Joined</dt><dd>{date(user.createdAt)}</dd><dt>Ban reason</dt><dd>{user.banReason || '—'}</dd><dt>Ban expiry</dt><dd>{user.banExpires ? date(user.banExpires) : user.banned ? 'Indefinite' : 'Not banned'}</dd></dl></Drawer>
+-    <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer></div>
++    <Drawer title="Activity & storage"><dl><dt>Content items</dt><dd>{Number(counts.posts)}</dd><dt>Comments</dt><dd>{Number(counts.comments)}</dd><dt>Messages sent (contents remain private)</dt><dd>{Number(counts.messages)}</dd><dt>Media storage</dt><dd>{bytes(counts.storage_bytes)}</dd><dt>Active sessions</dt><dd>{Number(counts.sessions)}</dd></dl></Drawer>
++    <Drawer title="Messaging access"><small>Read-only. Change these under Communications, where each edit needs the account ID and a reason.</small><dl><dt>Direct messages</dt><dd>{detail.messaging?.dm_disabled?'Restricted':'Allowed'}</dd><dt>Sending</dt><dd>{detail.messaging?.send_disabled?'Blocked':'Allowed'}</dd><dt>Receiving</dt><dd>{detail.messaging?.receive_disabled?'Blocked':'Allowed'}</dd><dt>Suspension</dt><dd>{detail.messaging?.suspended?date(detail.messaging.suspended_until):'None'}</dd></dl></Drawer></div>
+<section className="admin-card"><h2>Account actions</h2><UserActions id={id} email={user.email} actions={actions} /></section>
+<DataTable caption="Active sessions — newest 50. No session tokens are exposed. Times are UTC." headings={['Created','Expires','IP address','Device / user agent']}>
+{sessions.map(session => <tr key={session.id}><td>{date(session.createdAt)}</td><td>{date(session.expiresAt)}</td><td>{session.ipAddress || 'Not recorded'}</td><td>{session.userAgent || 'Not recorded'}</td></tr>)}
+diff --git a/app/api/admin/comms/route.ts b/app/api/admin/comms/route.ts
+index b7e1ebe..fab0736 100644
+--- a/app/api/admin/comms/route.ts
++++ b/app/api/admin/comms/route.ts
+@@ -6,10 +6,13 @@ import { getPool } from '@/lib/postgres';
+import { createAdminCampaignEmailSender } from '@/lib/email';
+import {
+deleteAnnouncement, inspectConversation, listAnnouncements, listConversations,
+-  listMessageAccounts, listNotificationTemplates, moderateMessage, previewEmailCampaign,
+-  saveAnnouncement, saveNotificationTemplate, sendEmailCampaign, sendInAppBroadcast,
+-  previewInAppBroadcast, setDirectMessageControl, updateEmailControls, getEmailControls,
++  listMessageAccounts, listMessageRestrictions, listNotificationTemplates, moderateMessage, previewEmailCampaign,
++  saveAnnouncement, saveMessagingLimits, saveNotificationTemplate, sendEmailCampaign, sendInAppBroadcast,
++  previewInAppBroadcast, readMessagingLimits, setDirectMessageControl, setMessageRestriction,
++  updateEmailControls, getEmailControls,
+} from '@/lib/admin/communications';
++import { loadSettings } from '@/lib/admin/core';
++import { revalidatePath, revalidateTag } from 'next/cache';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+@@ -18,6 +21,8 @@ export const GET = adminRoute(async (request, actor) => {
+const db = await getPool(), params = new URL(request.url).searchParams, view = params.get('view');
+if (view === 'conversations') { requirePermission(actor, 'messages.read'); return Response.json(await listConversations(db, Object.fromEntries(params))); }
+if (view === 'accounts') { requirePermission(actor, 'messages.manage'); return Response.json(await listMessageAccounts(db, params.get('q') || '')); }
++  if (view === 'limits') { requirePermission(actor, 'messages.manage'); return Response.json(readMessagingLimits(await loadSettings(db))); }
++  if (view === 'restrictions') { requirePermission(actor, 'messages.manage'); return Response.json(await listMessageRestrictions(db, params.get('q') || '')); }
+if (view === 'templates') { requirePermission(actor, 'notifications.manage'); return Response.json(await listNotificationTemplates(db)); }
+if (view === 'email') { requirePermission(actor, 'email.send'); return Response.json(await getEmailControls(db)); }
+if (view === 'announcements') { requirePermission(actor, 'announcements.manage'); return Response.json(await listAnnouncements(db)); }
+@@ -30,6 +35,15 @@ export const POST = adminRoute(async (request, actor) => {
+case 'inspectConversation': return Response.json(await inspectConversation(pool, actor.userId, body));
+case 'moderateMessage': return Response.json(await moderateMessage(pool, actor.userId, body));
+case 'setDirectMessageControl': return Response.json(await setDirectMessageControl(pool, actor.userId, body));
++    case 'saveMessagingLimits': {
++      const saved = await saveMessagingLimits(pool, actor.userId, body);
++      // The messaging limits are read through the tag-invalidated settings
++      // cache, so the public API picks the change up without a redeploy.
++      revalidateTag('settings', { expire: 0 });
++      revalidatePath('/', 'layout');
++      return Response.json(saved);
++    }
++    case 'setMessageRestriction': return Response.json(await setMessageRestriction(pool, actor.userId, body));
+case 'saveNotificationTemplate': return Response.json(await saveNotificationTemplate(pool, actor.userId, body));
+case 'previewInAppBroadcast': return Response.json(await previewInAppBroadcast(pool, actor.userId, body));
+case 'sendInAppBroadcast': return Response.json(await sendInAppBroadcast(pool, actor.userId, body));
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 103f2fa..129e050 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -12,6 +12,7 @@ import { validateProfileUsername } from '@/lib/profile-url';
+import { loadSettings } from '@/lib/admin/core';
+import { getPool } from '@/lib/postgres';
+import { unsendMessage } from '@/lib/server';
++import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota } from '@/lib/messaging-policy';
+import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import type {MediaOption} from '@/lib/types';
+export const maxDuration=60;
+@@ -218,7 +219,13 @@ export async function POST(request:Request){
+}
+if(action==='delete_post'){await availablePost(user,id);const result=await database.prepare('UPDATE posts SET deleted_at=? WHERE id=? AND author_id=?').bind(now,id,user).run();if(!result.meta.changes)throw new AppError('You can only delete your own posts.',403);return json({ok:true});}
+if(action==='message'){
+-    const body=clean(input.body,2000,true);await requireAllowedText(body);
++    // The absolute ceiling is the largest value an administrator may store;
++    // the configured limit is enforced immediately after, with its own message.
++    const body=clean(input.body,4000,true);
++    const messaging=await readMessagingPolicy();
++    requireMessageBody(body,messaging);
++    await requireAllowedText(body);
++    await requireMessageQuota(database,user,messaging);
+// Story replies address the story's author through its post id.
+let recipientId=id;
+const storyPostId=typeof input.post_id==='string'?clean(input.post_id,100):'';
+@@ -230,8 +237,11 @@ export async function POST(request:Request){
+const recipient=await database.prepare('SELECT id,is_demo FROM profiles WHERE deleted_at IS NULL AND id=?').bind(recipientId).first<{id:string;is_demo:number}>();
+if(!recipient)throw new AppError('Profile not found.',404);
+if(recipient.is_demo)throw new AppError('This is a sample profile. You can message real members or save a note to yourself.');
+-    const {rows:restricted}=await (await getPool()).query('SELECT profile_id FROM admin_message_controls WHERE profile_id=ANY($1::text[]) AND dm_disabled=true',[user===recipientId?[user]:[user,recipientId]]);
+-    if(restricted.length)throw new AppError('Direct messages are unavailable for one of these accounts.',403);
++    // Per-account restrictions (global DM switch plus send/receive/suspension)
++    // are read from the database on every send: the Admin Panel writes policy,
++    // this is the enforcement.
++    const restrictions=await inspectMessageRestrictions(database,user,recipientId);
++    if(restrictions.blocked)throw new AppError(restrictions.reason,403);
+// A block cuts off the blocked person's messages to the blocker.
+if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
+const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
+diff --git a/app/globals.css b/app/globals.css
+index a7871ea..3b34362 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -1601,6 +1601,9 @@ div[data-slot=dialog-content].post-viewer {
+.message-row:hover .message-delete,.message-delete:focus-visible{opacity:1}
+.message-delete:hover{color:var(--destructive);background:rgba(220,38,38,.08)}
+@media (hover:none){.message-delete{opacity:.7}}
++/* Read receipt: a quiet "Seen" marker, only rendered when the administrator
++   keeps read receipts on. */
++.message-seen{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--muted-foreground)}
+
+/* ---------- authoring: per-media options, category, tags ---------- */
+.media-details{display:flex;flex-direction:column;gap:8px;margin:14px 0 4px;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--muted)}
+diff --git a/components/admin/analytics.tsx b/components/admin/analytics.tsx
+index 4d057fa..420abd9 100644
+--- a/components/admin/analytics.tsx
++++ b/components/admin/analytics.tsx
+@@ -52,6 +52,14 @@ export function AnalyticsDashboard({ initial }: { initial: AnalyticsSnapshot })
+<section className="admin-card"><h2>Category usage</h2><div className="analytics-ranked-list">{data.categories.map((row,index) => <p key={row.category}><span>{index+1}. {row.category}</span><strong>{number(row.creations)}</strong></p>)}{!data.categories.length && <p>No categories in this window.</p>}</div></section>
+<section className="admin-card"><h2>Hashtag usage</h2><div className="analytics-ranked-list">{data.hashtags.map((row,index) => <p key={row.hashtag}><span>{index+1}. #{row.hashtag}</span><strong>{number(row.uses)}</strong></p>)}{!data.hashtags.length && <p>No hashtags in this window.</p>}</div></section>
+</div>
++    <section className="admin-card"><h2>Messaging</h2><p>Messages sent by live, non-demo members inside the selected window, and the participant pairs that exchanged at least one. Restriction counts are the current state, not the window: they read the same rows the Communications panel writes.</p><div className="analytics-ranked-list">
++      <p><span>Messages sent in window</span><strong>{number(data.messaging.sent)}</strong></p>
++      <p><span>Active conversations in window</span><strong>{number(data.messaging.activeConversations)}</strong></p>
++      <p><span>Accounts with direct messages restricted</span><strong>{number(data.messaging.restrictions.dmDisabled)}</strong></p>
++      <p><span>Accounts blocked from sending</span><strong>{number(data.messaging.restrictions.sendDisabled)}</strong></p>
++      <p><span>Accounts blocked from receiving</span><strong>{number(data.messaging.restrictions.receiveDisabled)}</strong></p>
++      <p><span>Accounts with an active messaging suspension</span><strong>{number(data.messaging.restrictions.suspended)}</strong></p>
++    </div><p className="admin-note">There are no message-specific reports yet: the report action only covers posts and profiles, so nothing is counted here.</p></section>
+<section className="admin-card analytics-funnel"><h2>Signup → first-post funnel</h2><p>Lifetime real member accounts with at least one non-deleted post (`kind=post`); demo profiles and reels/stories are excluded.</p><div className="analytics-funnel-bar" role="img" aria-label={`${number(data.funnel.firstPostMembers)} of ${number(data.funnel.members)} members made a first post`}><span style={{ width: `${conversion}%` }}/></div><strong>{number(data.funnel.firstPostMembers)} / {number(data.funnel.members)} members · {data.funnel.conversionRate}%</strong></section>
+</div>;
+}
+diff --git a/components/admin/communications.tsx b/components/admin/communications.tsx
+index 7a2819c..9fa4a6d 100644
+--- a/components/admin/communications.tsx
++++ b/components/admin/communications.tsx
+@@ -7,13 +7,18 @@ type Conversation={first_id:string;second_id:string;first_name:string;first_emai
+type Message={id:string;sender_id:string;recipient_id:string;body:string;created_at:number;redacted_at:number|null;redaction_reason:string|null;sender_name:string};
+type Template={kind:string;enabled:boolean;template_text:string};
+type Account={id:string;name:string;email:string;username:string;dm_disabled:boolean;dm_reason:string};
++type MessagingLimits={maxLength:number;rateWindowSeconds:number;rateMaxMessages:number};
++type Restriction={profile_id:string;name:string;email:string;username:string;dm_disabled:boolean;send_disabled:boolean;receive_disabled:boolean;suspended_until:number;reason:string};
++type RestrictionDraft={send:boolean;receive:boolean;until:string;reason:string;confirm:string};
++const blankDraft=():RestrictionDraft=>({send:false,receive:false,until:'',reason:'',confirm:''});
++const toLocalInput=(value:number)=>{if(!value)return '';const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+type EmailState={paused:boolean;daily_cap:number;sent_today:number;remaining:number};
+type Announcement={id:string;title:string;body:string;href:string|null;tone:string;starts_at:number|null;ends_at:number|null;dismissible:boolean;audience:string;published:boolean;created_at:number};
+-const tabs=[['messages','Messages'],['controls','DM controls'],['templates','Notification templates'],['broadcast','In-app broadcast'],['email','Email'],['announcements','Announcements'],['pages','CMS pages']] as const;
++const tabs=[['messages','Messages'],['controls','DM controls'],['restrictions','Message restrictions'],['limits','Messaging limits'],['templates','Notification templates'],['broadcast','In-app broadcast'],['email','Email'],['announcements','Announcements'],['pages','CMS pages']] as const;
+export function CommunicationCenter(){
+const [tab,setTab]=useState<string>('messages');
+return <><div className="admin-tabs" role="tablist" aria-label="Communication tools">{tabs.map(([value,label])=><button type="button" role="tab" aria-selected={tab===value} className={tab===value?'active':''} key={value} onClick={()=>setTab(value)}>{label}</button>)}</div>
+-  {tab==='messages'&&<MessageInspector/>}{tab==='controls'&&<DirectMessageControls/>}{tab==='templates'&&<NotificationTemplateEditor/>}{tab==='broadcast'&&<BroadcastEditor/>}{tab==='email'&&<EmailCampaignEditor/>}{tab==='announcements'&&<AnnouncementEditor/>}{tab==='pages'&&<CmsPageManager/>}
++  {tab==='messages'&&<MessageInspector/>}{tab==='controls'&&<DirectMessageControls/>}{tab==='restrictions'&&<MessageRestrictionControls/>}{tab==='limits'&&<MessagingLimitsEditor/>}{tab==='templates'&&<NotificationTemplateEditor/>}{tab==='broadcast'&&<BroadcastEditor/>}{tab==='email'&&<EmailCampaignEditor/>}{tab==='announcements'&&<AnnouncementEditor/>}{tab==='pages'&&<CmsPageManager/>}
+</>;
+}
+function MessageInspector(){
+@@ -39,6 +44,39 @@ function DirectMessageControls(){
+const save=async(account:Account,disabled:boolean)=>{setBusy(true);setMessage('');try{await request('/api/admin/comms',{action:'setDirectMessageControl',profileId:account.id,disabled,reason:reasons[account.id]||'',confirmation:confirms[account.id]||''});await load();setConfirms({...confirms,[account.id]:''});setMessage('Direct-message restriction saved and audited.');}catch(e){setMessage(e instanceof Error?e.message:'Could not update direct-message access.');}finally{setBusy(false);}};
+return <section className="admin-card"><h2>Per-account direct-message controls</h2><p>The existing global Messages feature switch remains under Features. These per-account controls deny new sends when either participant is restricted; historical conversations are not hidden or deleted.</p><form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><div className="admin-filter-actions"><button className="admin-button">Search</button></div></form><div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Direct-message account controls"><table><thead><tr><th>Account</th><th>Current state</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(account=><tr key={account.id}><td className="actor-cell">{account.username||account.name}<small>{account.email}<br/>{account.id}</small></td><td className="status-cell">{account.dm_disabled?'Restricted':'Allowed'}</td><td className="reason-cell"><input aria-label={'Reason for '+account.email} value={reasons[account.id]??account.dm_reason} maxLength={500} onChange={event=>setReasons({...reasons,[account.id]:event.target.value})}/></td><td className="id-cell"><input aria-label={'Confirmation for '+account.email} value={confirms[account.id]||''} onChange={event=>setConfirms({...confirms,[account.id]:event.target.value})}/></td><td className="action-cell"><button className="admin-button" disabled={busy||confirms[account.id]!==account.id||(!account.dm_disabled&&!(reasons[account.id]||'').trim())} onClick={()=>void save(account,!account.dm_disabled)}>{account.dm_disabled?'Allow DMs':'Restrict DMs'}</button></td></tr>)}{!items.length&&<tr><td colSpan={5}>Search for a member to manage DM access.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
+}
++function MessageRestrictionControls(){
++ const [q,setQ]=useState(''),[items,setItems]=useState<Restriction[]>([]),[drafts,setDrafts]=useState<Record<string,RestrictionDraft>>({}),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
++ const draftFor=(row:Restriction):RestrictionDraft=>drafts[row.profile_id]||{send:row.send_disabled,receive:row.receive_disabled,until:toLocalInput(row.suspended_until),reason:row.reason,confirm:''};
++ const patch=(id:string,next:Partial<RestrictionDraft>)=>setDrafts(current=>{const base=current[id]||draftFor(items.find(row=>row.profile_id===id)!);return {...current,[id]:{...base,...next}};});
++ const load=async()=>setItems(await request<Restriction[]>('/api/admin/comms?view=restrictions&q='+encodeURIComponent(q)));
++ useEffect(()=>{let active=true;request<Restriction[]>('/api/admin/comms?view=restrictions&q=').then(rows=>{if(active)setItems(rows);}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load account restrictions.');});return()=>{active=false;};},[]);
++ const save=async(row:Restriction)=>{const draft=draftFor(row);setBusy(true);setMessage('');try{
++   await request('/api/admin/comms',{action:'setMessageRestriction',profileId:row.profile_id,send:draft.send,receive:draft.receive,suspendedUntil:draft.until?new Date(draft.until).toISOString():null,reason:draft.reason,confirmation:draft.confirm});
++   setDrafts(current=>({...current,[row.profile_id]:blankDraft()}));await load();setMessage('Restriction saved and audited. New sends are rejected immediately.');
++ }catch(e){setMessage(e instanceof Error?e.message:'Could not update the restriction.');}finally{setBusy(false);}};
++ return <section className="admin-card"><h2>Per-account message restrictions</h2><p>Three separate switches: <strong>sending</strong> stops this account from writing, <strong>receiving</strong> stops anyone writing to it, and <strong>suspension</strong> pauses messaging in both directions until the chosen moment. They stack on top of the global DM switch above and on the Messages feature flag under Features. Nothing is retroactive: existing conversations stay readable.</p>
++ <form className="admin-search" onSubmit={event=>{event.preventDefault();void load().catch(e=>setMessage(e.message));}}><label>Find account<input minLength={2} maxLength={100} value={q} onChange={event=>setQ(event.target.value)}/></label><div className="admin-filter-actions"><button className="admin-button">Search</button></div></form>
++ <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Per-account message restrictions"><table><thead><tr><th>Account</th><th>Sending</th><th>Receiving</th><th>Suspended until</th><th>Reason</th><th>Confirm account ID</th><th>Action</th></tr></thead><tbody>{items.map(row=>{const draft=draftFor(row);const restricted=draft.send||draft.receive||!!draft.until;
++  return <tr key={row.profile_id}><td className="actor-cell">{row.username||row.name}<small>{row.email}<br/>{row.profile_id}</small></td>
++   <td className="status-cell"><label className="feature-switch"><input type="checkbox" checked={draft.send} onChange={event=>patch(row.profile_id,{send:event.target.checked})}/>Blocked</label></td>
++   <td className="status-cell"><label className="feature-switch"><input type="checkbox" checked={draft.receive} onChange={event=>patch(row.profile_id,{receive:event.target.checked})}/>Blocked</label></td>
++   <td className="reason-cell"><input type="datetime-local" aria-label={'Suspension end for '+row.email} value={draft.until} onChange={event=>patch(row.profile_id,{until:event.target.value})}/></td>
++   <td className="reason-cell"><input aria-label={'Reason for '+row.email} maxLength={500} value={draft.reason} onChange={event=>patch(row.profile_id,{reason:event.target.value})}/></td>
++   <td className="id-cell"><input aria-label={'Confirmation for '+row.email} value={draft.confirm} onChange={event=>patch(row.profile_id,{confirm:event.target.value})}/></td>
++   <td className="action-cell"><button className="admin-button" disabled={busy||draft.confirm!==row.profile_id||(restricted&&draft.reason.trim().length<3)} onClick={()=>void save(row)}>{restricted?'Apply restriction':'Lift restriction'}</button></td></tr>;})}{!items.length&&<tr><td colSpan={7}>Search for a member to manage restrictions.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
++}
++function MessagingLimitsEditor(){
++ const [state,setState]=useState<MessagingLimits|null>(null),[maxLength,setMaxLength]=useState(2000),[window,setWindow]=useState(60),[cap,setCap]=useState(30),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
++ const load=async()=>{const limits=await request<MessagingLimits>('/api/admin/comms?view=limits');setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);};
++ useEffect(()=>{let active=true;request<MessagingLimits>('/api/admin/comms?view=limits').then(limits=>{if(active){setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);}}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load messaging limits.');});return()=>{active=false;};},[]);
++ const save=async()=>{setBusy(true);setMessage('');try{
++   await request('/api/admin/comms',{action:'saveMessagingLimits','messages.maxLength':maxLength,'messages.rateWindowSeconds':window,'messages.rateMaxMessages':cap});
++   await load();setMessage('Messaging limits saved and audited. The API and the composer follow them immediately.');
++ }catch(e){setMessage(e instanceof Error?e.message:'Could not save messaging limits.');}finally{setBusy(false);}};
++ return <div className="comms-grid"><section className="admin-card"><h2>Message length</h2><p>Longest message a member may send, counted in characters. The composer stops at the same number, and the API rejects anything longer, so a stale browser tab cannot slip past it.</p><label>Maximum characters (1–4000)<input type="number" min={1} max={4000} value={maxLength} onChange={event=>setMaxLength(Number(event.target.value))}/></label></section>
++ <section className="admin-card"><h2>Send quota</h2><p>Sliding window counted from the messages table itself. Set the window to 0 to switch the quota off entirely. The API answers 429 once a member reaches the cap; the composer never shows the quota, because it is a server rule.</p><label>Window in seconds (0–86400, 0 disables)<input type="number" min={0} max={86400} value={window} onChange={event=>setWindow(Number(event.target.value))}/></label><label>Maximum messages in the window (1–1000)<input type="number" min={1} max={1000} value={cap} onChange={event=>setCap(Number(event.target.value))}/></label></section>
++ <section className="admin-card admin-confirm"><h2>Save messaging limits</h2><p>{state?`Currently stored: ${state.maxLength} characters, ${state.rateWindowSeconds?state.rateMaxMessages+' messages per '+state.rateWindowSeconds+' seconds':'quota off'}.`:'Loading the stored values…'}</p><button className="admin-button admin-primary" type="button" disabled={busy} onClick={()=>void save()}>Save limits and audit</button>{message&&<p role="status">{message}</p>}</section></div>;
++}
+function NotificationTemplateEditor(){
+const [templates,setTemplates]=useState<Template[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+const load=async()=>setTemplates(await request<Template[]>('/api/admin/comms?view=templates'));
+diff --git a/components/admin/features.tsx b/components/admin/features.tsx
+index 49d8b40..28d91c9 100644
+--- a/components/admin/features.tsx
++++ b/components/admin/features.tsx
+@@ -6,7 +6,7 @@ import {request} from '@/components/social/common';
+export function FeatureEditor({initial}:{initial:FeatureConfig}){
+const [value,setValue]=useState(initial),[pending,setPending]=useState(false),[message,setMessage]=useState(''),[confirmation,setConfirmation]=useState('');const router=useRouter();
+return <form className="admin-confirm feature-editor" onSubmit={async event=>{event.preventDefault();setPending(true);setMessage('');try{await request('/api/admin/features',{value,confirmation});setMessage('Feature controls saved and audited. Existing public tabs should reload.');router.refresh();}catch(error){setMessage(error instanceof Error?error.message:'Could not save.');}finally{setPending(false);}}}>
+- <section className="admin-card"><h2>Feature rollouts</h2><p>Assignments are deterministic per feature and account ID. Anonymous visitors (including signup requests) share one stable cohort, not a random percentage of visitors. 100% is everyone; 0% is nobody. Feature flags do not grant permissions or bypass private accounts.</p><div className="feature-grid">{FEATURE_KEYS.map(key=><fieldset key={key}><legend>{key}</legend><label className="feature-switch"><input type="checkbox" checked={value.flags[key].enabled} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],enabled:e.target.checked}}})}/>Enabled</label><label>Rollout percent<input aria-label={key+' rollout percent'} type="number" min={0} max={100} step={1} value={value.flags[key].percent} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],percent:Number(e.target.value)}}})}/></label></fieldset>)}</div></section>
++ <section className="admin-card"><h2>Feature rollouts</h2><p>Assignments are deterministic per feature and account ID. Anonymous visitors (including signup requests) share one stable cohort, not a random percentage of visitors. 100% is everyone; 0% is nobody. Feature flags do not grant permissions or bypass private accounts.</p><p>Messaging switches: <strong>messages</strong> is the global direct-message switch; <strong>messageDeletion</strong> hides the unsend control and makes the API reject deletion; <strong>messageSearch</strong> turns conversation search off; <strong>readReceipts</strong> hides the seen marker and stops the read state from being recorded; <strong>emojiPicker</strong> removes the emoji control from the composer. Length and send-quota limits live under Communications.</p><div className="feature-grid">{FEATURE_KEYS.map(key=><fieldset key={key}><legend>{key}</legend><label className="feature-switch"><input type="checkbox" checked={value.flags[key].enabled} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],enabled:e.target.checked}}})}/>Enabled</label><label>Rollout percent<input aria-label={key+' rollout percent'} type="number" min={0} max={100} step={1} value={value.flags[key].percent} onChange={e=>setValue({...value,flags:{...value.flags,[key]:{...value.flags[key],percent:Number(e.target.value)}}})}/></label></fieldset>)}</div></section>
+<section className="admin-card admin-confirm"><h2>Maintenance</h2><p>Verified, active admins/owners bypass maintenance only. Feature flags still apply to them. Admin pages, sign-in, recovery and sign-out remain reachable. Existing private content stays private.</p><label className="feature-switch"><input type="checkbox" checked={value.maintenance.enabled} onChange={e=>setValue({...value,maintenance:{...value.maintenance,enabled:e.target.checked}})}/>Enable maintenance mode</label><label>Public title<input maxLength={100} required value={value.maintenance.title} onChange={e=>setValue({...value,maintenance:{...value.maintenance,title:e.target.value}})}/></label><label>Public message<input maxLength={500} value={value.maintenance.message} onChange={e=>setValue({...value,maintenance:{...value.maintenance,message:e.target.value}})}/></label>{value.maintenance.enabled&&<label>Type MAINTENANCE to confirm<input autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required/></label>}</section>
+<section className="admin-card admin-confirm"><h2>Displayed engagement</h2><p>Displayed total = floor((real interactions + per-post baseline) × multiplier + deterministic jitter), clamped to 0–1 trillion. Jitter is a stable per-post offset, not a fresh random number on each request. Views count unique recorded “seen” reactions, not video plays.</p><label>Multiplier (0–100)<input type="number" min={0} max={100} step="0.01" value={value.counters.multiplier} onChange={e=>setValue({...value,counters:{...value.counters,multiplier:Number(e.target.value)}})}/></label><label>Jitter amplitude (0–1000)<input type="number" min={0} max={1000} step={1} value={value.counters.jitter} onChange={e=>setValue({...value,counters:{...value.counters,jitter:Number(e.target.value)}})}/></label><label className="feature-switch"><input type="checkbox" checked={value.counters.hide} onChange={e=>setValue({...value,counters:{...value.counters,hide:e.target.checked}})}/>Hide public post engagement counts</label><p>Open a post in Content for baseline editing. Hiding displayed counts does not erase actual engagement or alter private-profile access.</p></section>
+{message&&<p role="status">{message}</p>}<button type="submit" className="admin-button admin-primary" disabled={pending||(value.maintenance.enabled&&confirmation!=='MAINTENANCE')}>{pending?'Saving…':'Publish feature controls'}</button>
+diff --git a/components/social/app.tsx b/components/social/app.tsx
+index 355b5a9..b775785 100644
+--- a/components/social/app.tsx
++++ b/components/social/app.tsx
+@@ -272,7 +272,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
+const poll = async () => {
+if (active && timer) { clearTimeout(timer); timer = undefined; }
+try {
+-        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features">>("/api/social?activity=1", undefined, t);
++        const activity = await request<Pick<SocialData, "notifications" | "unreadMessages" | "features" | "messaging">>("/api/social?activity=1", undefined, t);
+if (!active) return;
+const newest = activity.notifications[0]?.created_at || 0;
+const changed = activity.unreadMessages > 0 || (latestNotification && newest > latestNotification);
+@@ -287,6 +287,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
+...current,
+unreadMessages: activity.unreadMessages,
+features: activity.features ?? current.features,
++            messaging: activity.messaging ?? current.messaging,
+notifications: incoming.length ? [...incoming, ...current.notifications].sort((a, b) => b.created_at - a.created_at).slice(0, 100) : current.notifications,
+};
+});
+@@ -627,7 +628,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
+{view === "saved" && <SavedView me={data.me} posts={data.posts} openPost={actions.openPost} navigate={target => navigate(target)} />}
+{view === "tag" && profileId && <TagView tag={profileId} openPost={actions.openPost} />}
+{view === "messages" && (data.me
+-              ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} onProfile={id => navigate("profile", id)} />
++              ? <Messages key={recipient || "default"} me={data.me} people={data.people} initialRecipient={recipient} maxLength={data.messaging?.maxLength} onProfile={id => navigate("profile", id)} />
+: <Empty icon={<Send />} heading={t("app.your_conversations_here")} body={t("app.sign_in_to_send_messages_and_save_notes_to_yourself")}
+action={<button className="primary-button" onClick={() => openAuth()}>{t("auth.signIn")}</button>} />)}
+{view === "notifications" && (
+diff --git a/components/social/messages.tsx b/components/social/messages.tsx
+index 42b28a7..2bb4a5b 100644
+--- a/components/social/messages.tsx
++++ b/components/social/messages.tsx
+@@ -6,14 +6,19 @@ import { Send, Search, SquarePen, ArrowLeft, Bookmark, Trash2 } from "lucide-rea
+import { toast } from "sonner";
+import { Avatar, Empty, IconButton, Busy, request, timeAgo, count } from "./common";
+import { EmojiPicker, EmojiTrigger } from "./emoji-picker";
++import { useFeatures } from "./features";
+import type { Person, Message } from "@/lib/types";
+
+type OutgoingMessage = Message & { pending?: boolean };
+
+-export function Messages({ me, people, initialRecipient, onProfile }: {
+-  me: Person; people: Person[]; initialRecipient: string | null; onProfile: (id: string) => void;
++export function Messages({ me, people, initialRecipient, maxLength, onProfile }: {
++  me: Person; people: Person[]; initialRecipient: string | null; maxLength?: number; onProfile: (id: string) => void;
+}) {
+const t=useLabels();
++  const flags=useFeatures();
++  // The server is the authority; this only stops the composer early and keeps
++  // the character counter honest when an administrator lowers the limit.
++  const bodyLimit=maxLength&&maxLength>0?maxLength:2000;
+const [recipient, setRecipient] = useState(initialRecipient || me.id);
+const [query, setQuery] = useState("");
+const [body, setBody] = useState("");
+@@ -151,11 +156,11 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
+</span>
+<IconButton label={t("messages.find_someone_to_message")} onClick={() => queryInput.current?.focus()}><SquarePen size={22} /></IconButton>
+</header>
+-        <label className="search-field">
++        {flags.messageSearch && <label className="search-field">
+<Search size={18} />
+<input ref={queryInput} placeholder={t("messages.search_people")} aria-label={t("messages.search_conversations")} value={query} onChange={e => setQuery(e.target.value)} />
+-        </label>
+-        {query.trim().length >= 2 && serverHits.length > 0 && (<>
++        </label>}
++        {flags.messageSearch && query.trim().length >= 2 && serverHits.length > 0 && (<>
+<h3>{t("messages.in_conversations")}</h3>
+{serverHits.map(p => (
+<button key={"hit:" + p.id} className={"conversation " + (recipient === p.id ? "selected" : "")}
+@@ -219,7 +224,8 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
+/^https?:\/\//.test(text) ? <a key={index} href={text} target="_blank" rel="noreferrer" className="message-link">{text}</a> : text)}</p>
+<span className="message-row-foot">
+<time title={new Date(m.created_at).toLocaleString()}>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+-                  {!m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
++                  {flags.readReceipts && !m.pending && m.sender_id === me.id && m.read_at && <span className="message-seen" title={new Date(m.read_at).toLocaleString()}>{t("messages.seen")}</span>}
++                  {flags.messageDeletion && !m.pending && m.sender_id === me.id && <button className="message-delete" aria-label={t("messages.delete_message")} title={t("messages.delete")} onClick={() => void removeMessage(m)}><Trash2 size={13} /></button>}
+</span>
+</div>
+))}
+@@ -232,7 +238,7 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
+<div ref={bottom} />
+</div>
+<form className="message-compose" onSubmit={e => { e.preventDefault(); void send(); }}>
+-          <span className="emoji-anchor">
++          {flags.emojiPicker && <span className="emoji-anchor">
+<EmojiTrigger open={emojiOpen} label={t("messages.add_a_smile")} onToggle={() => {
+// Opening the picker parks the caret where the user left it so
+// the first emoji lands there; closing returns focus to the
+@@ -262,13 +268,13 @@ export function Messages({ me, people, initialRecipient, onProfile }: {
+onClose={() => { setEmojiOpen(false); input.current?.focus(); }}
+/>
+)}
+-          </span>
++          </span>}
+<input
+ref={input}
+aria-label={t("messages.write_a_message")}
+placeholder={t("messages.message")}
+value={body}
+-            maxLength={2000}
++            maxLength={bodyLimit}
+onChange={e => { setBody(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
+onKeyUp={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+onClick={e => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+diff --git a/lib/admin/analytics.ts b/lib/admin/analytics.ts
+index f4fe292..6500929 100644
+--- a/lib/admin/analytics.ts
++++ b/lib/admin/analytics.ts
+@@ -11,6 +11,14 @@ export type AnalyticsDay = {
+reports: number;
+storageBytes: number;
+};
++export type MessagingInsight = {
++  /** Messages sent inside the window, excluding demo and deleted senders. */
++  sent: number;
++  /** Distinct participant pairs that exchanged at least one message. */
++  activeConversations: number;
++  /** Accounts currently carrying a messaging restriction. */
++  restrictions: { dmDisabled: number; sendDisabled: number; receiveDisabled: number; suspended: number };
++};
+export type AnalyticsSnapshot = {
+days: number;
+daily: AnalyticsDay[];
+@@ -19,6 +27,7 @@ export type AnalyticsSnapshot = {
+categories: { category: string; creations: number }[];
+hashtags: { hashtag: string; uses: number }[];
+funnel: { members: number; firstPostMembers: number; conversionRate: number };
++  messaging: MessagingInsight;
+};
+
+const DAY_MS = 86_400_000;
+@@ -115,9 +124,29 @@ export async function dashboardAnalytics(db: QueryExecutor, inputDays: unknown =
+.sort((left,right) => right.uses-left.uses || left.hashtag.localeCompare(right.hashtag))
+.slice(0,20);
+
++  const [{ rows: [messagingWindow] }, { rows: [restrictions] }] = await Promise.all([
++    db.query(`SELECT COUNT(*) AS sent,COUNT(DISTINCT CASE WHEN m.sender_id<m.recipient_id THEN m.sender_id||':'||m.recipient_id ELSE m.recipient_id||':'||m.sender_id END) AS active_conversations
++      FROM messages m JOIN profiles sender ON sender.id=m.sender_id
++      WHERE m.created_at>=$1 AND m.deleted_at IS NULL AND sender.deleted_at IS NULL AND COALESCE(sender.is_demo,0)=0`, [start]),
++    db.query(`SELECT
++      (SELECT COUNT(*) FROM admin_message_controls WHERE dm_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS dm_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE send_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS send_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE receive_disabled=${dialect === 'sqlite' ? '1' : 'true'}) AS receive_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>${dialect === 'sqlite' ? '(unixepoch()*1000)' : '(extract(epoch from now())*1000)'}) AS suspended`),
++  ]);
+const members = asNumber(funnel.members), firstPostMembers = asNumber(funnel.first_post_members);
+return {
+days, daily,
++    messaging: {
++      sent: asNumber(messagingWindow.sent),
++      activeConversations: asNumber(messagingWindow.active_conversations),
++      restrictions: {
++        dmDisabled: asNumber(restrictions.dm_disabled),
++        sendDisabled: asNumber(restrictions.send_disabled),
++        receiveDisabled: asNumber(restrictions.receive_disabled),
++        suspended: asNumber(restrictions.suspended),
++      },
++    },
+topPosts: topPosts.map(row => ({ ...row, id: String(row.id), created_at: asNumber(row.created_at), likes: asNumber(row.likes), comments: asNumber(row.comments), views: asNumber(row.views) })) as AnalyticsSnapshot['topPosts'],
+topCreators: topCreators.map(row => ({ ...row, id: String(row.id), creations: asNumber(row.creations), likes: asNumber(row.likes), comments: asNumber(row.comments) })) as AnalyticsSnapshot['topCreators'],
+categories: categories.map(row => ({ category: String(row.category), creations: asNumber(row.creations) })),
+diff --git a/lib/admin/communications.ts b/lib/admin/communications.ts
+index 0bd1487..be46710 100644
+--- a/lib/admin/communications.ts
++++ b/lib/admin/communications.ts
+@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
+import type { PoolLike, QueryExecutor } from '../postgres';
+import { claimTransactionalEmail } from '../email';
+-import { AdminError } from './validation';
++import { AdminError, validateSetting } from './validation';
+import { authorizeAdmin, insertAudit, transaction } from './core';
+import { requirePermission } from './permissions';
++import { DEFAULT_MESSAGING, type MessagingPolicy } from '../messaging-policy';
+
+export const NOTIFICATION_KINDS = ['like', 'comment', 'follow', 'tag', 'broadcast'] as const;
+export type NotificationKind = typeof NOTIFICATION_KINDS[number];
+@@ -124,6 +125,159 @@ export async function setDirectMessageControl(pool: PoolLike, actorId: string, i
+});
+}
+
++// --------------------- global messaging limits (settings) --------------------
++/** Keys an administrator may write from the Communications panel. */
++export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages'] as const;
++export type MessagingSettingKey = typeof MESSAGING_SETTING_KEYS[number];
++export type MessagingLimits = MessagingPolicy;
++const POLICY_KEY: Record<MessagingSettingKey, keyof MessagingPolicy> = {
++  'messages.maxLength': 'maxLength',
++  'messages.rateWindowSeconds': 'rateWindowSeconds',
++  'messages.rateMaxMessages': 'rateMaxMessages',
++};
++
++/** Current limits, always the stored value or the shipped default. */
++export function readMessagingLimits(settings: Record<string, unknown>): MessagingLimits {
++  const number = (key: MessagingSettingKey) => {
++    const value = Number(settings[key]);
++    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]];
++  };
++  return {
++    maxLength: Math.max(1, number('messages.maxLength') || DEFAULT_MESSAGING.maxLength),
++    rateWindowSeconds: Math.max(0, number('messages.rateWindowSeconds')),
++    rateMaxMessages: Math.max(1, number('messages.rateMaxMessages') || DEFAULT_MESSAGING.rateMaxMessages),
++  };
++}
++
++/**
++ * Persist the messaging limits.
++ *
++ * Every key goes through the shared `validateSetting` registry, so the same
++ * bounds that guard the API also guard the Admin Panel, and each write is
++ * audited with its previous value. `messages.manage` is enough: these are
++ * messaging policy, not general platform settings.
++ */
++export async function saveMessagingLimits(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
++  const next: Partial<Record<MessagingSettingKey, number>> = {};
++  for (const key of MESSAGING_SETTING_KEYS) {
++    if (input[key] === undefined) continue;
++    const value = typeof input[key] === 'string' ? Number(input[key]) : input[key];
++    if (typeof value !== 'number' || !Number.isFinite(value)) throw new AdminError('Enter a whole number for every messaging limit.');
++    next[key] = validateSetting(key, value) as number;
++  }
++  if (!Object.keys(next).length) throw new AdminError('Choose at least one messaging limit to change.');
++  return transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId);
++    requirePermission(actor, 'messages.manage');
++    for (const [key, value] of Object.entries(next) as [MessagingSettingKey, number][]) {
++      const { rows: [row] } = await db.query('SELECT value FROM app_settings WHERE key=$1', [key]);
++      const before = row ? JSON.parse(String(row.value)) : DEFAULT_MESSAGING[POLICY_KEY[key]];
++      await db.query(`INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES($1,$2,$3,$4)
++        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at,updated_by=EXCLUDED.updated_by`,
++        [key, JSON.stringify(value), Date.now(), actor.userId]);
++      await insertAudit(db, actor, { action: 'settings.write', targetType: 'setting', targetId: key, before, after: value });
++    }
++    return { ok: true, saved: Object.keys(next) } as const;
++  });
++}
++
++// ------------------- per-account messaging restrictions ----------------------
++export type MessageRestriction = {
++  profile_id: string;
++  name: string;
++  email: string;
++  username: string;
++  dm_disabled: boolean;
++  send_disabled: boolean;
++  receive_disabled: boolean;
++  suspended_until: number;
++  reason: string;
++};
++
++/** Accounts matching a search term with their complete messaging state. */
++export async function listMessageRestrictions(db: QueryExecutor, queryInput: unknown): Promise<MessageRestriction[]> {
++  const q = text(queryInput, 100, 'account search');
++  if (q.length < 2) return [];
++  const pattern = '%' + q.replace(/[\\%_]/g, '\\$&') + '%';
++  const { rows } = await db.query(`SELECT u.id,u.name,u.email,p.username,
++      COALESCE(c.dm_disabled,false) AS dm_disabled,COALESCE(c.reason,'') AS control_reason,
++      COALESCE(r.send_disabled,false) AS send_disabled,COALESCE(r.receive_disabled,false) AS receive_disabled,
++      COALESCE(r.suspended_until,0) AS suspended_until,COALESCE(r.reason,'') AS restriction_reason
++    FROM "user" u JOIN profiles p ON p.id=u.id
++    LEFT JOIN admin_message_controls c ON c.profile_id=p.id
++    LEFT JOIN admin_message_restrictions r ON r.profile_id=p.id
++    WHERE p.deleted_at IS NULL AND (u.id ILIKE $1 OR u.email ILIKE $1 OR u.name ILIKE $1 OR p.username ILIKE $1)
++    ORDER BY u."createdAt" DESC,u.id LIMIT 30`, [pattern]);
++  return rows.map(row => ({
++    profile_id: String(row.id),
++    name: String(row.name || ''),
++    email: String(row.email || ''),
++    username: String(row.username || ''),
++    dm_disabled: row.dm_disabled === true || row.dm_disabled === 1,
++    send_disabled: row.send_disabled === true || row.send_disabled === 1,
++    receive_disabled: row.receive_disabled === true || row.receive_disabled === 1,
++    suspended_until: Number(row.suspended_until || 0),
++    reason: String(row.restriction_reason || row.control_reason || ''),
++  }));
++}
++
++/** How many accounts currently carry a messaging restriction (Analytics). */
++export async function countMessageRestrictions(db: QueryExecutor) {
++  const { rows: [row] } = await db.query(`SELECT
++      (SELECT COUNT(*) FROM admin_message_controls WHERE dm_disabled=true) AS dm_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE send_disabled=true) AS send_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE receive_disabled=true) AS receive_disabled,
++      (SELECT COUNT(*) FROM admin_message_restrictions WHERE suspended_until>$1) AS suspended`);
++  return {
++    dmDisabled: Number(row?.dm_disabled || 0),
++    sendDisabled: Number(row?.send_disabled || 0),
++    receiveDisabled: Number(row?.receive_disabled || 0),
++    suspended: Number(row?.suspended || 0),
++  };
++}
++
++/**
++ * Set the send/receive/suspension policy for one account.
++ *
++ * `suspendedUntil` accepts a timestamp or an ISO string; null (or 0) lifts the
++ * suspension. Clearing every switch removes the row entirely, so an account
++ * with no restriction has no row at all.
++ */
++export async function setMessageRestriction(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
++  const profileId = text(input.profileId, 200, 'account ID', true);
++  const reason = text(input.reason ?? '', 500, 'reason');
++  const send = input.send === undefined ? false : input.send;
++  const receive = input.receive === undefined ? false : input.receive;
++  if (typeof send !== 'boolean' || typeof receive !== 'boolean') throw new AdminError('Send and receive must each be on or off.');
++  if (input.confirmation !== profileId) throw new AdminError('Type the exact account ID to confirm.');
++  if ((send || receive) && reason.length < 3) throw new AdminError('A restriction needs a reason of at least 3 characters.');
++  const suspendedUntil = optionalTime(input.suspendedUntil, 'suspension end');
++  if (suspendedUntil !== null && suspendedUntil <= Date.now()) throw new AdminError('Choose a suspension end in the future.');
++  const restricted = send || receive || suspendedUntil !== null;
++  if (restricted && reason.length < 3) throw new AdminError('A restriction needs a reason of at least 3 characters.');
++  return transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId);
++    requirePermission(actor, 'messages.manage');
++    const { rows: [profile] } = await db.query('SELECT id FROM profiles WHERE id=$1 AND deleted_at IS NULL FOR UPDATE', [profileId]);
++    if (!profile) throw new AdminError('Active profile not found.', 404);
++    const { rows: [before] } = await db.query('SELECT send_disabled,receive_disabled,suspended_until,reason FROM admin_message_restrictions WHERE profile_id=$1 FOR UPDATE', [profileId]);
++    const after = { send, receive, suspended_until: suspendedUntil ?? 0, reason: restricted ? reason : '' };
++    if (restricted) {
++      await db.query(`INSERT INTO admin_message_restrictions(profile_id,send_disabled,receive_disabled,suspended_until,reason,updated_at,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7)
++        ON CONFLICT(profile_id) DO UPDATE SET send_disabled=EXCLUDED.send_disabled,receive_disabled=EXCLUDED.receive_disabled,suspended_until=EXCLUDED.suspended_until,reason=EXCLUDED.reason,updated_at=EXCLUDED.updated_at,updated_by=EXCLUDED.updated_by`,
++        [profileId, send, receive, after.suspended_until, after.reason, Date.now(), actor.userId]);
++    } else {
++      await db.query('DELETE FROM admin_message_restrictions WHERE profile_id=$1', [profileId]);
++    }
++    await insertAudit(db, actor, {
++      action: 'messages.restriction', targetType: 'user', targetId: profileId,
++      before: before ? { send_disabled: before.send_disabled === true, receive_disabled: before.receive_disabled === true, suspended_until: Number(before.suspended_until || 0), reason: String(before.reason || '') } : null,
++      after, reason: reason || undefined,
++    });
++    return { ok: true, profileId, ...after };
++  });
++}
++
+// ------------------------ notification templates ----------------------------
+export async function listNotificationTemplates(db: QueryExecutor) {
+const { rows } = await db.query('SELECT kind,enabled,template_text,updated_at,updated_by FROM admin_notification_templates ORDER BY kind');
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+index a28ae1d..da832f0 100644
+--- a/lib/admin/config.ts
++++ b/lib/admin/config.ts
+@@ -23,6 +23,9 @@ export const SETTINGS_DEFAULTS = {
+'theme.defaultTheme': 'system',
+'upload.maxFileMb': 20,
+'upload.dailyQuotaMb': 250,
++  'messages.maxLength': 2000,
++  'messages.rateWindowSeconds': 60,
++  'messages.rateMaxMessages': 30,
+};
+export type Settings = typeof SETTINGS_DEFAULTS;
+export type SettingKey = keyof Settings;
+diff --git a/lib/admin/label-defaults.ts b/lib/admin/label-defaults.ts
+index 17dace8..7b64af8 100644
+--- a/lib/admin/label-defaults.ts
++++ b/lib/admin/label-defaults.ts
+@@ -254,6 +254,7 @@ export const LABEL_DEFAULTS = {
+"messages.load_earlier_messages": "Load earlier messages",
+"messages.start_of_this_conversation": "Start of this conversation",
+"messages.sending": "Sending…",
++  "messages.seen": "Seen",
+"messages.delete_message": "Delete message",
+"messages.delete": "Delete",
+"messages.a_little_space_for_yourself": "A little space for yourself",
+diff --git a/lib/admin/queries.ts b/lib/admin/queries.ts
+index 76b74ad..00ccae2 100644
+--- a/lib/admin/queries.ts
++++ b/lib/admin/queries.ts
+@@ -51,7 +51,24 @@ export async function userDetail(db: QueryExecutor, id: string) {
+(SELECT COUNT(*) FROM session WHERE "userId"=$1 AND "expiresAt">now()) AS sessions`, [id]);
+// NEVER return session tokens, account password hashes or OAuth credentials.
+const { rows: sessions } = await db.query('SELECT id,"createdAt","expiresAt","ipAddress","userAgent" FROM session WHERE "userId"=$1 AND "expiresAt">now() ORDER BY "createdAt" DESC LIMIT 50', [id]);
+-  return { user, counts, sessions };
++  // Messaging restrictions are read-only here: changing them belongs to the
++  // Communications panel, which owns the confirmation and audit flow.
++  const { rows: [messaging] } = await db.query(`SELECT
++    COALESCE((SELECT dm_disabled FROM admin_message_controls WHERE profile_id=$1),false) AS dm_disabled,
++    COALESCE((SELECT send_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS send_disabled,
++    COALESCE((SELECT receive_disabled FROM admin_message_restrictions WHERE profile_id=$1),false) AS receive_disabled,
++    COALESCE((SELECT suspended_until FROM admin_message_restrictions WHERE profile_id=$1),0) AS suspended_until`, [id]);
++  // `suspended` is resolved on the server so the page never compares clock
++  // values while rendering.
++  const messagingState = {
++    dm_disabled: messaging?.dm_disabled === true,
++    send_disabled: messaging?.send_disabled === true,
++    receive_disabled: messaging?.receive_disabled === true,
++    suspended_until: Number(messaging?.suspended_until || 0),
++    // Resolved on the server so the page never compares clock values while rendering.
++    suspended: Number(messaging?.suspended_until || 0) > Date.now(),
++  };
++  return { user, counts, sessions, messaging: messagingState };
+}
+export async function dashboard(db: QueryExecutor) {
+// Turso/libSQL stores these Better Auth timestamps as Unix milliseconds and
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+index 1b656bd..d75a86f 100644
+--- a/lib/admin/validation.ts
++++ b/lib/admin/validation.ts
+@@ -56,6 +56,9 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
+case 'theme.defaultTheme': valid = ['system', 'light', 'dark'].includes(value as string); break;
+case 'upload.maxFileMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100; break;
+case 'upload.dailyQuotaMb': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10000; break;
++    case 'messages.maxLength': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 4000; break;
++    case 'messages.rateWindowSeconds': valid = typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 86400; break;
++    case 'messages.rateMaxMessages': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000; break;
+}
+if (!valid) throw new AdminError('Invalid setting value.');
+return value as Settings[SettingKey];
+diff --git a/lib/features.ts b/lib/features.ts
+index 6fe3bfd..e1ee440 100644
+--- a/lib/features.ts
++++ b/lib/features.ts
+@@ -1,13 +1,22 @@
+/** Rollouts are deterministic by account ID; anonymous visitors share one cohort. */
+-export const FEATURE_KEYS=['reels','stories','explore','search','messages','notifications','comments','likes','saves','shares','follow','reports','uploads','signups','guestBrowsing','privateAccounts','tagging','postEditing'] as const;
++export const FEATURE_KEYS=['reels','stories','explore','search','messages','notifications','comments','likes','saves','shares','follow','reports','uploads','signups','guestBrowsing','privateAccounts','tagging','postEditing','messageDeletion','messageSearch','readReceipts','emojiPicker'] as const;
+export type Feature=typeof FEATURE_KEYS[number];
+export type Flags=Record<Feature,boolean>;
+export type FeatureConfig={flags:Record<Feature,{enabled:boolean;percent:number}>;maintenance:{enabled:boolean;title:string;message:string};counters:{multiplier:number;jitter:number;hide:boolean}};
+export const DEFAULT_FEATURES:FeatureConfig={flags:Object.fromEntries(FEATURE_KEYS.map(key=>[key,{enabled:true,percent:100}])) as FeatureConfig['flags'],maintenance:{enabled:false,title:'We’ll be back soon',message:'We’re making a few improvements. Please check back shortly.'},counters:{multiplier:1,jitter:0,hide:false}};
+export function validateFeatures(value:unknown):FeatureConfig {
+if(!value||typeof value!=='object')throw new Error('Invalid feature configuration.');const input=value as FeatureConfig;
++ if(!input.flags||typeof input.flags!=='object'||Array.isArray(input.flags))throw new Error('Invalid feature configuration.');
+const flags={} as FeatureConfig['flags'];
+- for(const key of FEATURE_KEYS){const f=input.flags?.[key];if(!f||typeof f.enabled!=='boolean'||!Number.isInteger(f.percent)||f.percent<0||f.percent>100)throw new Error('Each feature needs an on/off value and a rollout from 0 to 100.');flags[key]={enabled:f.enabled,percent:f.percent};}
++ for(const key of FEATURE_KEYS){
++  // A stored configuration written before a key existed keeps that key's
++  // default instead of failing the whole document, which would otherwise
++  // silently reset every other switch whenever a new feature is added.
++  const f=Object.hasOwn(input.flags,key)?input.flags[key]:undefined;
++  if(f===undefined){flags[key]={enabled:true,percent:100};continue;}
++  if(typeof f.enabled!=='boolean'||!Number.isInteger(f.percent)||f.percent<0||f.percent>100)throw new Error('Each feature needs an on/off value and a rollout from 0 to 100.');
++  flags[key]={enabled:f.enabled,percent:f.percent};
++ }
+const m=input.maintenance,c=input.counters;
+if(!m||typeof m.enabled!=='boolean'||typeof m.title!=='string'||!m.title.trim()||m.title.length>100||typeof m.message!=='string'||m.message.length>500||/[\x00-\x1f]/.test(m.title+m.message))throw new Error('Invalid maintenance text.');
+if(!c||typeof c.multiplier!=='number'||!Number.isFinite(c.multiplier)||c.multiplier<0||c.multiplier>100||!Number.isInteger(c.jitter)||c.jitter<0||c.jitter>1000||typeof c.hide!=='boolean')throw new Error('Counters require multiplier 0–100, jitter 0–1000 and hide on/off.');
+@@ -18,5 +27,5 @@ export function resolveFeatures(config:FeatureConfig,id:string|null):Flags{retur
+export const ALL_FEATURES=resolveFeatures(DEFAULT_FEATURES,null);
+export function featureConfig(settings:Record<string,unknown>):FeatureConfig {if(!settings['features.config'])return structuredClone(DEFAULT_FEATURES);try{return validateFeatures(JSON.parse(String(settings['features.config'])));}catch{return structuredClone(DEFAULT_FEATURES);}}
+export const VIEW_FEATURES:Record<string,Feature>={reels:'reels',search:'search',tag:'search',explore:'explore',messages:'messages',notifications:'notifications',saved:'saves',create:'uploads'};
+-export const QUERY_FEATURES:Record<string,Feature>={comments:'comments',messages:'messages',inbox:'messages',messages_search:'messages',highlights:'stories','story-viewers':'stories',tagged:'tagging',accounts:'search',search:'search',hashtag:'search',reels:'reels',explore:'explore',saved:'saves',collections:'saves',following:'follow',relations:'follow'};
+-export const ACTION_FEATURES:Record<string,Feature>={comment:'comments',delete_comment:'comments',follow:'follow',message:'messages',delete_message:'messages',read_messages:'messages',read_notifications:'notifications',set_privacy:'privateAccounts',report:'reports',highlight:'stories',create_collection:'saves',delete_collection:'saves',save_to_collection:'saves',update_post:'postEditing',create_post:'uploads'};
++export const QUERY_FEATURES:Record<string,Feature>={comments:'comments',messages:'messages',inbox:'messages',messages_search:'messageSearch',highlights:'stories','story-viewers':'stories',tagged:'tagging',accounts:'search',search:'search',hashtag:'search',reels:'reels',explore:'explore',saved:'saves',collections:'saves',following:'follow',relations:'follow'};
++export const ACTION_FEATURES:Record<string,Feature>={comment:'comments',delete_comment:'comments',follow:'follow',message:'messages',delete_message:'messageDeletion',read_messages:'readReceipts',read_notifications:'notifications',set_privacy:'privateAccounts',report:'reports',highlight:'stories',create_collection:'saves',delete_collection:'saves',save_to_collection:'saves',update_post:'postEditing',create_post:'uploads'};
+diff --git a/lib/messaging-policy.ts b/lib/messaging-policy.ts
+new file mode 100644
+index 0000000..06ee800
+<a href="../../../../dev/null">---</a>
++++ b/lib/messaging-policy.ts
+@@ -0,0 +1,149 @@
++import { AdminError } from './admin/validation';
++import { readAppSettings } from './settings-cache';
++
++/**
++ * Server-side messaging policy.
++ *
++ * Everything here runs on the request path, never in the browser: the client
++ * only mirrors these limits so the composer can stop early. An administrator
++ * can therefore tighten a limit in the Admin Panel and the API rejects the
++ * request even if a stale tab still shows the old control.
++ */
++export type MessagingPolicy = {
++  maxLength: number;
++  /** Sliding window in seconds. 0 disables the send quota entirely. */
++  rateWindowSeconds: number;
++  /** Maximum sends inside the window. */
++  rateMaxMessages: number;
++};
++
++export const DEFAULT_MESSAGING: MessagingPolicy = {
++  maxLength: 2000,
++  rateWindowSeconds: 60,
++  rateMaxMessages: 30,
++};
++
++export const MESSAGING_LIMITS = {
++  maxLength: { min: 1, max: 4000 },
++  rateWindowSeconds: { min: 0, max: 86400 },
++  rateMaxMessages: { min: 1, max: 1000 },
++} as const;
++
++const integer = (value: unknown, min: number, max: number) =>
++  typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
++
++/** Coerce one stored value, falling back to the default on anything invalid. */
++function bounded(value: unknown, key: keyof MessagingPolicy): number {
++  const limit = MESSAGING_LIMITS[key];
++  const fallback: number = DEFAULT_MESSAGING[key];
++  if (value === undefined || value === null || value === '') return fallback;
++  const numeric = typeof value === 'string' ? Number(value) : value;
++  return typeof numeric === 'number' && integer(numeric, limit.min, limit.max) ? numeric : fallback;
++}
++
++export function messagingPolicy(settings: Record<string, unknown>): MessagingPolicy {
++  return {
++    maxLength: bounded(settings['messages.maxLength'], 'maxLength'),
++    rateWindowSeconds: bounded(settings['messages.rateWindowSeconds'], 'rateWindowSeconds'),
++    rateMaxMessages: bounded(settings['messages.rateMaxMessages'], 'rateMaxMessages'),
++  };
++}
++
++/**
++ * Cached read of the current messaging limits. The settings cache is
++ * tag-invalidated whenever an administrator writes `messages.*`, so a change is
++ * visible to the next request without a redeploy.
++ */
++export async function readMessagingPolicy(): Promise<MessagingPolicy> {
++  return messagingPolicy((await readAppSettings()) as unknown as Record<string, unknown>);
++}
++
++/** Length is a hard boundary: the stored message is never truncated silently. */
++export function requireMessageBody(body: string, policy: MessagingPolicy) {
++  if (body.length > policy.maxLength) {
++    throw new AdminError(`Messages are limited to ${policy.maxLength} characters.`, 422);
++  }
++  return body;
++}
++
++export interface MessageQuotaDb {
++  prepare(sql: string): {
++    bind(...values: unknown[]): { first<T>(): Promise<T | null> };
++  };
++}
++
++/**
++ * Sliding-window send quota.
++ *
++ * Counted from the `messages` table itself rather than a separate counter, so
++ * an existing deployment needs no extra state and the window is exact. The
++ * query is indexed on `sender_id` through the conversation indexes.
++ */
++export async function requireMessageQuota(db: MessageQuotaDb, senderId: string, policy: MessagingPolicy) {
++  if (policy.rateWindowSeconds <= 0) return;
++  const since = Date.now() - policy.rateWindowSeconds * 1000;
++  const row = await db
++    .prepare('SELECT COUNT(*) AS sent FROM messages WHERE sender_id=? AND created_at>? AND deleted_at IS NULL')
++    .bind(senderId, since)
++    .first<{ sent: number }>();
++  if (Number(row?.sent || 0) >= policy.rateMaxMessages) {
++    throw new AdminError('You are sending messages too quickly. Try again in a moment.', 429);
++  }
++}
++
++export type MessageRestrictionRow = {
++  profile_id: string;
++  dm_disabled?: number;
++  send_disabled?: number;
++  receive_disabled?: number;
++  suspended_until?: number;
++};
++
++export type MessageRestrictions = {
++  blocked: boolean;
++  reason: string;
++};
++
++/**
++ * Per-account messaging restrictions for one send.
++ *
++ * Reads the long-standing global DM switch (`admin_message_controls`) and the
++ * granular send/receive/suspension rows (`admin_message_restrictions`) in the
++ * same pass. The check always runs on the server: the Admin Panel only decides
++ * *what* the policy is, never whether it applies.
++ */
++export async function inspectMessageRestrictions(
++  db: { prepare(sql: string): { bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> } } },
++  senderId: string,
++  recipientId: string,
++): Promise<MessageRestrictions> {
++  const participants = senderId === recipientId ? [senderId] : [senderId, recipientId];
++  const placeholders = participants.map(() => '?').join(',');
++  const [controls, restrictions] = await Promise.all([
++    db
++      .prepare(`SELECT profile_id,dm_disabled FROM admin_message_controls WHERE profile_id IN (${placeholders})`)
++      .bind(...participants)
++      .all<MessageRestrictionRow>(),
++    db
++      .prepare(`SELECT profile_id,send_disabled,receive_disabled,suspended_until FROM admin_message_restrictions WHERE profile_id IN (${placeholders})`)
++      .bind(...participants)
++      .all<MessageRestrictionRow>(),
++  ]);
++  const now = Date.now();
++  const rows = [...(controls.results || []), ...(restrictions.results || [])];
++  const isTrue = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
++  const suspended = rows.find(row => Number(row.suspended_until || 0) > now);
++  if (suspended) {
++    return { blocked: true, reason: 'Messaging is paused for this account until ' + new Date(Number(suspended.suspended_until)).toLocaleString() + '.' };
++  }
++  if (rows.some(row => row.profile_id === senderId && isTrue(row.send_disabled))) {
++    return { blocked: true, reason: 'You are not allowed to send messages right now.' };
++  }
++  if (rows.some(row => row.profile_id === recipientId && isTrue(row.receive_disabled))) {
++    return { blocked: true, reason: 'This account is not accepting messages right now.' };
++  }
++  if (rows.some(row => isTrue(row.dm_disabled))) {
++    return { blocked: true, reason: 'Direct messages are unavailable for one of these accounts.' };
++  }
++  return { blocked: false, reason: '' };
++}
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index 2c2897b..036083d 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -183,6 +183,7 @@ export const adminCommsUpgradeStatements=[
+'CREATE INDEX IF NOT EXISTS notifications_broadcast_idx ON notifications(broadcast_id) WHERE broadcast_id IS NOT NULL',
+`CREATE TABLE IF NOT EXISTS admin_message_controls(profile_id text PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,dm_disabled boolean NOT NULL DEFAULT false,reason text NOT NULL DEFAULT '',updated_at bigint NOT NULL,updated_by text NOT NULL)`,
+'CREATE INDEX IF NOT EXISTS admin_message_controls_disabled_idx ON admin_message_controls(profile_id) WHERE dm_disabled=true',
++ `CREATE TABLE IF NOT EXISTS admin_message_restrictions(profile_id text PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,send_disabled boolean NOT NULL DEFAULT false,receive_disabled boolean NOT NULL DEFAULT false,suspended_until bigint NOT NULL DEFAULT 0,reason text NOT NULL DEFAULT '',updated_at bigint NOT NULL,updated_by text NOT NULL DEFAULT '')`,
+`CREATE TABLE IF NOT EXISTS admin_notification_templates(kind text PRIMARY KEY,enabled boolean NOT NULL DEFAULT true,template_text text NOT NULL,updated_at bigint NOT NULL DEFAULT 0,updated_by text NOT NULL DEFAULT '')`,
+`INSERT INTO admin_notification_templates(kind,enabled,template_text) VALUES ('like',true,'liked your post'),('comment',true,'commented on your post'),('follow',true,'started following you'),('tag',true,'tagged you in a post'),('broadcast',true,'sent you an announcement') ON CONFLICT(kind) DO NOTHING`,
+`CREATE OR REPLACE FUNCTION suppress_disabled_admin_notification() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM admin_notification_templates WHERE kind=NEW.kind AND enabled=true) THEN RETURN NULL; END IF; RETURN NEW; END $$`,
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index 49f8d02..fac8e17 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
+import { postgresQuery, type SqlDialect } from './sql';
+import { countDbTrip } from './perf';
+
+-import { tursoSchemaStatements, tursoIndexStatements } from './turso-schema';
++import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements } from './turso-schema';
+
+export type QueryResultRow = PgQueryResultRow;
+
+@@ -55,6 +55,13 @@ export const DATABASE_MIGRATIONS = [
+version: 2,
+statements: tursoIndexStatements,
+},
++  {
++    // Granular per-account messaging restrictions. CREATE TABLE IF NOT EXISTS
++    // is idempotent on both libSQL and PostgreSQL, so an environment that
++    // already received the table with the base schema pays nothing here.
++    version: 3,
++    statements: tursoMessagingUpgradeStatements,
++  },
+];
+
+let ready: Promise<void> | undefined;
+diff --git a/lib/server.ts b/lib/server.ts
+index f59bb72..ea44051 100644
+--- a/lib/server.ts
++++ b/lib/server.ts
+@@ -1,5 +1,6 @@
+import {AdminError} from './admin/validation';
+import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
++import { readMessagingPolicy } from './messaging-policy';
+import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
+import {displayCounterColumns} from './counters';
+import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
+@@ -234,7 +235,8 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
+viewer?notifications(viewer,25):Promise.resolve({results:[]}),
+viewer&&policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+]);
+-  return {features:policy.flags,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
++  const messaging=await readMessagingPolicy();
++  return {features:policy.flags,messaging,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
+}
+
+/* ------------------------------ lightweight activity ------------------------------ */
+@@ -243,12 +245,12 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
+* message count in one response, never the full notification join. */
+export async function activity(viewer:string){
+const policy=await featurePolicy(viewer);
+-  if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags};
++  if(!policy.flags.notifications&&!policy.flags.messages)return {notifications:[],unreadMessages:0,features:policy.flags,messaging:await readMessagingPolicy()};
+const [notifs,unread]=await Promise.all([
+policy.flags.notifications?notifications(viewer,10):Promise.resolve({results:[]}),
+policy.flags.messages?db().prepare('SELECT COUNT(*) count FROM messages WHERE recipient_id=? AND sender_id!=? AND read_at IS NULL AND deleted_at IS NULL').bind(viewer,viewer).first<{count:number}>():Promise.resolve({count:0}),
+]);
+-  return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags};
++  return {notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,features:policy.flags,messaging:await readMessagingPolicy()};
+}
+
+/* ---------------------------- conversation (messages) ---------------------------- */
+diff --git a/lib/turso-schema.ts b/lib/turso-schema.ts
+index 3e7efb4..3426397 100644
+--- a/lib/turso-schema.ts
++++ b/lib/turso-schema.ts
+@@ -616,6 +616,22 @@ export const tursoSchemaStatements: string[] = [
+WHERE dm_disabled = 1
+`,
+
++  `
++  CREATE TABLE IF NOT EXISTS admin_message_restrictions (
++    profile_id TEXT PRIMARY KEY NOT NULL,
++    send_disabled INTEGER NOT NULL DEFAULT 0,
++    receive_disabled INTEGER NOT NULL DEFAULT 0,
++    suspended_until INTEGER NOT NULL DEFAULT 0,
++    reason TEXT NOT NULL DEFAULT '',
++    updated_at INTEGER NOT NULL,
++    updated_by TEXT NOT NULL DEFAULT '',
++
++    FOREIGN KEY (profile_id)
++      REFERENCES profiles(id)
++      ON DELETE CASCADE
++  )
++  `,
++
+`
+CREATE TABLE IF NOT EXISTS admin_notification_templates (
+kind TEXT PRIMARY KEY NOT NULL,
+@@ -745,3 +761,29 @@ export const tursoIndexStatements: string[] = [
+`CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id)`,
+`CREATE INDEX IF NOT EXISTS idx_profiles_created ON profiles(created_at) WHERE deleted_at IS NULL`,
+];
++
++/**
++ * Migration 3: granular per-account messaging restrictions.
++ *
++ * Kept separate from `tursoSchemaStatements` so an environment that already
++ * applied version 1 still receives the table: every statement is
++ * `CREATE ... IF NOT EXISTS`, which is a no-op where the object already
++ * exists and therefore safe to replay on any dialect.
++ */
++export const tursoMessagingUpgradeStatements: string[] = [
++  `CREATE TABLE IF NOT EXISTS admin_message_restrictions (
++    profile_id TEXT PRIMARY KEY NOT NULL,
++    send_disabled INTEGER NOT NULL DEFAULT 0,
++    receive_disabled INTEGER NOT NULL DEFAULT 0,
++    suspended_until INTEGER NOT NULL DEFAULT 0,
++    reason TEXT NOT NULL DEFAULT '',
++    updated_at INTEGER NOT NULL,
++    updated_by TEXT NOT NULL DEFAULT '',
++
++    FOREIGN KEY (profile_id)
++      REFERENCES profiles(id)
++      ON DELETE CASCADE
++  )`,
++  // `profile_id` is the primary key, so every lookup the messaging policy
++  // performs is already served by that index and no second one is added.
++];
+diff --git a/lib/types.ts b/lib/types.ts
+index 38ea844..5a9dd35 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -6,5 +6,5 @@ export type Message={id:string;sender_id:string;recipient_id:string;body:string;
+export type Notification={id:string;actor_id:string;kind:string;post_id:string|null;created_at:number;read_at:number|null;username:string;avatar:string;media:string|null;media_type:string|null;template_text?:string;message_text?:string|null;broadcast_id?:string|null};
+export type SavedCollection={id:string;name:string;created_at:number;post_ids:string[]};
+export type StoryViewer={username:string;name:string;avatar:string};
+-export type SocialData={features?:import('./features').Flags;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
++export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
+export type SearchResults={people:Person[];posts:Post[]};
+diff --git a/tests/admin-messaging.test.ts b/tests/admin-messaging.test.ts
+new file mode 100644
+index 0000000..4463a60
+<a href="../../../../dev/null">---</a>
++++ b/tests/admin-messaging.test.ts
+@@ -0,0 +1,453 @@
++import assert from 'node:assert/strict';
++import { test, before, beforeEach, after } from 'node:test';
++import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import path from 'node:path';
++import { randomBytes } from 'node:crypto';
++
++// Admin Panel coverage for messaging controls.
++//
++// The suite drives the real admin functions and the real public API against a
++// real libSQL database with real signed-in accounts, so every restriction is
++// proven end to end: Admin Panel write -> app_settings / admin tables -> API ->
++// behaviour. The driver is the deployed libSQL runtime pointed at a throwaway
++// file, which is why no credentials are needed.
++delete process.env.DATABASE_URL;
++delete process.env.POSTGRES_URL;
++const dataDir = mkdtempSync(path.join(tmpdir(), 'functiongram-admin-messaging-'));
++process.env.TURSO_DATABASE_URL = 'file:' + path.join(dataDir, 'messaging.sqlite');
++process.env.BETTER_AUTH_SECRET = randomBytes(32).toString('hex');
++process.env.BREVO_API_KEY = 'test-only-key';
++process.env.BREVO_SENDER_EMAIL = 'noreply@example.test';
++
++import { betterAuth } from 'better-auth';
++import { getMigrations } from 'better-auth/db/migration';
++import { twoFactor } from 'better-auth/plugins';
++import { authConfiguration } from '../lib/auth-config';
++import { getTursoDb } from '../lib/turso';
++import { ensureSchema, getPool } from '../lib/postgres';
++import { db } from '../lib/server';
++import { validateFeatures, DEFAULT_FEATURES } from '../lib/features';
++import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy } from '../lib/messaging-policy';
++import { saveSetting } from '../lib/admin/core';
++import {
++  MESSAGING_SETTING_KEYS, countMessageRestrictions,
++  listMessageRestrictions, readMessagingLimits, saveMessagingLimits, setMessageRestriction,
++} from '../lib/admin/communications';
++import { AdminError } from '../lib/admin/validation';
++import { POST, GET } from '../app/api/social/route';
++
++const origin = 'http://localhost:3000';
++const host = new URL(origin).host;
++
++type Account = { id: string; cookie: string; name: string };
++let owner: Account;
++let alice: Account;
++let bob: Account;
++let carol: Account;
++const pool = await getPool();
++
++before(async () => {
++  // Better Auth applies a built-in three-per-ten-seconds cap to every
++  // /sign-in and /sign-up path. This suite needs four accounts (an owner plus
++  // three members), so those two caps are widened here and only here; the
++  // limiter itself stays on and database-backed, exactly as in production.
++  const base = authConfiguration({});
++  const options = {
++    ...base,
++    rateLimit: {
++      ...base.rateLimit,
++      customRules: {
++        ...base.rateLimit?.customRules,
++        '/sign-up/email': { window: 60, max: 20 },
++        '/sign-in/email': { window: 60, max: 20 },
++      },
++    },
++    appName: 'FunctionGram',
++    secret: process.env.BETTER_AUTH_SECRET!,
++    database: { db: getTursoDb(), type: 'sqlite' as const },
++    plugins: [twoFactor({ issuer: 'RSTMC', twoFactorCookieMaxAge: 300, trustDeviceMaxAge: 0 })],
++    logger: { level: 'error' as const },
++  };
++  const { runMigrations } = await getMigrations(betterAuth(options).options);
++  await runMigrations();
++  await ensureSchema();
++
++  const captured: string[] = [];
++  const auth = betterAuth({
++    ...options,
++    emailVerification: {
++      ...options.emailVerification,
++      sendVerificationEmail: (details: { url: string }) => { captured.push(details.url); return Promise.resolve(); },
++    },
++  });
++
++  async function callAuth(pathName: string, body?: unknown, cookie = '') {
++    return auth.handler(new Request(origin + '/api/auth/' + pathName, {
++      method: body ? 'POST' : 'GET',
++      headers: { host, origin, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
++      ...(body ? { body: JSON.stringify(body) } : {}),
++    }));
++  }
++
++  async function register(name: string): Promise<Account> {
++    const email = name + '@adminmsg.test';
++    const password = 'Example-password-' + name + '-123!';
++    const signup = await callAuth('sign-up/email', { email, password, name, callbackURL: '/' });
++    assert.equal(signup.status, 200, await signup.clone().text());
++    const created = await signup.json() as { user: { id: string } };
++    const verification = new URL(captured.pop()!);
++    assert.equal((await auth.handler(new Request(verification.href, { headers: { host } }))).status, 302, 'email verified');
++    const signin = await callAuth('sign-in/email', { email, password, callbackURL: '/' });
++    assert.equal(signin.status, 200, await signin.clone().text());
++    const cookie = signin.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
++    return { id: created.user.id, cookie, name };
++  }
++
++  owner = await register('owner');
++  await pool.query('UPDATE "user" SET role=$1 WHERE id=$2', ['owner', owner.id]);
++  alice = await register('alice');
++  bob = await register('bob');
++  carol = await register('carol');
++  // One authenticated request per account creates its profile row, exactly as
++  // the sign-in hook does in production.
++  for (const account of [owner, alice, bob, carol]) await api(account, { action: 'read_notifications' });
++});
++
++after(() => { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ } });
++
++/* eslint-disable @typescript-eslint/no-explicit-any */
++async function api(user: Account | null, body?: Record<string, unknown> | null, query = '') {
++  const response = body
++    ? await POST(new Request(origin + '/api/social' + query, {
++        method: 'POST',
++        headers: { host, origin, 'content-type': 'application/json', ...(user ? { cookie: user.cookie } : {}) },
++        body: JSON.stringify(body),
++      }))
++    : await GET(new Request(origin + '/api/social' + query, { headers: { host, ...(user ? { cookie: user.cookie } : {}) } }));
++  const data = (await response.json().catch(() => null)) as any;
++  return { status: response.status, data };
++}
++/* eslint-enable @typescript-eslint/no-explicit-any */
++
++// Every test starts from the shipped state, so no test can pass or fail
++// because of what the previous one left behind.
++beforeEach(async () => {
++  await pool.query('DELETE FROM admin_message_restrictions');
++  await pool.query('DELETE FROM admin_message_controls');
++  await pool.query('DELETE FROM messages');
++  await saveMessagingLimits(pool, owner.id, {
++    'messages.maxLength': DEFAULT_MESSAGING.maxLength,
++    'messages.rateWindowSeconds': DEFAULT_MESSAGING.rateWindowSeconds,
++    'messages.rateMaxMessages': DEFAULT_MESSAGING.rateMaxMessages,
++  });
++  await writeFeatures(DEFAULT_FEATURES);
++});
++
++async function stored(key: string) {
++  const { rows } = await pool.query('SELECT value FROM app_settings WHERE key=?', [key]);
++  return rows[0] ? JSON.parse(String(rows[0].value)) : undefined;
++}
++
++async function audit(action: string) {
++  const { rows } = await pool.query('SELECT target_id,"before","after",reason FROM admin_audit_log WHERE action=? ORDER BY created_at', [action]);
++  return rows.map(row => ({ target_id: String(row.target_id), before: row.before, after: row.after, reason: row.reason }));
++}
++
++test('the messaging limits are registered settings with safe defaults', () => {
++  const defaults = readMessagingLimits({});
++  assert.deepEqual(defaults, DEFAULT_MESSAGING);
++  assert.equal(defaults.maxLength, 2000);
++  assert.equal(defaults.rateWindowSeconds, 60);
++  assert.equal(defaults.rateMaxMessages, 30);
++  // Malformed or hostile stored values never widen the policy. A zero window
++  // is the one legitimate "off" value, so it is asserted separately.
++  for (const value of [0, -1, 5000, 1.5, 'abc', null, {}]) {
++    const policy = messagingPolicy({ 'messages.maxLength': value, 'messages.rateMaxMessages': value });
++    assert.deepEqual(policy, DEFAULT_MESSAGING, `stored value ${JSON.stringify(value)} falls back`);
++  }
++  for (const value of [-1, 86401, 1.5, 'abc', null, {}]) {
++    assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': value }).rateWindowSeconds, 60, `window ${JSON.stringify(value)} falls back`);
++  }
++  assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': 0 }).rateWindowSeconds, 0, 'a zero window disables the quota');
++  assert.deepEqual(messagingPolicy({ 'messages.maxLength': '40', 'messages.rateWindowSeconds': '0', 'messages.rateMaxMessages': '7' }), { maxLength: 40, rateWindowSeconds: 0, rateMaxMessages: 7 });
++});
++
++test('saving messaging limits persists every key, audits each one and rejects out-of-range values', async () => {
++  const result = await saveMessagingLimits(pool, owner.id, {
++    'messages.maxLength': 40, 'messages.rateWindowSeconds': 120, 'messages.rateMaxMessages': 7,
++  });
++  assert.deepEqual(result.saved, [...MESSAGING_SETTING_KEYS]);
++  assert.equal(await stored('messages.maxLength'), 40);
++  assert.equal(await stored('messages.rateWindowSeconds'), 120);
++  assert.equal(await stored('messages.rateMaxMessages'), 7);
++  assert.deepEqual(readMessagingLimits({ 'messages.maxLength': await stored('messages.maxLength'), 'messages.rateWindowSeconds': await stored('messages.rateWindowSeconds'), 'messages.rateMaxMessages': await stored('messages.rateMaxMessages') }), { maxLength: 40, rateWindowSeconds: 120, rateMaxMessages: 7 });
++  const writes = await audit('settings.write');
++  // Audit values are stored as JSON text, exactly as the audit viewer reads them.
++  assert.ok(writes.some(row => row.target_id === 'messages.maxLength' && Number(row.after) === 40), 'the length change is audited');
++  assert.ok(writes.some(row => row.target_id === 'messages.rateWindowSeconds' && Number(row.after) === 120), 'the window change is audited');
++
++  for (const invalid of [0, 4001, -1, 1.5, 'x', null]) {
++    await assert.rejects(() => saveMessagingLimits(pool, owner.id, { 'messages.maxLength': invalid }), (error: unknown) => {
++      assert.ok(error instanceof AdminError, 'a typed admin error, not a raw failure');
++      return true;
++    }, `length ${JSON.stringify(invalid)} is rejected`);
++  }
++  for (const invalid of [-1, 86401, 2.5]) {
++    await assert.rejects(() => saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': invalid }));
++  }
++  for (const invalid of [0, 1001, 3.5]) {
++    await assert.rejects(() => saveMessagingLimits(pool, owner.id, { 'messages.rateMaxMessages': invalid }));
++  }
++  await assert.rejects(() => saveMessagingLimits(pool, owner.id, {}), /at least one/i);
++  // A rejected write leaves the stored values untouched.
++  assert.equal(await stored('messages.maxLength'), 40);
++});
++
++test('only an administrator may write messaging limits, and the reason is audited', async () => {
++  const before = await stored('messages.maxLength');
++  await assert.rejects(() => saveMessagingLimits(pool, alice.id, { 'messages.maxLength': 100 }), (error: unknown) => {
++    assert.ok(error instanceof AdminError && error.status === 403, 'a regular member is refused');
++    return true;
++  });
++  await assert.rejects(() => saveMessagingLimits(pool, null, { 'messages.maxLength': 100 }), { status: 401 });
++  assert.equal(await stored('messages.maxLength'), before, 'nothing was written');
++});
++
++test('per-account restrictions are stored, audited, confirmed and liftable', async () => {
++  const until = Date.now() + 3600000;
++  const created = await setMessageRestriction(pool, owner.id, {
++    profileId: alice.id, send: true, receive: false, suspendedUntil: until, reason: 'Spam reports', confirmation: alice.id,
++  });
++  assert.equal(created.ok, true);
++  assert.equal(created.send, true);
++  assert.equal(created.suspended_until > 0, true);
++
++  const rows = await listMessageRestrictions(pool, 'alice');
++  assert.equal(rows.length, 1);
++  assert.equal(rows[0].send_disabled, true);
++  assert.equal(rows[0].receive_disabled, false);
++  assert.equal(rows[0].suspended_until, created.suspended_until);
++  assert.equal(rows[0].reason, 'Spam reports');
++
++  const writes = await audit('messages.restriction');
++  assert.equal(writes.length, 1);
++  assert.equal(writes[0].target_id, alice.id);
++  assert.equal((JSON.parse(String(writes[0].after)) as { send: boolean }).send, true);
++  assert.equal(writes[0].reason, 'Spam reports');
++
++  // Every guard a caller could try to skip.
++  await assert.rejects(() => setMessageRestriction(pool, owner.id, { profileId: alice.id, send: true, reason: 'nope', confirmation: 'wrong' }), /exact account ID/i);
++  await assert.rejects(() => setMessageRestriction(pool, owner.id, { profileId: alice.id, send: true, confirmation: alice.id }), /reason/i);
++  await assert.rejects(() => setMessageRestriction(pool, owner.id, { profileId: alice.id, send: true, reason: 'spam', suspendedUntil: Date.now() - 1000, confirmation: alice.id }), /future/i);
++  await assert.rejects(() => setMessageRestriction(pool, owner.id, { profileId: 'missing', send: true, reason: 'spam', confirmation: 'missing' }), { status: 404 });
++  await assert.rejects(() => setMessageRestriction(pool, bob.id, { profileId: alice.id, send: true, reason: 'spam', confirmation: alice.id }), { status: 403 });
++
++  // Lifting every switch removes the row entirely.
++  const lifted = await setMessageRestriction(pool, owner.id, { profileId: alice.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: alice.id });
++  assert.equal(lifted.send, false);
++  assert.equal(lifted.suspended_until, 0);
++  const remaining = await pool.query('SELECT profile_id FROM admin_message_restrictions WHERE profile_id=?', [alice.id]);
++  assert.equal(remaining.rows.length, 0, 'no row remains for an unrestricted account');
++});
++
++test('the restriction lookup answers for sending, receiving, suspension and the global DM switch', async () => {
++  assert.deepEqual(await inspectMessageRestrictions(db(), alice.id, bob.id), { blocked: false, reason: '' });
++
++  await setMessageRestriction(pool, owner.id, { profileId: alice.id, send: true, reason: 'sending only', confirmation: alice.id });
++  const sending = await inspectMessageRestrictions(db(), alice.id, bob.id);
++  assert.equal(sending.blocked, true);
++  assert.match(sending.reason, /not allowed to send/i);
++  // A send restriction is one-directional: bob may still write to alice.
++  assert.equal((await inspectMessageRestrictions(db(), bob.id, alice.id)).blocked, false, 'the other participant is unaffected');
++  await setMessageRestriction(pool, owner.id, { profileId: alice.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: alice.id });
++
++  await setMessageRestriction(pool, owner.id, { profileId: bob.id, receive: true, reason: 'inbox closed', confirmation: bob.id });
++  const receiving = await inspectMessageRestrictions(db(), alice.id, bob.id);
++  assert.equal(receiving.blocked, true);
++  assert.match(receiving.reason, /not accepting messages/i);
++  // Alice can still talk to carol.
++  assert.equal((await inspectMessageRestrictions(db(), alice.id, carol.id)).blocked, false);
++  await setMessageRestriction(pool, owner.id, { profileId: bob.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: bob.id });
++
++  await setMessageRestriction(pool, owner.id, { profileId: carol.id, send: false, receive: false, suspendedUntil: Date.now() + 600000, reason: 'cooling off', confirmation: carol.id });
++  const suspended = await inspectMessageRestrictions(db(), carol.id, alice.id);
++  assert.equal(suspended.blocked, true);
++  assert.match(suspended.reason, /paused/i);
++  await setMessageRestriction(pool, owner.id, { profileId: carol.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: carol.id });
++
++  // The long-standing global DM switch still denies both participants.
++  await pool.query('INSERT INTO admin_message_controls(profile_id,dm_disabled,reason,updated_at,updated_by) VALUES(?,1,?,?,?)', [carol.id, 'policy', Date.now(), owner.id]);
++  assert.equal((await inspectMessageRestrictions(db(), alice.id, carol.id)).blocked, true);
++  await pool.query('DELETE FROM admin_message_controls WHERE profile_id=?', [carol.id]);
++  assert.equal((await inspectMessageRestrictions(db(), alice.id, carol.id)).blocked, false);
++});
++
++test('the API enforces the per-account restrictions a stale client would hide', async () => {
++  const first = await api(alice, { action: 'message', id: bob.id, body: 'before the restriction' });
++  assert.equal(first.status, 200, 'a plain send still works');
++
++  await setMessageRestriction(pool, owner.id, { profileId: alice.id, send: true, reason: 'restricted', confirmation: alice.id });
++  const blocked = await api(alice, { action: 'message', id: bob.id, body: 'this must not be stored' });
++  assert.equal(blocked.status, 403, 'the API refuses the send');
++  assert.match(String(blocked.data.error), /not allowed to send/i);
++  const stored = await pool.query('SELECT id FROM messages WHERE sender_id=? AND body=?', [alice.id, 'this must not be stored']);
++  assert.equal(stored.rows.length, 0, 'nothing was written');
++  // Reading history is untouched by a send restriction.
++  assert.equal((await api(alice, { action: 'read_notifications' })).status, 200);
++
++  await setMessageRestriction(pool, owner.id, { profileId: alice.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: alice.id });
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'after the lift' })).status, 200, 'the lift takes effect without a redeploy');
++});
++
++test('the API enforces the configured message length', async () => {
++  await saveMessagingLimits(pool, owner.id, { 'messages.maxLength': 40 });
++  const blocked = await api(alice, { action: 'message', id: bob.id, body: 'x'.repeat(41) });
++  assert.equal(blocked.status, 422, 'a longer body is rejected');
++  assert.match(String(blocked.data.error), /limited to 40 characters/i);
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'x'.repeat(40) })).status, 200, 'the configured limit is exactly reachable');
++});
++
++test('the API enforces the send quota and 0 disables it', async () => {
++  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 3600, 'messages.rateMaxMessages': 1 });
++  assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'first' })).status, 200);
++  const throttled = await api(bob, { action: 'message', id: carol.id, body: 'second' });
++  assert.equal(throttled.status, 429, 'the second send inside the window is refused');
++  assert.match(String(throttled.data.error), /too quickly/i);
++  const { rows } = await pool.query('SELECT id FROM messages WHERE sender_id=? AND body=?', [bob.id, 'second']);
++  assert.equal(rows.length, 0, 'the throttled message was never stored');
++
++  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 0 });
++  assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'third' })).status, 200, 'a zero window switches the quota off');
++  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 60, 'messages.rateMaxMessages': 30 });
++});
++
++test('each messaging feature switch is enforced by the API, not only by the UI', async () => {
++  const seedId = await send(alice, bob, 'flagged');
++  const features = structuredClone(DEFAULT_FEATURES);
++
++  // Deletion.
++  features.flags.messageDeletion.enabled = false;
++  await writeFeatures(features);
++  const deletion = await api(alice, { action: 'delete_message', id: seedId });
++  assert.equal(deletion.status, 403, 'deletion is refused while the switch is off');
++  assert.ok(await message(seedId), 'the message survives the refused deletion');
++  features.flags.messageDeletion.enabled = true;
++  await writeFeatures(features);
++  assert.equal((await api(alice, { action: 'delete_message', id: seedId })).status, 200, 'the same request succeeds once the switch is back on');
++
++  // Read receipts.
++  features.flags.readReceipts.enabled = false;
++  await writeFeatures(features);
++  const read = await api(alice, { action: 'read_messages', id: bob.id });
++  assert.equal(read.status, 403, 'marking a thread read is refused');
++  features.flags.readReceipts.enabled = true;
++  await writeFeatures(features);
++  assert.equal((await api(alice, { action: 'read_messages', id: bob.id })).status, 200);
++
++  // Conversation search.
++  features.flags.messageSearch.enabled = false;
++  await writeFeatures(features);
++  const search = await api(alice, null, '?messages_search=flagged');
++  assert.equal(search.status, 403, 'conversation search is refused');
++  features.flags.messageSearch.enabled = true;
++  await writeFeatures(features);
++  assert.equal((await api(alice, null, '?messages_search=flagged')).status, 200);
++
++  // The global switch still gates everything else.
++  features.flags.messages.enabled = false;
++  await writeFeatures(features);
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'no' })).status, 403, 'the global switch still blocks sending');
++  assert.equal((await api(alice, null, '?messages=' + bob.id)).status, 403, 'and reading a conversation');
++  features.flags.messages.enabled = true;
++  await writeFeatures(features);
++});
++
++test('a stored feature configuration written before the messaging keys existed keeps its defaults', () => {
++  // An older deployment stored a document without the messaging keys. Validating
++  // it must not throw (which would silently reset every other switch).
++  const legacy = { flags: { likes: { enabled: true, percent: 50 } }, maintenance: DEFAULT_FEATURES.maintenance, counters: DEFAULT_FEATURES.counters };
++  const parsed = validateFeatures(legacy);
++  assert.equal(parsed.flags.likes.percent, 50, 'the stored flag survives');
++  for (const key of ['messageDeletion', 'messageSearch', 'readReceipts', 'emojiPicker'] as const) {
++    assert.deepEqual(parsed.flags[key], { enabled: true, percent: 100 }, `${key} keeps its default`);
++  }
++  // A present but malformed flag is still rejected.
++  assert.throws(() => validateFeatures({ ...legacy, flags: { ...legacy.flags, messageDeletion: { enabled: 'yes', percent: 10 } } }));
++  // An empty document is still invalid, so a corrupt write is never accepted.
++  assert.throws(() => validateFeatures({}));
++});
++
++test('the messaging surface of the client mirrors the switches instead of hiding them with CSS', () => {
++  const messages = readFileSync(path.join(process.cwd(), 'components/social/messages.tsx'), 'utf8');
++  assert.match(messages, /flags\.messageDeletion && !m\.pending && m\.sender_id === me\.id/, 'the delete control is removed from the DOM');
++  assert.match(messages, /flags\.messageSearch && <label className="search-field"/, 'the conversation search is removed from the DOM');
++  assert.match(messages, /flags\.emojiPicker && <span className="emoji-anchor"/, 'the emoji control is removed from the DOM');
++  assert.match(messages, /flags\.readReceipts && !m\.pending && m\.sender_id === me\.id && m\.read_at/, 'the seen marker follows the read-receipt switch');
++  assert.match(messages, /maxLength=\{bodyLimit\}/, 'the composer honours the configured limit');
++
++  const features = readFileSync(path.join(process.cwd(), 'lib/features.ts'), 'utf8');
++  assert.match(features, /delete_message:'messageDeletion'/, 'deletion maps to its own switch');
++  assert.match(features, /messages_search:'messageSearch'/, 'search maps to its own switch');
++  assert.match(features, /read_messages:'readReceipts'/, 'read receipts map to their own switch');
++});
++
++test('the admin write path requires the messaging permission and the API rejects a forged client flag', async () => {
++  const route = readFileSync(path.join(process.cwd(), 'app/api/admin/comms/route.ts'), 'utf8');
++  assert.match(route, /view === 'limits'[\s\S]{0,120}messages\.manage/, 'reading the limits needs messages.manage');
++  assert.match(route, /view === 'restrictions'[\s\S]{0,120}messages\.manage/, 'reading restrictions needs messages.manage');
++  assert.match(route, /case 'saveMessagingLimits'/, 'the limits are written through the admin route');
++  assert.match(route, /case 'setMessageRestriction'/, 'restrictions are written through the admin route');
++  assert.match(route, /revalidateTag\('settings'/, 'a limit change invalidates the settings cache');
++
++  const communications = readFileSync(path.join(process.cwd(), 'lib/admin/communications.ts'), 'utf8');
++  assert.match(communications, /saveMessagingLimits[\s\S]{0,1200}requirePermission\(actor, 'messages\.manage'\)/, 'the limit write is authorized');
++  assert.match(communications, /setMessageRestriction[\s\S]{0,1600}requirePermission\(actor, 'messages\.manage'\)/, 'the restriction write is authorized');
++
++  // A browser that still shows the composer cannot talk the API into it.
++  await setMessageRestriction(pool, owner.id, { profileId: carol.id, send: true, reason: 'restricted', confirmation: carol.id });
++  const forged = await api(carol, { action: 'message', id: alice.id, body: 'please allow', can_send: true, restricted: false });
++  assert.equal(forged.status, 403, 'a client flag is ignored');
++  await setMessageRestriction(pool, owner.id, { profileId: carol.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: carol.id });
++});
++
++test('the migration that adds the restriction table is registered and replayable', async () => {
++  const { DATABASE_MIGRATIONS } = await import('../lib/postgres');
++  const latest = DATABASE_MIGRATIONS.at(-1)!;
++  assert.equal(latest.version, 3);
++  const beforeReplay = await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions');
++  for (const statement of latest.statements) { await pool.query(statement); await pool.query(statement); }
++  const afterReplay = await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions');
++  assert.equal(afterReplay.rows[0].n, beforeReplay.rows[0].n, 'replaying the migration is harmless');
++});
++
++async function writeFeatures(config: ReturnType<typeof structuredClone<typeof DEFAULT_FEATURES>>) {
++  await saveSetting(pool, owner.id, 'features.config', JSON.stringify(validateFeatures(config)));
++}
++
++async function send(sender: Account, recipient: Account, body: string) {
++  const response = await api(sender, { action: 'message', id: recipient.id, body });
++  assert.equal(response.status, 200, await Promise.resolve(String(response.data?.error || '')));
++  return String(response.data.id);
++}
++
++async function message(id: string) {
++  const { rows } = await pool.query('SELECT id FROM messages WHERE id=?', [id]);
++  return rows[0];
++}
++
++test('analytics reports messaging volume and the current restriction counts', async () => {
++  await api(alice, { action: 'message', id: bob.id, body: 'counted by analytics' });
++  await setMessageRestriction(pool, owner.id, { profileId: bob.id, send: true, reason: 'analytics', confirmation: bob.id });
++  const counts = await countMessageRestrictions(pool);
++  assert.equal(counts.sendDisabled, 1);
++  assert.equal(counts.dmDisabled, 0);
++  await setMessageRestriction(pool, owner.id, { profileId: bob.id, send: false, receive: false, suspendedUntil: null, reason: '', confirmation: bob.id });
++  assert.equal((await countMessageRestrictions(pool)).sendDisabled, 0);
++
++  const { dashboardAnalytics } = await import('../lib/admin/analytics');
++  const snapshot = await dashboardAnalytics(pool, 14);
++  assert.ok(snapshot.messaging.sent >= 1, 'messages sent are counted');
++  assert.ok(snapshot.messaging.activeConversations >= 1, 'participant pairs are counted');
++  assert.deepEqual(Object.keys(snapshot.messaging.restrictions).sort(), ['dmDisabled', 'receiveDisabled', 'sendDisabled', 'suspended']);
++});
+diff --git a/tests/admin-system.test.ts b/tests/admin-system.test.ts
+index 6fcbf29..1c02249 100644
+--- a/tests/admin-system.test.ts
++++ b/tests/admin-system.test.ts
+@@ -29,13 +29,21 @@ async function fixture() {
+}
+const DAY=86_400_000;
+
+-test('migration 12 is additive, idempotent, registered after Phase 10 and preserves the explicit demo-seed switch', async () => {
++test('migrations 12 and 13 are additive, idempotent and replayable on an existing deployment', async () => {
+const { pg, pool } = await fixture();
+try {
+-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,12);
+-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
++    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,13);
++    const messaging = DATABASE_MIGRATIONS.at(-1)!;
++    assert.equal(messaging.statements, (await import('../lib/turso-schema')).tursoMessagingUpgradeStatements);
++    // Replaying version 13 over a schema that already has the table is a no-op,
++    // which is what lets an existing deployment take the upgrade safely.
++    for (const sql of messaging.statements) await pool.query(sql);
++    for (const sql of messaging.statements) await pool.query(sql);
++    assert.equal((await pool.query('SELECT COUNT(*) AS n FROM admin_message_restrictions')).rows[0].n,0);
++    const system = DATABASE_MIGRATIONS.find(item => item.version === 12)!;
++    assert.equal(system.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
+await pool.query('UPDATE admin_demo_seed_control SET enabled=false WHERE id=1');
+-    for (const sql of DATABASE_MIGRATIONS.at(-1)!.statements) await pool.query(sql);
++    for (const sql of system.statements) await pool.query(sql);
+assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
+const overview=await systemOverview(pool);
+assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,12);
+diff --git a/tests/admin-users.test.ts b/tests/admin-users.test.ts
+index 02b9153..4bde260 100644
+--- a/tests/admin-users.test.ts
++++ b/tests/admin-users.test.ts
+@@ -15,7 +15,7 @@ import { authorizeAdmin } from '../lib/admin/core';
+
+async function fixture() {
+const db = new PGlite();
+-  for (const statement of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements]) await db.exec(statement);
++  for (const statement of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminCommsUpgradeStatements]) await db.exec(statement);
+// PGlite is the local PostgreSQL runtime: timestamps are timestamptz, not the
+// Unix milliseconds the deployed libSQL/Turso runtime stores.
+const pool = serializedPool({ storageDialect: 'postgres', async query(sql, values) {
+--
+2.39.5
+
+
+From 835304116d59625979be572c8e863d2d9728ba9a Mon Sep 17 00:00:00 2001
+From: rstmcsoch <300077786+rstmcsoch@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 03:52:40 +0000
+Subject: [PATCH 2/2] feat(admin): let private accounts be limited to their
+existing followers
+
+The audit brief calls for a non-follower messaging restriction where the
+relationship model exists, and FunctionGram already has one: the follows
+table. The switch is off by default, so today's behaviour (anyone may
+message a private profile) is unchanged until an administrator turns it on.
+
+Enforced in the message action after the per-account restrictions, and it
+reuses the follow graph rather than introducing a second relationship
+model. Notes to oneself are never gated. A malformed stored value falls
+back to off, so it can never open the gate.
+
+Co-authored-by: arena-agent <297053741+arena-agent@users.noreply.github.com>
+---
+app/api/social/route.ts             |  5 ++-
+components/admin/communications.tsx | 13 +++----
+lib/admin/communications.ts         | 24 +++++++++----
+lib/admin/config.ts                 |  1 +
+lib/admin/validation.ts             |  1 +
+lib/messaging-policy.ts             | 44 ++++++++++++++++++++++-
+tests/admin-messaging.test.ts       | 54 ++++++++++++++++++++++++++---
+7 files changed, 122 insertions(+), 20 deletions(-)
+
+diff --git a/app/api/social/route.ts b/app/api/social/route.ts
+index 129e050..6220386 100644
+--- a/app/api/social/route.ts
++++ b/app/api/social/route.ts
+@@ -12,7 +12,7 @@ import { validateProfileUsername } from '@/lib/profile-url';
+import { loadSettings } from '@/lib/admin/core';
+import { getPool } from '@/lib/postgres';
+import { unsendMessage } from '@/lib/server';
+-import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota } from '@/lib/messaging-policy';
++import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota,requirePrivateRecipientAllowed } from '@/lib/messaging-policy';
+import { AppError,postCounters,availablePost,notifications,bootstrap,activity,conversation,inboxPreview,postComments,peopleDirectory,db,identity,clean,fail,json,jsonPublic,readBody,requestHeadersWithHost,sameOrigin,feed,person,searchPeople,relatedPeople,highlights,savedCollections,storyViewers,messageSearch } from '@/lib/server';
+import type {MediaOption} from '@/lib/types';
+export const maxDuration=60;
+@@ -242,6 +242,9 @@ export async function POST(request:Request){
+// this is the enforcement.
+const restrictions=await inspectMessageRestrictions(database,user,recipientId);
+if(restrictions.blocked)throw new AppError(restrictions.reason,403);
++    // Optional follower gate for private accounts, reusing the existing
++    // follow graph rather than a second relationship model.
++    if(messaging.privateFollowersOnly)await requirePrivateRecipientAllowed(database,user,recipientId);
+// A block cuts off the blocked person's messages to the blocker.
+if(await database.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?').bind(recipientId,user).first())throw new AppError('You cannot message this profile.',403);
+const messageId=crypto.randomUUID();await database.prepare('INSERT INTO messages (id,sender_id,recipient_id,body,created_at,read_at,post_id) VALUES (?,?,?,?,?,?,?)').bind(messageId,user,recipientId,body,now,user===recipientId?now:null,storyPostId||null).run();return json({id:messageId,sender_id:user,recipient_id:recipientId,body,created_at:now,read_at:user===recipientId?now:null});
+diff --git a/components/admin/communications.tsx b/components/admin/communications.tsx
+index 9fa4a6d..2548832 100644
+--- a/components/admin/communications.tsx
++++ b/components/admin/communications.tsx
+@@ -7,7 +7,7 @@ type Conversation={first_id:string;second_id:string;first_name:string;first_emai
+type Message={id:string;sender_id:string;recipient_id:string;body:string;created_at:number;redacted_at:number|null;redaction_reason:string|null;sender_name:string};
+type Template={kind:string;enabled:boolean;template_text:string};
+type Account={id:string;name:string;email:string;username:string;dm_disabled:boolean;dm_reason:string};
+-type MessagingLimits={maxLength:number;rateWindowSeconds:number;rateMaxMessages:number};
++type MessagingLimits={maxLength:number;rateWindowSeconds:number;rateMaxMessages:number;privateFollowersOnly:boolean};
+type Restriction={profile_id:string;name:string;email:string;username:string;dm_disabled:boolean;send_disabled:boolean;receive_disabled:boolean;suspended_until:number;reason:string};
+type RestrictionDraft={send:boolean;receive:boolean;until:string;reason:string;confirm:string};
+const blankDraft=():RestrictionDraft=>({send:false,receive:false,until:'',reason:'',confirm:''});
+@@ -66,16 +66,17 @@ function MessageRestrictionControls(){
+<td className="action-cell"><button className="admin-button" disabled={busy||draft.confirm!==row.profile_id||(restricted&&draft.reason.trim().length<3)} onClick={()=>void save(row)}>{restricted?'Apply restriction':'Lift restriction'}</button></td></tr>;})}{!items.length&&<tr><td colSpan={7}>Search for a member to manage restrictions.</td></tr>}</tbody></table></div>{message&&<p role="status">{message}</p>}</section>;
+}
+function MessagingLimitsEditor(){
+- const [state,setState]=useState<MessagingLimits|null>(null),[maxLength,setMaxLength]=useState(2000),[window,setWindow]=useState(60),[cap,setCap]=useState(30),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+- const load=async()=>{const limits=await request<MessagingLimits>('/api/admin/comms?view=limits');setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);};
+- useEffect(()=>{let active=true;request<MessagingLimits>('/api/admin/comms?view=limits').then(limits=>{if(active){setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);}}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load messaging limits.');});return()=>{active=false;};},[]);
++ const [state,setState]=useState<MessagingLimits|null>(null),[maxLength,setMaxLength]=useState(2000),[window,setWindow]=useState(60),[cap,setCap]=useState(30),[followersOnly,setFollowersOnly]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
++ const load=async()=>{const limits=await request<MessagingLimits>('/api/admin/comms?view=limits');setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);setFollowersOnly(limits.privateFollowersOnly);};
++ useEffect(()=>{let active=true;request<MessagingLimits>('/api/admin/comms?view=limits').then(limits=>{if(active){setState(limits);setMaxLength(limits.maxLength);setWindow(limits.rateWindowSeconds);setCap(limits.rateMaxMessages);setFollowersOnly(limits.privateFollowersOnly);}}).catch(e=>{if(active)setMessage(e instanceof Error?e.message:'Could not load messaging limits.');});return()=>{active=false;};},[]);
+const save=async()=>{setBusy(true);setMessage('');try{
+-   await request('/api/admin/comms',{action:'saveMessagingLimits','messages.maxLength':maxLength,'messages.rateWindowSeconds':window,'messages.rateMaxMessages':cap});
++   await request('/api/admin/comms',{action:'saveMessagingLimits','messages.maxLength':maxLength,'messages.rateWindowSeconds':window,'messages.rateMaxMessages':cap,'messages.privateFollowersOnly':followersOnly});
+await load();setMessage('Messaging limits saved and audited. The API and the composer follow them immediately.');
+}catch(e){setMessage(e instanceof Error?e.message:'Could not save messaging limits.');}finally{setBusy(false);}};
+return <div className="comms-grid"><section className="admin-card"><h2>Message length</h2><p>Longest message a member may send, counted in characters. The composer stops at the same number, and the API rejects anything longer, so a stale browser tab cannot slip past it.</p><label>Maximum characters (1–4000)<input type="number" min={1} max={4000} value={maxLength} onChange={event=>setMaxLength(Number(event.target.value))}/></label></section>
+<section className="admin-card"><h2>Send quota</h2><p>Sliding window counted from the messages table itself. Set the window to 0 to switch the quota off entirely. The API answers 429 once a member reaches the cap; the composer never shows the quota, because it is a server rule.</p><label>Window in seconds (0–86400, 0 disables)<input type="number" min={0} max={86400} value={window} onChange={event=>setWindow(Number(event.target.value))}/></label><label>Maximum messages in the window (1–1000)<input type="number" min={1} max={1000} value={cap} onChange={event=>setCap(Number(event.target.value))}/></label></section>
+- <section className="admin-card admin-confirm"><h2>Save messaging limits</h2><p>{state?`Currently stored: ${state.maxLength} characters, ${state.rateWindowSeconds?state.rateMaxMessages+' messages per '+state.rateWindowSeconds+' seconds':'quota off'}.`:'Loading the stored values…'}</p><button className="admin-button admin-primary" type="button" disabled={busy} onClick={()=>void save()}>Save limits and audit</button>{message&&<p role="status">{message}</p>}</section></div>;
++ <section className="admin-card"><h2>Private accounts</h2><p>Off by default: a private profile can be messaged by anyone, exactly as today. Switching it on limits a private account to its existing followers, using the same follow graph the rest of the app uses. Notes to yourself are never affected.</p><label className="feature-switch"><input type="checkbox" checked={followersOnly} onChange={event=>setFollowersOnly(event.target.checked)}/>Only followers may message a private account</label></section>
++ <section className="admin-card admin-confirm"><h2>Save messaging limits</h2><p>{state?`Currently stored: ${state.maxLength} characters, ${state.rateWindowSeconds?state.rateMaxMessages+' messages per '+state.rateWindowSeconds+' seconds':'quota off'}, private accounts ${state.privateFollowersOnly?'limited to followers':'open to everyone'}.`:'Loading the stored values…'}</p><button className="admin-button admin-primary" type="button" disabled={busy} onClick={()=>void save()}>Save limits and audit</button>{message&&<p role="status">{message}</p>}</section></div>;
+}
+function NotificationTemplateEditor(){
+const [templates,setTemplates]=useState<Template[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+diff --git a/lib/admin/communications.ts b/lib/admin/communications.ts
+index be46710..6023b83 100644
+--- a/lib/admin/communications.ts
++++ b/lib/admin/communications.ts
+@@ -127,25 +127,31 @@ export async function setDirectMessageControl(pool: PoolLike, actorId: string, i
+
+// --------------------- global messaging limits (settings) --------------------
+/** Keys an administrator may write from the Communications panel. */
+-export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages'] as const;
++export const MESSAGING_SETTING_KEYS = ['messages.maxLength', 'messages.rateWindowSeconds', 'messages.rateMaxMessages', 'messages.privateFollowersOnly'] as const;
+export type MessagingSettingKey = typeof MESSAGING_SETTING_KEYS[number];
+export type MessagingLimits = MessagingPolicy;
+const POLICY_KEY: Record<MessagingSettingKey, keyof MessagingPolicy> = {
+'messages.maxLength': 'maxLength',
+'messages.rateWindowSeconds': 'rateWindowSeconds',
+'messages.rateMaxMessages': 'rateMaxMessages',
++  'messages.privateFollowersOnly': 'privateFollowersOnly',
+};
+
+/** Current limits, always the stored value or the shipped default. */
+export function readMessagingLimits(settings: Record<string, unknown>): MessagingLimits {
+const number = (key: MessagingSettingKey) => {
+const value = Number(settings[key]);
+-    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]];
++    return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MESSAGING[POLICY_KEY[key]] as number;
++  };
++  const flag = (key: MessagingSettingKey) => {
++    const value = settings[key];
++    return typeof value === 'boolean' ? value : DEFAULT_MESSAGING[POLICY_KEY[key]] as boolean;
+};
+return {
+maxLength: Math.max(1, number('messages.maxLength') || DEFAULT_MESSAGING.maxLength),
+rateWindowSeconds: Math.max(0, number('messages.rateWindowSeconds')),
+rateMaxMessages: Math.max(1, number('messages.rateMaxMessages') || DEFAULT_MESSAGING.rateMaxMessages),
++    privateFollowersOnly: flag('messages.privateFollowersOnly'),
+};
+}
+
+@@ -158,12 +164,16 @@ export function readMessagingLimits(settings: Record<string, unknown>): Messagin
+* messaging policy, not general platform settings.
+*/
+export async function saveMessagingLimits(pool: PoolLike, actorId: string | null, input: Record<string, unknown>) {
+-  const next: Partial<Record<MessagingSettingKey, number>> = {};
++  const next: Partial<Record<MessagingSettingKey, number | boolean>> = {};
+for (const key of MESSAGING_SETTING_KEYS) {
+-    if (input[key] === undefined) continue;
+-    const value = typeof input[key] === 'string' ? Number(input[key]) : input[key];
+-    if (typeof value !== 'number' || !Number.isFinite(value)) throw new AdminError('Enter a whole number for every messaging limit.');
+-    next[key] = validateSetting(key, value) as number;
++    const raw = input[key];
++    if (raw === undefined) continue;
++    // Boolean switches arrive as booleans; numeric limits tolerate a numeric
++    // string so a form field never has to parse it first. `validateSetting`
++    // then applies the same bounds the API uses.
++    const value = typeof raw === 'boolean' ? raw : typeof raw === 'string' ? Number(raw) : raw;
++    if (typeof value !== 'number' && typeof value !== 'boolean') throw new AdminError('Enter a whole number for every messaging limit.');
++    next[key] = validateSetting(key, value) as number | boolean;
+}
+if (!Object.keys(next).length) throw new AdminError('Choose at least one messaging limit to change.');
+return transaction(pool, async db => {
+diff --git a/lib/admin/config.ts b/lib/admin/config.ts
+index da832f0..43fc77d 100644
+--- a/lib/admin/config.ts
++++ b/lib/admin/config.ts
+@@ -26,6 +26,7 @@ export const SETTINGS_DEFAULTS = {
+'messages.maxLength': 2000,
+'messages.rateWindowSeconds': 60,
+'messages.rateMaxMessages': 30,
++  'messages.privateFollowersOnly': false,
+};
+export type Settings = typeof SETTINGS_DEFAULTS;
+export type SettingKey = keyof Settings;
+diff --git a/lib/admin/validation.ts b/lib/admin/validation.ts
+index d75a86f..f02d098 100644
+--- a/lib/admin/validation.ts
++++ b/lib/admin/validation.ts
+@@ -59,6 +59,7 @@ export function validateSetting(key: string, value: unknown): Settings[SettingKe
+case 'messages.maxLength': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 4000; break;
+case 'messages.rateWindowSeconds': valid = typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 86400; break;
+case 'messages.rateMaxMessages': valid = typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000; break;
++    case 'messages.privateFollowersOnly': valid = typeof value === 'boolean'; break;
+}
+if (!valid) throw new AdminError('Invalid setting value.');
+return value as Settings[SettingKey];
+diff --git a/lib/messaging-policy.ts b/lib/messaging-policy.ts
+index 06ee800..ec21a93 100644
+--- a/lib/messaging-policy.ts
++++ b/lib/messaging-policy.ts
+@@ -15,12 +15,15 @@ export type MessagingPolicy = {
+rateWindowSeconds: number;
+/** Maximum sends inside the window. */
+rateMaxMessages: number;
++  /** When on, a private account only accepts messages from its followers. */
++  privateFollowersOnly: boolean;
+};
+
+export const DEFAULT_MESSAGING: MessagingPolicy = {
+maxLength: 2000,
+rateWindowSeconds: 60,
+rateMaxMessages: 30,
++  privateFollowersOnly: false,
+};
+
+export const MESSAGING_LIMITS = {
+@@ -32,8 +35,10 @@ export const MESSAGING_LIMITS = {
+const integer = (value: unknown, min: number, max: number) =>
+typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
+
++type NumericPolicyKey = 'maxLength' | 'rateWindowSeconds' | 'rateMaxMessages';
++
+/** Coerce one stored value, falling back to the default on anything invalid. */
+-function bounded(value: unknown, key: keyof MessagingPolicy): number {
++function bounded(value: unknown, key: NumericPolicyKey): number {
+const limit = MESSAGING_LIMITS[key];
+const fallback: number = DEFAULT_MESSAGING[key];
+if (value === undefined || value === null || value === '') return fallback;
+@@ -46,6 +51,12 @@ export function messagingPolicy(settings: Record<string, unknown>): MessagingPol
+maxLength: bounded(settings['messages.maxLength'], 'maxLength'),
+rateWindowSeconds: bounded(settings['messages.rateWindowSeconds'], 'rateWindowSeconds'),
+rateMaxMessages: bounded(settings['messages.rateMaxMessages'], 'rateMaxMessages'),
++    // A malformed value must never open the gate: anything that is not an
++    // explicit true falls back to the shipped default.
++    privateFollowersOnly: settings['messages.privateFollowersOnly'] === true
++      || settings['messages.privateFollowersOnly'] === 1
++      || settings['messages.privateFollowersOnly'] === 'true'
++      || settings['messages.privateFollowersOnly'] === '1',
+};
+}
+
+@@ -112,6 +123,37 @@ export type MessageRestrictions = {
+* same pass. The check always runs on the server: the Admin Panel only decides
+* *what* the policy is, never whether it applies.
+*/
++export interface MessageRecipientDb {
++  prepare(sql: string): {
++    bind(...values: unknown[]): { first<T>(): Promise<T | null> };
++  };
++}
++
++/**
++ * Private accounts may be limited to their followers.
++ *
++ * The follow graph already exists (`follows`), so this reuses it instead of
++ * introducing a second relationship model. Saved notes to oneself are always
++ * allowed: the sender is the recipient.
++ */
++export async function requirePrivateRecipientAllowed(
++  db: MessageRecipientDb,
++  senderId: string,
++  recipientId: string,
++) {
++  if (senderId === recipientId) return;
++  const recipient = await db
++    .prepare('SELECT is_private FROM profiles WHERE id=? AND deleted_at IS NULL')
++    .bind(recipientId)
++    .first<{ is_private: number }>();
++  if (!recipient || recipient.is_private !== 1) return;
++  const follows = await db
++    .prepare('SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?')
++    .bind(senderId, recipientId)
++    .first();
++  if (!follows) throw new AdminError('This account only accepts messages from accounts it follows.', 403);
++}
++
+export async function inspectMessageRestrictions(
+db: { prepare(sql: string): { bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> } } },
+senderId: string,
+diff --git a/tests/admin-messaging.test.ts b/tests/admin-messaging.test.ts
+index 4463a60..f1b7997 100644
+--- a/tests/admin-messaging.test.ts
++++ b/tests/admin-messaging.test.ts
+@@ -28,7 +28,7 @@ import { getTursoDb } from '../lib/turso';
+import { ensureSchema, getPool } from '../lib/postgres';
+import { db } from '../lib/server';
+import { validateFeatures, DEFAULT_FEATURES } from '../lib/features';
+-import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy } from '../lib/messaging-policy';
++import { DEFAULT_MESSAGING, inspectMessageRestrictions, messagingPolicy, requirePrivateRecipientAllowed } from '../lib/messaging-policy';
+import { saveSetting } from '../lib/admin/core';
+import {
+MESSAGING_SETTING_KEYS, countMessageRestrictions,
+@@ -140,6 +140,7 @@ beforeEach(async () => {
+'messages.maxLength': DEFAULT_MESSAGING.maxLength,
+'messages.rateWindowSeconds': DEFAULT_MESSAGING.rateWindowSeconds,
+'messages.rateMaxMessages': DEFAULT_MESSAGING.rateMaxMessages,
++    'messages.privateFollowersOnly': DEFAULT_MESSAGING.privateFollowersOnly,
+});
+await writeFeatures(DEFAULT_FEATURES);
+});
+@@ -160,6 +161,7 @@ test('the messaging limits are registered settings with safe defaults', () => {
+assert.equal(defaults.maxLength, 2000);
+assert.equal(defaults.rateWindowSeconds, 60);
+assert.equal(defaults.rateMaxMessages, 30);
++  assert.equal(defaults.privateFollowersOnly, false, 'private accounts are open to everyone by default');
+// Malformed or hostile stored values never widen the policy. A zero window
+// is the one legitimate "off" value, so it is asserted separately.
+for (const value of [0, -1, 5000, 1.5, 'abc', null, {}]) {
+@@ -170,18 +172,24 @@ test('the messaging limits are registered settings with safe defaults', () => {
+assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': value }).rateWindowSeconds, 60, `window ${JSON.stringify(value)} falls back`);
+}
+assert.equal(messagingPolicy({ 'messages.rateWindowSeconds': 0 }).rateWindowSeconds, 0, 'a zero window disables the quota');
+-  assert.deepEqual(messagingPolicy({ 'messages.maxLength': '40', 'messages.rateWindowSeconds': '0', 'messages.rateMaxMessages': '7' }), { maxLength: 40, rateWindowSeconds: 0, rateMaxMessages: 7 });
++  assert.deepEqual(messagingPolicy({ 'messages.maxLength': '40', 'messages.rateWindowSeconds': '0', 'messages.rateMaxMessages': '7' }), { maxLength: 40, rateWindowSeconds: 0, rateMaxMessages: 7, privateFollowersOnly: false });
+});
+
+test('saving messaging limits persists every key, audits each one and rejects out-of-range values', async () => {
+const result = await saveMessagingLimits(pool, owner.id, {
+-    'messages.maxLength': 40, 'messages.rateWindowSeconds': 120, 'messages.rateMaxMessages': 7,
++    'messages.maxLength': 40, 'messages.rateWindowSeconds': 120, 'messages.rateMaxMessages': 7, 'messages.privateFollowersOnly': true,
+});
+assert.deepEqual(result.saved, [...MESSAGING_SETTING_KEYS]);
+assert.equal(await stored('messages.maxLength'), 40);
+assert.equal(await stored('messages.rateWindowSeconds'), 120);
+assert.equal(await stored('messages.rateMaxMessages'), 7);
+-  assert.deepEqual(readMessagingLimits({ 'messages.maxLength': await stored('messages.maxLength'), 'messages.rateWindowSeconds': await stored('messages.rateWindowSeconds'), 'messages.rateMaxMessages': await stored('messages.rateMaxMessages') }), { maxLength: 40, rateWindowSeconds: 120, rateMaxMessages: 7 });
++  assert.equal(await stored('messages.privateFollowersOnly'), true);
++  assert.deepEqual(readMessagingLimits({
++    'messages.maxLength': await stored('messages.maxLength'),
++    'messages.rateWindowSeconds': await stored('messages.rateWindowSeconds'),
++    'messages.rateMaxMessages': await stored('messages.rateMaxMessages'),
++    'messages.privateFollowersOnly': await stored('messages.privateFollowersOnly'),
++  }), { maxLength: 40, rateWindowSeconds: 120, rateMaxMessages: 7, privateFollowersOnly: true });
+const writes = await audit('settings.write');
+// Audit values are stored as JSON text, exactly as the audit viewer reads them.
+assert.ok(writes.some(row => row.target_id === 'messages.maxLength' && Number(row.after) === 40), 'the length change is audited');
+@@ -308,6 +316,42 @@ test('the API enforces the configured message length', async () => {
+assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'x'.repeat(40) })).status, 200, 'the configured limit is exactly reachable');
+});
+
++test('private accounts can be limited to their existing followers', async () => {
++  // Off by default: anyone may message a private account.
++  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'open by default' })).status, 200);
++  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
++
++  await saveMessagingLimits(pool, owner.id, { 'messages.privateFollowersOnly': true });
++  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
++  const gated = await api(alice, { action: 'message', id: bob.id, body: 'must be refused' });
++  assert.equal(gated.status, 403, 'a non-follower is refused');
++  assert.match(String(gated.data.error), /only accepts messages from accounts it follows/i);
++  const stored = await pool.query('SELECT id FROM messages WHERE sender_id=? AND body=?', [alice.id, 'must be refused']);
++  assert.equal(stored.rows.length, 0, 'nothing was written');
++
++  // The existing follow graph is the only gate: following opens it again.
++  await pool.query('INSERT INTO follows(follower_id,followee_id) VALUES(?,?)', [alice.id, bob.id]);
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'now a follower' })).status, 200);
++  await pool.query('DELETE FROM follows WHERE follower_id=? AND followee_id=?', [alice.id, bob.id]);
++
++  // A saved note to oneself is never gated, and lifting the switch reopens it.
++  assert.equal((await api(bob, { action: 'message', id: bob.id, body: 'note to self' })).status, 200);
++  await saveMessagingLimits(pool, owner.id, { 'messages.privateFollowersOnly': false });
++  assert.equal((await api(alice, { action: 'message', id: bob.id, body: 'open again' })).status, 200);
++  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
++
++  // A malformed stored value must never open the gate.
++  await pool.query("INSERT INTO app_settings(key,value,updated_at,updated_by) VALUES('messages.privateFollowersOnly','\"yes\"',1,'t') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
++  assert.equal(messagingPolicy({ 'messages.privateFollowersOnly': 'yes' }).privateFollowersOnly, false, 'a non-boolean falls back to off');
++  await pool.query('DELETE FROM app_settings WHERE key=?', ['messages.privateFollowersOnly']);
++  // The gate itself, called directly with a private recipient and no follow row.
++  await pool.query('UPDATE profiles SET is_private=1 WHERE id=?', [bob.id]);
++  await assert.rejects(() => requirePrivateRecipientAllowed(db(), alice.id, bob.id), /only accepts messages from accounts it follows/i);
++  await assert.doesNotReject(() => requirePrivateRecipientAllowed(db(), bob.id, bob.id), 'a saved note to oneself is never gated');
++  await pool.query('UPDATE profiles SET is_private=0 WHERE id=?', [bob.id]);
++});
++
+test('the API enforces the send quota and 0 disables it', async () => {
+await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 3600, 'messages.rateMaxMessages': 1 });
+assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'first' })).status, 200);
+@@ -319,7 +363,7 @@ test('the API enforces the send quota and 0 disables it', async () => {
+
+await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 0 });
+assert.equal((await api(bob, { action: 'message', id: carol.id, body: 'third' })).status, 200, 'a zero window switches the quota off');
+-  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 60, 'messages.rateMaxMessages': 30 });
++  await saveMessagingLimits(pool, owner.id, { 'messages.rateWindowSeconds': 60, 'messages.rateMaxMessages': 30, 'messages.privateFollowersOnly': false });
+});
+
+test('each messaging feature switch is enforced by the API, not only by the UI', async () => {
+--
+2.39.5

@@ -17,7 +17,7 @@ export async function mediaDuration(bytes: Uint8Array) {
     return duration;
   } catch { throw new AdminError('Could not verify video duration. Choose a video with readable duration metadata.'); }
 }
-export async function checkReelDuration(db: QueryExecutor, urls: string[], limit: number, maxBytes = 20 * 1024 * 1024) {
+export async function checkReelDuration(db: QueryExecutor, urls: string[], limit: number, maxBytes = 20 * 1024 * 1024, label = 'Reels') {
   if (!limit) return; // 0 preserves the original unlimited-duration behavior.
   if (urls.length !== 1) throw new AdminError('A reel requires one video.');
   const url = urls[0]; let bytes: Uint8Array;
@@ -47,5 +47,18 @@ export async function checkReelDuration(db: QueryExecutor, urls: string[], limit
       }
     }
   } catch (error) { if (error instanceof AdminError) throw error; throw new AdminError('Could not read video metadata. Please try again.',503); }
-  if (await mediaDuration(bytes) > limit) throw new AdminError(`Reels must be at most ${limit} seconds long.`);
+  if (await mediaDuration(bytes) > limit) throw new AdminError(`${label} must be at most ${limit} seconds long.`);
+}
+
+/** Product ceiling. Admin configuration cannot raise a story video past this. */
+export const STORY_VIDEO_HARD_CAP = 15;
+
+/** Configured story length, never above the hard cap and never unlimited. */
+export function storyVideoLimit(configured: number) {
+  if (!Number.isFinite(configured) || configured <= 0) return STORY_VIDEO_HARD_CAP;
+  return Math.min(STORY_VIDEO_HARD_CAP, configured);
+}
+
+export async function checkStoryDuration(db: QueryExecutor, urls: string[], configuredSeconds: number, maxBytes?: number) {
+  await checkReelDuration(db, urls, storyVideoLimit(configuredSeconds), maxBytes, 'Stories');
 }

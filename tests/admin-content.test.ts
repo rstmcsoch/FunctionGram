@@ -6,7 +6,7 @@ import {PGlite} from '@electric-sql/pglite';
 import * as schema from '../lib/postgres-schema';
 import {serializedPool} from '../lib/serialized-pool';
 import {moderateContent,contentDetail,contentFilters,listContent} from '../lib/admin/content';
-import {mediaDuration,checkReelDuration} from '../lib/reel-duration';
+import {mediaDuration,checkReelDuration,checkStoryDuration} from '../lib/reel-duration';
 import {saveSetting} from '../lib/admin/core';
 
 async function fixture() {
@@ -130,4 +130,22 @@ test('managed PostgreSQL migration 7 preserves content and serializes overlappin
   assert.equal((await listContent(pool,contentFilters({status:'hidden'}))).total,2);
   assert.equal((await pool.query('SELECT id FROM admin_audit_log')).rows.length,4);
  }finally{await pool.query('DROP SCHEMA IF EXISTS admin_phase_three_test CASCADE');await pool.end();}
+});
+
+test('story videos over the configured cap are rejected and photo stories are not', async () => {
+  const {db,pool,act}=await fixture();
+  try {
+    await assert.rejects(checkStoryDuration(pool,['/media/flowers.mp4'],1),{status:400});
+    await checkStoryDuration(pool,['/media/flowers.mp4'],15);
+    await checkStoryDuration(pool,['/media/flowers.mp4'],100);
+    await saveSetting(pool,'admin','content.storyVideoMaxSeconds',1);
+    await pool.query(`UPDATE posts SET kind='story',media_type='video',media='["/media/flowers.mp4"]',aspects='[1]' WHERE id='story'`);
+    await assert.rejects(act('edit',['story'],{caption:'too long for a story'}),/Stories must be at most 1 seconds/);
+    await saveSetting(pool,'admin','content.storyVideoMaxSeconds',15);
+    await act('edit',['story'],{caption:'story video ok'});
+    await pool.query(`UPDATE posts SET media_type='image',media='["/media/coast.jpg"]' WHERE id='story'`);
+    await saveSetting(pool,'admin','content.storyVideoMaxSeconds',1);
+    await act('edit',['story'],{caption:'photo story ok'});
+    assert.equal((await contentDetail(pool,'posts','story')).caption,'photo story ok');
+  } finally { await db.close(); }
 });

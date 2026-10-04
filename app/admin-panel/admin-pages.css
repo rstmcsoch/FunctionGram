@@ -449,7 +449,13 @@
    wrapper's clipped scroll area (markup and semantics unchanged). */
 .admin-shell .admin-matrix-cell {
   position: relative;
+  text-align: center;
 }
+.admin-shell .admin-matrix-cell[data-allowed="yes"] { color: #8fd18f; }
+.admin-shell .admin-matrix-cell[data-allowed="no"] { color: #8a817c; }
+.admin-shell .admin-matrix-mark { font-weight: 700; }
+.admin-shell .admin-matrix-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.admin-shell .admin-matrix-toggle input:disabled { cursor: not-allowed; }
 
 .admin-shell .admin-badge-mono {
   font-family: var(--adm-mono);

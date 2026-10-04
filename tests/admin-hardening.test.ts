@@ -39,9 +39,10 @@ test('only owners grant roles; grants require exact target email, reason, and a 
  const {db,pool}=await fixture();try{
   const command={action:'promoteModerator' as const,id:'target',confirmation:'target@example.test',reason:'Trusted moderation work',expires:null};
   await assert.rejects(changeUser(pool,'moderator',command),{status:403});
-  await assert.rejects(changeUser(pool,'admin',command),{status:403});
+  await assert.rejects(changeUser(pool,'admin',{...command,action:'promote'}),{status:403});
   await assert.rejects(changeUser(pool,'owner',{...command,confirmation:'wrong@example.test'}),{status:400});
   await assert.rejects(changeUser(pool,'owner',{...command,reason:''}),{status:400});
+  await pool.query('UPDATE "user" SET "twoFactorEnabled"=true WHERE id=\'target\'');
   await changeUser(pool,'owner',command);
   assert.equal((await pool.query('SELECT role FROM "user" WHERE id=\'target\'')).rows[0].role,'moderator');
   assert.equal((await pool.query("SELECT action FROM admin_audit_log WHERE target_id='target'")).rows[0].action,'users.promoteModerator');
@@ -83,9 +84,12 @@ test('optional admin IP allowlist supports exact IPv4/IPv6 and CIDRs; invalid po
  assert.equal(isAdminIpAllowed(new Headers({'x-real-ip':'2001:db8::45'}),policy),true);
  assert.equal(isAdminIpAllowed(new Headers({'x-real-ip':'::ffff:192.0.2.14'}),policy),true);
  assert.equal(isAdminIpAllowed(new Headers(),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
- assert.equal(isAdminIpAllowed(new Headers({'x-forwarded-for':'192.0.2.14, 10.0.0.2'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),true);
+ assert.equal(isAdminIpAllowed(new Headers({'x-forwarded-for':'192.0.2.14, 10.0.0.2'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
+ assert.equal(isAdminIpAllowed(new Headers({'x-vercel-forwarded-for':'198.51.100.9, 192.0.2.14'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),true);
+ assert.equal(isAdminIpAllowed(new Headers({'x-vercel-forwarded-for':'192.0.2.14, 198.51.100.9'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
  assert.throws(()=>assertAdminIpAllowed(new Headers({'x-real-ip':'192.0.2.14'}),{ADMIN_IP_ALLOWLIST:'not-an-ip'}),{status:503});
- assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===10)?.statements,schema.adminHardeningUpgradeStatements);
+ assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===10),undefined);
+ assert.ok(DATABASE_MIGRATIONS.some(migration=>migration.statements.some(sql=>/admin_login_devices/.test(sql))));
 });
 
 test('new admin devices store only HMAC fingerprints, audit once, and trigger safe notices',async()=>{
@@ -115,7 +119,8 @@ test('audit viewer filters historical rows, CSV neutralizes formulas, and old re
  const {db,pool}=await fixture();try{
   await insertAudit(pool,{userId:'owner',email:'=SUM(1,1)',role:'owner'},{action:'users.demote',targetType:'user',targetId:'target-1',before:{role:'admin'},after:{role:'user'},reason:'Role review'});
   await insertAudit(pool,{userId:'admin',email:'admin@example.test',role:'admin'},{action:'content.hide',targetType:'posts',targetId:'post-1',reason:'Safety review'});
-  const filtered=await listAudit(pool,{action:'users.',actor:'SUM',targetType:'user',targetId:'target',from:'2026-09-29',to:'2026-10-01',page:1,limit:50});
+  const day=new Date().toISOString().slice(0,10);
+  const filtered=await listAudit(pool,{action:'users.',actor:'SUM',targetType:'user',targetId:'target',from:day,to:day,page:1,limit:50});
   assert.equal(filtered.total,1);assert.equal(filtered.rows[0].action,'users.demote');
   assert.throws(()=>auditFilters({from:'2026-02-30'}),/valid UTC dates/);
   const csv=await exportAuditCsv(pool,{action:'users.',actor:'',targetType:'',targetId:'',from:'',to:'',q:'',page:1,limit:50});

@@ -6,7 +6,9 @@ import { randomUUID } from 'node:crypto';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, SETTINGS_DEFAULTS, type AdminActor, type Settings, type SettingKey } from './config';
 import { AdminError, validateSetting } from './validation';
+import { inPlaceholders } from '../sql';
 import { requirePermission } from './permissions';
+import { ensureRoleAnchors, grantsFor, loadRoleMatrix } from './role-matrix';
 
 export async function transaction<T>(pool: PoolLike, work: (db: QueryExecutor) => Promise<T>): Promise<T> {
   const db = await pool.connect();
@@ -26,7 +28,12 @@ export async function authorizeAdmin(db: QueryExecutor, userId: string | null, o
   if (!user || !flagIsTrue(user.emailVerified) || !accountEnabled(user) || !ADMIN_ROLES.includes(user.role) || (ownerOnly && user.role !== 'owner')) {
     throw new AdminError('Administrator access required.', 403);
   }
-  return { userId: user.id, email: user.email, role: user.role };
+  await ensureRoleAnchors(db, user.email, user.id);
+  const { rows: [fresh] } = await db.query('SELECT role FROM "user" WHERE id=$1', [userId]);
+  const role = fresh?.role ?? user.role;
+  if (!ADMIN_ROLES.includes(role) || (ownerOnly && role !== 'owner')) throw new AdminError('Administrator access required.', 403);
+  const matrix = await loadRoleMatrix(db);
+  return { userId: user.id, email: user.email, role, permissions: grantsFor(role, matrix) };
 }
 
 export type AuditEvent = {
@@ -65,7 +72,7 @@ export async function bootstrapAdmin(pool: PoolLike, userId: string, verifiedSes
 export async function loadSettings(db: QueryExecutor): Promise<Settings> {
   const result: Record<string, unknown> = { ...SETTINGS_DEFAULTS };
   const keys = Object.keys(SETTINGS_DEFAULTS);
-  const placeholders = keys.map(() => '?').join(',');
+  const placeholders = inPlaceholders(keys.length);
   const { rows } = await db.query(
     `SELECT key,value FROM app_settings WHERE key IN (${placeholders})`,
     keys,
@@ -84,6 +91,10 @@ export async function loadSettings(db: QueryExecutor): Promise<Settings> {
 
 export async function saveSetting(pool: PoolLike, userId: string, key: string, input: unknown) {
   const value = validateSetting(key, input);
+  if (['content.reelsEnabled','content.storiesEnabled','content.storyTrayEnabled','content.storyRingEnabled'].includes(key)) {
+    const actorPreview = await authorizeAdmin(pool, userId);
+    requirePermission(actorPreview, 'features.primary');
+  }
   await transaction(pool, async db => {
     const actor = await authorizeAdmin(db, userId);
     requirePermission(actor,'settings.manage');

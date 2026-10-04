@@ -580,3 +580,56 @@
 .admin-shell .admin-main > * {
   min-width: 0;
 }
+
+
+/* Grouped navigation hints and overview launcher. Presentation only. */
+.admin-nav-group-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.admin-nav-group-hint {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--adm-text-3);
+}
+.admin-launcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.admin-shell .admin-launcher-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 108px;
+  padding: 14px;
+  border: 1px solid var(--adm-border-subtle);
+  border-radius: 14px;
+  background: var(--adm-muted-surface);
+  color: var(--adm-text);
+  text-decoration: none;
+}
+.admin-shell .admin-launcher-card:hover,
+.admin-shell .admin-launcher-card:focus-visible {
+  border-color: var(--adm-accent);
+  text-decoration: none;
+}
+.admin-launcher-card span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--adm-text-3);
+}
+.admin-launcher-card strong { font-size: 15px; }
+.admin-launcher-card small { color: var(--adm-text-2); line-height: 1.35; }
+.admin-subsection { margin: 18px 0 8px; font-size: 14px; }
+.admin-tab-groups { display: grid; gap: 12px; margin: 8px 0 18px; }
+.admin-tab-group p { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--adm-text-3); }
+.admin-tab-group .admin-tabs { margin: 0; }
+.admin-filter-drawer summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.admin-filter-drawer form { margin-top: 12px; }

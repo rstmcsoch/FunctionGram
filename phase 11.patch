@@ -1,0 +1,1282 @@
+diff --git a/app/api/admin/analytics/route.ts b/app/api/admin/analytics/route.ts
+new file mode 100644
+index 0000000..821aafc
+--- /dev/null
++++ b/app/api/admin/analytics/route.ts
+@@ -0,0 +1,11 @@
++import { adminRoute } from '@/lib/admin/route';
++import { getPool } from '@/lib/postgres';
++import { dashboardAnalytics } from '@/lib/admin/analytics';
++import { AdminError } from '@/lib/admin/validation';
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++export const GET = adminRoute(async request => {
++  const days = new URL(request.url).searchParams.get('days') ?? '14';
++  if (!['14','30','90'].includes(days)) throw new AdminError('Choose a 14, 30, or 90 day analytics window.');
++  return Response.json(await dashboardAnalytics(await getPool(), Number(days)));
++}, 'analytics.read');
+diff --git a/app/api/admin/exports/route.ts b/app/api/admin/exports/route.ts
+new file mode 100644
+index 0000000..9d22af5
+--- /dev/null
++++ b/app/api/admin/exports/route.ts
+@@ -0,0 +1,11 @@
++import { adminRoute } from '@/lib/admin/route';
++import { adminBody } from '@/lib/admin/body';
++import { getPool } from '@/lib/postgres';
++import { createAdminExport } from '@/lib/admin/exports';
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++export const maxDuration = 60;
++export const POST = adminRoute(async (request, actor) => {
++  const body = await adminBody(request, 16000);
++  return createAdminExport(await getPool(), actor.userId, body);
++}, 'exports.read');
+diff --git a/app/api/admin/system/route.ts b/app/api/admin/system/route.ts
+new file mode 100644
+index 0000000..ceffe0d
+--- /dev/null
++++ b/app/api/admin/system/route.ts
+@@ -0,0 +1,26 @@
++import { revalidatePath, revalidateTag } from 'next/cache';
++import { adminRoute } from '@/lib/admin/route';
++import { adminBody } from '@/lib/admin/body';
++import { getPool } from '@/lib/postgres';
++import { systemOverview, auditCachePurge, runReadOnlySql, wipeDemoData, reseedDemoData, pruneExpiredStories, pruneOrphanAssets } from '@/lib/admin/system';
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++export const maxDuration = 60;
++export const GET = adminRoute(async () => Response.json(await systemOverview(await getPool())), 'system.read');
++export const POST = adminRoute(async (request, actor) => {
++  const body = await adminBody(request, 12000), pool = await getPool();
++  switch (body.action) {
++    case 'readOnlySql': return Response.json(await runReadOnlySql(pool, actor.userId, body));
++    case 'purgeCache': {
++      await auditCachePurge(pool, actor.userId, body);
++      revalidateTag('settings', { expire: 0 });
++      revalidatePath('/', 'layout');
++      return Response.json({ ok: true });
++    }
++    case 'wipeDemoData': return Response.json(await wipeDemoData(pool, actor.userId, body));
++    case 'reseedDemoData': return Response.json(await reseedDemoData(pool, actor.userId, body));
++    case 'pruneExpiredStories': return Response.json(await pruneExpiredStories(pool, actor.userId, body));
++    case 'pruneOrphanAssets': return Response.json(await pruneOrphanAssets(pool, actor.userId, body));
++    default: return Response.json({ error: 'Unknown system operation.' }, { status: 400 });
++  }
++}, 'system.read');
+diff --git a/app/rstmcadmin/admin.css b/app/rstmcadmin/admin.css
+index 51ed659..b536042 100644
+--- a/app/rstmcadmin/admin.css
++++ b/app/rstmcadmin/admin.css
+@@ -27,3 +27,4 @@
+ .media-settings-grid,.media-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px}.media-settings-grid label,.media-filters label{display:grid;gap:8px;min-width:0}.media-row-actions{display:flex;flex-wrap:wrap;gap:8px}.admin-table td small{display:block}.media-confirm code,.media-reservation code{overflow-wrap:anywhere}.media-reservation{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.media-confirm{padding:16px;border:1px solid var(--border);border-radius:12px}
+ .moderation-console{display:grid;gap:20px;min-width:0}.moderation-tabs,.moderation-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.moderation-filters label{display:grid;gap:7px;flex:1 1 190px;min-width:min(100%,190px)}.moderation-report-list{display:grid;gap:14px}.moderation-report{display:grid;gap:12px;min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--background)}.moderation-report header{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;align-items:start}.moderation-report header p{margin:6px 0}.moderation-report p,.moderation-report code{overflow-wrap:anywhere}.moderation-report label{display:grid;gap:6px}.moderation-report textarea{width:100%;max-width:100%;min-width:0;min-height:80px;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-report input{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--input);border-radius:12px;background:var(--background);color:var(--foreground)}.moderation-console .admin-table-scroll{min-width:0;max-width:100%;overflow:auto}.moderation-console .admin-table{min-width:680px}.moderation-console .admin-card{min-width:0}
+ .admin-tabs{display:flex;gap:8px;overflow-x:auto;margin:18px 0 24px;padding-bottom:4px}.admin-tabs button{flex:none;min-height:42px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);cursor:pointer}.admin-tabs button.active{background:var(--primary);color:white;border-color:var(--primary)}.comms-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}.comms-page-manager{display:grid;gap:18px}.admin-message-row{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--canvas)}.admin-message-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.notification-template-row{display:grid;grid-template-columns:minmax(140px,1fr) auto minmax(200px,2fr) auto;align-items:end;gap:12px;margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px}.admin-confirm textarea{width:100%;max-width:100%;min-height:100px;resize:vertical}.admin-message-row label,.admin-card label{min-width:0}@media(max-width:650px){.notification-template-row{grid-template-columns:1fr}.comms-grid{grid-template-columns:minmax(0,1fr)}}
++.analytics-dashboard,.system-tools{display:grid;gap:18px}.analytics-controls,.admin-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.analytics-controls label{min-width:150px}.analytics-controls h2,.analytics-controls p{margin-top:0}.analytics-summary{margin:0}.analytics-summary .admin-stat strong{font-size:clamp(20px,3vw,30px)}.analytics-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.analytics-chart{min-width:0}.analytics-chart h3{margin:0 0 14px;font-size:15px}.analytics-bars{height:112px;display:flex;align-items:end;gap:3px;padding:4px 2px;border-bottom:1px solid var(--line);overflow:hidden}.analytics-bars span{flex:1 1 0;min-width:2px;background:var(--primary);border-radius:3px 3px 0 0;opacity:.82}.analytics-axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:12px}.analytics-caption{max-width:340px;max-height:4.5em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}.analytics-ranked-list p{display:flex;justify-content:space-between;gap:12px;padding:7px 0;margin:0;border-bottom:1px solid var(--line)}.analytics-funnel-bar{height:18px;margin:16px 0 10px;background:var(--canvas);border-radius:999px;overflow:hidden}.analytics-funnel-bar span{display:block;height:100%;background:var(--primary);border-radius:inherit}.analytics-funnel strong{display:block}.migration-chips{display:flex;flex-wrap:wrap;gap:8px}.migration-chips span{padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}.migration-chips .is-applied{border-color:#21835d}.migration-chips .is-pending{border-color:#b45309;color:#b45309}.system-env-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:0 20px;margin:0}.system-env-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.system-env-list dt{font-weight:600}.system-env-list dd{margin:0;color:var(--muted)}.system-sql textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:150px}.system-sql-result{max-height:480px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);white-space:pre-wrap;overflow-wrap:anywhere}.admin-button-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.admin-guide{max-width:900px}.admin-guide h2{margin-top:0}.export-manager .admin-detail{align-items:end}@media(max-width:700px){.analytics-chart-grid{grid-template-columns:minmax(0,1fr)}.analytics-controls,.admin-card-heading{flex-direction:column}.analytics-controls label{width:100%}.analytics-bars{height:90px}}
+diff --git a/app/rstmcadmin/analytics/page.tsx b/app/rstmcadmin/analytics/page.tsx
+new file mode 100644
+index 0000000..41977e8
+--- /dev/null
++++ b/app/rstmcadmin/analytics/page.tsx
+@@ -0,0 +1,11 @@
++import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
++import { getPool } from '@/lib/postgres';
++import { dashboardAnalytics } from '@/lib/admin/analytics';
++import { AnalyticsDashboard } from '@/components/admin/analytics';
++export const dynamic = 'force-dynamic';
++export default async function AnalyticsPage() {
++  const actor = await requireAdminPage();
++  assertAdminPagePermission(actor, 'analytics.read');
++  const initial = await dashboardAnalytics(await getPool(), 14);
++  return <><p className="admin-eyebrow">Control room / Analytics</p><h1>Community insights</h1><AnalyticsDashboard initial={initial}/></>;
++}
+diff --git a/app/rstmcadmin/exports/page.tsx b/app/rstmcadmin/exports/page.tsx
+new file mode 100644
+index 0000000..892c35a
+--- /dev/null
++++ b/app/rstmcadmin/exports/page.tsx
+@@ -0,0 +1,7 @@
++import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
++import { ExportManager } from '@/components/admin/exports';
++export default async function ExportsPage() {
++  const actor = await requireAdminPage();
++  assertAdminPagePermission(actor, 'exports.read');
++  return <><p className="admin-eyebrow">Control room / Exports</p><h1>Bounded data exports</h1><ExportManager/></>;
++}
+diff --git a/app/rstmcadmin/guide/page.tsx b/app/rstmcadmin/guide/page.tsx
+new file mode 100644
+index 0000000..9282d1b
+--- /dev/null
++++ b/app/rstmcadmin/guide/page.tsx
+@@ -0,0 +1,18 @@
++import Link from 'next/link';
++import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
++import { ADMIN_BASE_PATH } from '@/lib/admin/config';
++
++export default async function AdminGuidePage() {
++  const actor = await requireAdminPage();
++  assertAdminPagePermission(actor, 'system.read');
++  return <>
++    <p className="admin-eyebrow">Control room / Operator guide</p><h1>Operations guide</h1>
++    <section className="admin-card admin-guide"><h2>Analytics and exports</h2><p>Analytics uses UTC day buckets. “Active sign-in proxy” counts distinct accounts whose Better Auth session was refreshed that day; it is not a per-request DAU event. Uploaded storage is the sum of asset bytes added during the chosen window, not a historical snapshot of retained storage. The signup funnel counts non-demo member accounts with at least one non-deleted post; stories and reels are not counted as first posts.</p><p>Exports are streamed and capped at 1,000 records. User exports contain email addresses, report exports can include moderation details, and audit exports include recorded network/client metadata. Save and share these files only with a justified operational need.</p>
++      <p><Link href={ADMIN_BASE_PATH+'/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH+'/exports'}>Open exports</Link></p></section>
++    <section className="admin-card admin-guide"><h2>Migration status and cache</h2><p>The system page compares applied migration versions with the application registry; it does not apply migrations. Run migrations through the normal deployment process. Cache invalidation clears the tagged settings cache and revalidates the public root layout; it cannot clear a browser cache or a third-party CDN.</p><p>Environment inspection reports booleans only. Keep credentials in deployment environment settings, never in the database-backed site settings.</p></section>
++    <section className="admin-card admin-guide"><h2>SQL runner safety</h2><p>Owner-only. It accepts one SELECT over the documented application tables, blocks authentication/session/account and settings tables, denies comments, CTEs, subqueries, locks, writes and non-allowlisted functions, runs in a PostgreSQL read-only transaction, stops after five seconds, and returns at most 500 rows. Each accepted query is audited by hash; SQL text is not retained in the audit log. The runner is not a replacement for a controlled database console.</p><p>Use explicit columns, short time windows, and a LIMIT. Avoid exporting message bodies or personal information unless the task requires it.</p></section>
++    <section className="admin-card admin-guide"><h2>Demo-data tools</h2><p>Re-seed inserts missing bundled demo fixtures and does not overwrite existing fixture IDs. Wipe permanently removes profiles marked as demo and their dependent demo rows, and disables automatic re-seeding until an owner explicitly re-seeds. Profiles linked to an authentication account are deliberately excluded from the wipe, even if mistakenly marked as demo; real accounts and uploaded assets are not selected by the demo flag.</p></section>
++    <section className="admin-card admin-guide"><h2>Retention tools</h2><p>Expired stories are eligible for permanent pruning only after 30 days past expiry, and are deleted in batches of at most 100; dependent story comments, reactions and highlights cascade. Orphan assets require seven days without an application reference and are moved to the existing Trash state, not physically deleted. The normal Media restore window and owner-only purge protection remain in force.</p><p>Before applying a destructive action, preview the count, enter the exact confirmation, and record a clear reason. Every accepted power-tool operation creates an append-only audit event.</p></section>
++    <p className="admin-muted">Keep a verified owner recovery path available. For lockout recovery, use the separately reviewed operator procedure and an authorized database console; never expose SQL write access inside this panel.</p>
++  </>;
++}
+diff --git a/app/rstmcadmin/layout.tsx b/app/rstmcadmin/layout.tsx
+index 79d7e53..c66872f 100644
+--- a/app/rstmcadmin/layout.tsx
++++ b/app/rstmcadmin/layout.tsx
+@@ -20,6 +20,10 @@ const navigation: {label:string;path:string;permission:AdminPermission}[] = [
+   {label:'Audit',path:'/audit',permission:'audit.read'},
+   {label:'Security & roles',path:'/security',permission:'security.read'},
+   {label:'Communications',path:'/communications',permission:'messages.read'},
++  {label:'Analytics',path:'/analytics',permission:'analytics.read'},
++  {label:'Exports',path:'/exports',permission:'exports.read'},
++  {label:'System tools',path:'/system',permission:'system.read'},
++  {label:'Operator guide',path:'/guide',permission:'system.read'},
+ ];
+ export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+   const actor=await requireAdminPage();
+diff --git a/app/rstmcadmin/page.tsx b/app/rstmcadmin/page.tsx
+index 1f33264..e68b1ee 100644
+--- a/app/rstmcadmin/page.tsx
++++ b/app/rstmcadmin/page.tsx
+@@ -19,10 +19,10 @@ export default async function AdminHome() {
+       <StatCard label="New this week" value={number('new_users')} hint="Accounts created in the last 7 days" />
+       <StatCard label="Recently active sessions" value={number('active_users')} hint="Users with sessions updated in the last 7 days; not DAU" />
+       <StatCard label="Content items" value={number('posts')} hint="Posts, reels and stories outside trash" />
+-      <StatCard label="Open reports" value={number('reports')} hint="New or in triage; inbox arrives in Phase 8" />
++      <StatCard label="Open reports" value={number('reports')} hint="New or in triage; review the Safety inbox" />
+       <StatCard label="Media storage" value={bytes(stats.storage_bytes)} hint="Total recorded asset size" />
+     </section>
+     <section className="admin-card"><h2>People & accounts</h2><p>Find accounts, review sessions, manage access, and restore accounts from trash. All account actions are recorded.</p><Link className="admin-button admin-primary" href={ADMIN_BASE_PATH + '/users'}>Manage users</Link></section>
+-    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p></section>
++    <section className="admin-card"><h2>System status</h2><p>Applied migrations: {migrations.rows.map(row => row.version).join(', ')} · Stored settings: {Number(settings.count)}</p><p><Link href={ADMIN_BASE_PATH + '/analytics'}>Open analytics</Link> · <Link href={ADMIN_BASE_PATH + '/exports'}>Export lists</Link> · <Link href={ADMIN_BASE_PATH + '/system'}>System tools</Link></p><p className="admin-muted">All admin access requires two-factor authentication and a 12-hour absolute session. Role grants are owner-only; review the <Link href={ADMIN_BASE_PATH + '/security'}>security policy and permission matrix</Link>.</p></section>
+   </>;
+ }
+diff --git a/app/rstmcadmin/system/page.tsx b/app/rstmcadmin/system/page.tsx
+new file mode 100644
+index 0000000..071b73d
+--- /dev/null
++++ b/app/rstmcadmin/system/page.tsx
+@@ -0,0 +1,12 @@
++import { requireAdminPage, assertAdminPagePermission } from '@/lib/admin/guard';
++import { hasPermission } from '@/lib/admin/permissions';
++import { getPool } from '@/lib/postgres';
++import { systemOverview } from '@/lib/admin/system';
++import { SystemTools } from '@/components/admin/system';
++export const dynamic = 'force-dynamic';
++export default async function SystemPage() {
++  const actor = await requireAdminPage();
++  assertAdminPagePermission(actor, 'system.read');
++  const initial = await systemOverview(await getPool());
++  return <><p className="admin-eyebrow">Control room / System tools</p><h1>Health and safe power tools</h1><SystemTools initial={initial} canOwnerTools={hasPermission(actor.role,'system.sql')&&hasPermission(actor.role,'system.demo')} canPrune={hasPermission(actor.role,'system.prune')}/></>;
++}
+diff --git a/components/admin/analytics.tsx b/components/admin/analytics.tsx
+new file mode 100644
+index 0000000..309f27e
+--- /dev/null
++++ b/components/admin/analytics.tsx
+@@ -0,0 +1,57 @@
++'use client';
++import { useEffect, useState } from 'react';
++import type { AnalyticsSnapshot } from '@/lib/admin/analytics';
++import { bytes } from './ui';
++
++const number = (value: number) => Number(value || 0).toLocaleString('en-IN');
++const metrics = [
++  { key: 'signups', label: 'Signups' },
++  { key: 'activeUsers', label: 'Active sign-in proxy' },
++  { key: 'creations', label: 'Creations' },
++  { key: 'messages', label: 'Messages' },
++  { key: 'reports', label: 'Reports' },
++  { key: 'storageBytes', label: 'Uploaded storage' },
++] as const;
++type MetricKey = typeof metrics[number]['key'];
++function Chart({ data, metric }: { data: AnalyticsSnapshot['daily']; metric: typeof metrics[number] }) {
++  const max = Math.max(1, ...data.map(row => row[metric.key]));
++  return <section className="admin-card analytics-chart"><h3>{metric.label}</h3><div className="analytics-bars" role="img" aria-label={`${metric.label} per UTC day`}>
++    {data.map(row => <span key={row.date} title={`${row.date}: ${metric.key === 'storageBytes' ? bytes(row[metric.key]) : number(row[metric.key])}`} style={{ height: `${Math.max(row[metric.key] ? 4 : 1, Math.round(row[metric.key] * 100 / max))}%` }} />)}
++  </div><div className="analytics-axis"><span>{data[0]?.date}</span><span>{data.at(-1)?.date}</span></div></section>;
++}
++export function AnalyticsDashboard({ initial }: { initial: AnalyticsSnapshot }) {
++  const [days, setDays] = useState(initial.days), [data, setData] = useState(initial), [busy, setBusy] = useState(false), [error, setError] = useState('');
++  useEffect(() => {
++    if (days === initial.days) return;
++    let active = true;
++    fetch(`/api/admin/analytics?days=${days}`, { cache: 'no-store' }).then(async response => {
++      const payload = await response.json() as AnalyticsSnapshot | { error?: string };
++      if (!response.ok) throw new Error('error' in payload ? payload.error || 'Analytics could not be loaded.' : 'Analytics could not be loaded.');
++      return payload as AnalyticsSnapshot;
++    }).then(payload => { if (active) { setData(payload); setError(''); setBusy(false); } }).catch(cause => { if (active) { setError(cause instanceof Error ? cause.message : 'Analytics could not be loaded.'); setBusy(false); } });
++    return () => { active = false; };
++  }, [days, initial.days]);
++  const changeDays = (value: number) => { setError(''); if (value === initial.days) { setData(initial); setDays(value); setBusy(false); return; } setBusy(true); setDays(value); };
++  const totals = metrics.reduce((all, metric) => ({ ...all, [metric.key]: data.daily.reduce((sum, row) => sum + row[metric.key], 0) }), {} as Record<MetricKey, number>);
++  const conversion = Math.max(0, Math.min(100, data.funnel.conversionRate));
++  return <div className="analytics-dashboard">
++    <div className="admin-card analytics-controls"><div><h2>Community analytics</h2><p>Daily buckets use UTC. Active users are a session-refresh proxy, not per-request DAU; uploaded storage is new asset bytes in the period, not a historical retained-storage snapshot.</p></div><label>Window<select value={days} onChange={event => changeDays(Number(event.target.value))}><option value={14}>14 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select></label></div>
++    {error && <p role="alert" className="admin-error">{error}</p>}{busy && <p role="status">Updating the analytics window…</p>}
++    <section className="admin-stats analytics-summary" aria-label="Totals for selected UTC window">
++      <article className="admin-stat"><span>Signups</span><strong>{number(totals.signups)}</strong></article>
++      <article className="admin-stat"><span>Active sign-in proxy</span><strong>{number(totals.activeUsers)}</strong></article>
++      <article className="admin-stat"><span>Creations</span><strong>{number(totals.creations)}</strong></article>
++      <article className="admin-stat"><span>Messages</span><strong>{number(totals.messages)}</strong></article>
++      <article className="admin-stat"><span>Reports</span><strong>{number(totals.reports)}</strong></article>
++      <article className="admin-stat"><span>Asset bytes added</span><strong>{bytes(totals.storageBytes)}</strong></article>
++    </section>
++    <div className="analytics-chart-grid">{metrics.map(metric => <Chart key={metric.key} data={data.daily} metric={metric}/>)}</div>
++    <div className="comms-grid analytics-lists">
++      <section className="admin-card"><h2>Top content</h2><p>Visible, non-demo posts and reels from the selected window; ordered by real likes plus comments.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top content"><table><thead><tr><th>Creator / caption</th><th>Kind · category</th><th>Likes</th><th>Comments</th><th>Views</th></tr></thead><tbody>{data.topPosts.map(row => <tr key={row.id}><td><strong>{row.username}</strong><small>{row.name}</small><div className="analytics-caption">{row.caption}</div></td><td>{row.kind} · {row.category}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td><td>{number(row.views)}</td></tr>)}{!data.topPosts.length && <tr><td colSpan={5}>No eligible content in this window.</td></tr>}</tbody></table></div></section>
++      <section className="admin-card"><h2>Top creators</h2><p>Content created in the selected window; interactions are real, not boosted display counts.</p><div className="admin-table-scroll" role="region" tabIndex={0} aria-label="Top creators"><table><thead><tr><th>Creator</th><th>Creations</th><th>Likes</th><th>Comments</th></tr></thead><tbody>{data.topCreators.map(row => <tr key={row.id}><td>{row.username}<small>{row.name}</small></td><td>{number(row.creations)}</td><td>{number(row.likes)}</td><td>{number(row.comments)}</td></tr>)}{!data.topCreators.length && <tr><td colSpan={4}>No eligible creators in this window.</td></tr>}</tbody></table></div></section>
++      <section className="admin-card"><h2>Category usage</h2><div className="analytics-ranked-list">{data.categories.map((row,index) => <p key={row.category}><span>{index+1}. {row.category}</span><strong>{number(row.creations)}</strong></p>)}{!data.categories.length && <p>No categories in this window.</p>}</div></section>
++      <section className="admin-card"><h2>Hashtag usage</h2><div className="analytics-ranked-list">{data.hashtags.map((row,index) => <p key={row.hashtag}><span>{index+1}. #{row.hashtag}</span><strong>{number(row.uses)}</strong></p>)}{!data.hashtags.length && <p>No hashtags in this window.</p>}</div></section>
++    </div>
++    <section className="admin-card analytics-funnel"><h2>Signup → first-post funnel</h2><p>Lifetime real member accounts with at least one non-deleted post (`kind=post`); demo profiles and reels/stories are excluded.</p><div className="analytics-funnel-bar" role="img" aria-label={`${number(data.funnel.firstPostMembers)} of ${number(data.funnel.members)} members made a first post`}><span style={{ width: `${conversion}%` }}/></div><strong>{number(data.funnel.firstPostMembers)} / {number(data.funnel.members)} members · {data.funnel.conversionRate}%</strong></section>
++  </div>;
++}
+diff --git a/components/admin/exports.tsx b/components/admin/exports.tsx
+new file mode 100644
+index 0000000..157c087
+--- /dev/null
++++ b/components/admin/exports.tsx
+@@ -0,0 +1,32 @@
++'use client';
++import { useState } from 'react';
++
++type Resource = 'users'|'posts'|'reports'|'audit';
++export function ExportManager(){
++ const [resource,setResource]=useState<Resource>('users'),[format,setFormat]=useState<'csv'|'json'>('csv'),[q,setQ]=useState(''),[status,setStatus]=useState('all'),[role,setRole]=useState('all'),[kind,setKind]=useState(''),[action,setAction]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
++ const run=async()=>{
++  setBusy(true);setMessage('');
++  const filters:Record<string,unknown>={};if(q.trim())filters.q=q.trim();
++  if(resource==='users'){filters.status=status;filters.role=role;}
++  if(resource==='posts'){filters.status=status;if(kind)filters.kind=kind;}
++  if(resource==='reports')filters.status=status;
++  if(resource==='audit'&&action.trim())filters.action=action.trim();
++  try{
++   const response=await fetch('/api/admin/exports',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({resource,format,filters})});
++   if(!response.ok){const body=await response.json() as {error?:string};throw new Error(body.error||'Export failed.');}
++   const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`functiongram-${resource}.${format}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
++   const matched=response.headers.get('X-Export-Matched-Rows')||'0',truncated=response.headers.get('X-Export-Truncated')==='true';
++   setMessage(`Export started · ${matched} matching rows · capped at 1,000${truncated?' (truncated)':''}. The request was audited.`);
++  }catch(error){setMessage(error instanceof Error?error.message:'Export failed.');}
++  finally{setBusy(false);}
++ };
++ return <section className="admin-card export-manager"><h2>List export</h2><p>Exports are streamed from the server, capped at 1,000 rows, formula-neutralized for CSV, and audited. Choose only the data you need; user exports include email addresses and audit exports include client metadata.</p>
++  <div className="admin-detail"><label>List<select value={resource} onChange={event=>{setResource(event.target.value as Resource);setStatus('all');}}><option value="users">Users</option><option value="posts">Posts</option><option value="reports">Reports</option><option value="audit">Audit</option></select></label><label>Format<select value={format} onChange={event=>setFormat(event.target.value as 'csv'|'json')}><option value="csv">CSV</option><option value="json">JSON</option></select></label>
++  <label>Search{resource==='audit'?' (action, actor, target, reason)':' text'}<input maxLength={160} value={q} onChange={event=>setQ(event.target.value)}/></label>
++  {resource==='users'&&<><label>User status<select value={status} onChange={event=>setStatus(event.target.value)}>{['all','active','banned','verified','unverified','deleted','demo','real'].map(item=><option key={item}>{item}</option>)}</select></label><label>Role<select value={role} onChange={event=>setRole(event.target.value)}>{['all','user','moderator','admin','owner'].map(item=><option key={item}>{item}</option>)}</select></label></>}
++  {resource==='posts'&&<><label>Content state<select value={status} onChange={event=>setStatus(event.target.value)}>{['all','visible','hidden','trash','pinned'].map(item=><option key={item}>{item}</option>)}</select></label><label>Kind<select value={kind} onChange={event=>setKind(event.target.value)}><option value="">All</option><option value="post">Post</option><option value="reel">Reel</option><option value="story">Story</option></select></label></>}
++  {resource==='reports'&&<label>Report status<select value={status} onChange={event=>setStatus(event.target.value)}>{['all','new','triage','actioned','dismissed'].map(item=><option key={item}>{item}</option>)}</select></label>}
++  {resource==='audit'&&<label>Action filter<input maxLength={160} value={action} onChange={event=>setAction(event.target.value)}/></label>}
++  </div><button className="admin-button admin-primary" type="button" disabled={busy} onClick={()=>void run()}>{busy?'Preparing export…':`Export ${resource} as ${format.toUpperCase()}`}</button>{message&&<p role="status">{message}</p>}
++ </section>;
++}
+diff --git a/components/admin/system.tsx b/components/admin/system.tsx
+new file mode 100644
+index 0000000..12d4028
+--- /dev/null
++++ b/components/admin/system.tsx
+@@ -0,0 +1,29 @@
++'use client';
++import { useState } from 'react';
++import type { systemOverview } from '@/lib/admin/system';
++
++type Overview = Awaited<ReturnType<typeof systemOverview>>;
++type SqlResult = { queryHash: string; columns: string[]; rows: Record<string, unknown>[]; rowLimit: number; truncated: boolean };
++const booleanLabel = (value: boolean) => value ? 'Configured' : 'Not configured';
++async function readResponse<T>(response: Response): Promise<T> {
++  const body = await response.json() as T & { error?: string };
++  if (!response.ok) throw new Error(body.error || 'System operation failed.');
++  return body;
++}
++export function SystemTools({ initial, canOwnerTools, canPrune }: { initial: Overview; canOwnerTools: boolean; canPrune: boolean }) {
++  const [overview,setOverview]=useState(initial),[confirmation,setConfirmation]=useState(''),[reason,setReason]=useState(''),[query,setQuery]=useState('SELECT id,kind,created_at FROM posts ORDER BY created_at DESC LIMIT 20'),[sqlReason,setSqlReason]=useState(''),[result,setResult]=useState<SqlResult|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState('');
++  const refresh=async()=>{setBusy(true);setError('');try{setOverview(await readResponse<Overview>(await fetch('/api/admin/system',{cache:'no-store'})));setMessage('System status refreshed.');}catch(cause){setError(cause instanceof Error?cause.message:'Could not refresh status.');}finally{setBusy(false);}};
++  const run=async(action:string)=>{setBusy(true);setError('');setMessage('');try{const payload=await readResponse<Record<string,unknown>>(await fetch('/api/admin/system',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({action,confirmation,reason})}));setMessage(`Operation completed: ${JSON.stringify(payload)}.`);setConfirmation('');setOverview(await readResponse<Overview>(await fetch('/api/admin/system',{cache:'no-store'})));}catch(cause){setError(cause instanceof Error?cause.message:'System operation failed.');}finally{setBusy(false);}};
++  const runSql=async()=>{setBusy(true);setError('');setMessage('');setResult(null);try{const payload=await readResponse<SqlResult>(await fetch('/api/admin/system',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({action:'readOnlySql',query,reason:sqlReason})}));setResult(payload);setMessage(`Read-only query returned ${payload.rows.length} rows${payload.truncated?' (capped at 500)':''}. Query hash: ${payload.queryHash}.`);}catch(cause){setError(cause instanceof Error?cause.message:'Query failed.');}finally{setBusy(false);}};
++  const env=Object.entries(overview.environment) as [string,boolean][];
++  const storyBatch=Math.min(overview.expiredStories,100),orphanBatch=Math.min(overview.orphanAssets,100);
++  return <div className="system-tools">
++    <section className="admin-card"><div className="admin-card-heading"><div><h2>Migration status</h2><p>Applied database migrations compared with the registered application sequence. This screen never runs migrations.</p></div><button className="admin-button" type="button" disabled={busy} onClick={()=>void refresh()}>Refresh status</button></div><p>{overview.migrationCount} applied · latest registered version {overview.latestRegisteredMigration} · {overview.missingMigrations.length?`missing ${overview.missingMigrations.join(', ')}`:'up to date'}</p><div className="migration-chips">{overview.migrations.map(item=><span className={item.applied?'is-applied':'is-pending'} key={item.version}>v{item.version} {item.applied?'applied':'pending'}</span>)}</div></section>
++    <section className="admin-card"><h2>Environment inspector</h2><p>Only whether each setting is present is exposed. Values, addresses, and secret names are never returned.</p><dl className="system-env-list">{env.map(([key,value])=><div key={key}><dt>{key.replace(/([A-Z])/g,' $1')}</dt><dd>{booleanLabel(value)}</dd></div>)}</dl></section>
++    <section className="admin-card"><h2>Cache invalidation</h2><p>Purges the settings cache and revalidates the public root layout. It does not clear browser/CDN caches or database data.</p><label>Audit reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Type PURGE SITE CACHE<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label><button className="admin-button" disabled={busy||confirmation!=='PURGE SITE CACHE'||reason.trim().length<8} onClick={()=>void run('purgeCache')}>Purge settings and public cache</button></section>
++    <section className="admin-card"><h2>Demo-data controls</h2><p>Seeded demo profiles are separate from real accounts. Re-seeding inserts missing fixture rows without replacing edits; wiping permanently removes demo profiles and their cascaded demo content, then disables automatic re-seeding.</p><p>{overview.demoProfiles} demo profiles · {overview.demoPosts} posts · automatic seed {overview.demoSeedEnabled?'enabled':'disabled'}</p>{canOwnerTools?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={overview.demoProfiles?`WIPE ${overview.demoProfiles} DEMO PROFILES or RESEED DEMO DATA`:'RESEED DEMO DATA'}/></label><div className="admin-button-row"><button className="admin-button" disabled={busy||confirmation!=='RESEED DEMO DATA'||reason.trim().length<8} onClick={()=>void run('reseedDemoData')}>Re-seed demo fixtures</button><button className="admin-button admin-danger" disabled={busy||confirmation!==`WIPE ${overview.demoProfiles} DEMO PROFILES`||reason.trim().length<8} onClick={()=>void run('wipeDemoData')}>Wipe demo data</button></div></>:<p>Owner-only tools.</p>}</section>
++    <section className="admin-card"><h2>Retention and orphan pruning</h2><p>Expired stories are permanently removed only after 30 days past expiry. Orphan assets are only staged into the existing Trash workflow after seven days; no Blob object is physically deleted. Each batch is capped at 100 and audited.</p><p>{overview.expiredStories} expired stories eligible · {overview.orphanAssets} old orphan assets eligible.</p>{canPrune?<><label>Reason<input maxLength={500} value={reason} onChange={event=>setReason(event.target.value)}/></label><label>Confirmation<input autoComplete="off" value={confirmation} onChange={event=>setConfirmation(event.target.value)} placeholder={`PRUNE ${storyBatch} EXPIRED STORIES or MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`}/></label><div className="admin-button-row"><button className="admin-button admin-danger" disabled={busy||!storyBatch||confirmation!==`PRUNE ${storyBatch} EXPIRED STORIES`||reason.trim().length<8} onClick={()=>void run('pruneExpiredStories')}>Prune expired stories</button><button className="admin-button" disabled={busy||!orphanBatch||confirmation!==`MOVE ${orphanBatch} ORPHAN ASSETS TO TRASH`||reason.trim().length<8} onClick={()=>void run('pruneOrphanAssets')}>Move orphan assets to Trash</button></div></>:<p>Owner-only tools.</p>}</section>
++    {canOwnerTools&&<section className="admin-card system-sql"><h2>Read-only SQL runner · owner only</h2><p>Exactly one SELECT; approved application tables only, no auth/session/account/settings tables, joins only, 500-row cap, five-second database timeout. The query is logged by SHA-256 hash and is never stored in the audit record. A read-only transaction is enforced by PostgreSQL.</p><label>SELECT query<textarea rows={7} maxLength={4000} spellCheck={false} value={query} onChange={event=>setQuery(event.target.value)}/></label><label>Reason for running this query<input maxLength={500} value={sqlReason} onChange={event=>setSqlReason(event.target.value)}/></label><button className="admin-button admin-primary" type="button" disabled={busy||!query.trim()||sqlReason.trim().length<10} onClick={()=>void runSql()}>{busy?'Running…':'Run SELECT'}</button>{result&&<><p>{result.rows.length} rows · {result.columns.length} columns · hash {result.queryHash}</p><pre className="system-sql-result">{JSON.stringify(result.rows,null,2)}</pre></>}</section>}
++    {(message||error)&&<p role={error?'alert':'status'} className={error?'admin-error':''}>{error||message}</p>}
++  </div>;
++}
+diff --git a/lib/admin/analytics.ts b/lib/admin/analytics.ts
+new file mode 100644
+index 0000000..0bd67d8
+--- /dev/null
++++ b/lib/admin/analytics.ts
+@@ -0,0 +1,103 @@
++import type { QueryExecutor } from '../postgres';
++import { AdminError } from './validation';
++
++export type AnalyticsDay = {
++  date: string;
++  signups: number;
++  activeUsers: number;
++  creations: number;
++  messages: number;
++  reports: number;
++  storageBytes: number;
++};
++export type AnalyticsSnapshot = {
++  days: number;
++  daily: AnalyticsDay[];
++  topPosts: { id: string; caption: string; category: string; kind: string; username: string; name: string; created_at: number; likes: number; comments: number; views: number }[];
++  topCreators: { id: string; username: string; name: string; creations: number; likes: number; comments: number }[];
++  categories: { category: string; creations: number }[];
++  hashtags: { hashtag: string; uses: number }[];
++  funnel: { members: number; firstPostMembers: number; conversionRate: number };
++};
++
++const DAY_MS = 86_400_000;
++const utcDay = (value: number) => Math.floor(value / DAY_MS) * DAY_MS;
++const asNumber = (value: unknown) => Number(value ?? 0);
++const dayKey = (value: unknown) => String(value instanceof Date ? value.toISOString().slice(0, 10) : value);
++const sinceClause = `to_timestamp($1::double precision / 1000)`;
++const publicLivePost = `p.deleted_at IS NULL AND p.hidden_at IS NULL AND (p.expires_at IS NULL OR p.expires_at>$2)
++  AND a.deleted_at IS NULL AND COALESCE(a.is_demo,0)=0
++  AND NOT COALESCE((SELECT shadow_banned FROM profile_moderation pm WHERE pm.profile_id=p.author_id),false)`;
++
++/** Session refreshes are an explicitly labelled DAU proxy; the app does not
++ * yet record a per-request activity event and this query does not invent one. */
++export async function dashboardAnalytics(db: QueryExecutor, inputDays: unknown = 14, now = Date.now()): Promise<AnalyticsSnapshot> {
++  const days = Number(inputDays);
++  if (!Number.isSafeInteger(days) || ![14, 30, 90].includes(days)) throw new AdminError('Choose a 14, 30, or 90 day analytics window.');
++  const start = utcDay(now) - (days - 1) * DAY_MS;
++  const daily: AnalyticsDay[] = Array.from({ length: days }, (_, index) => ({
++    date: new Date(start + index * DAY_MS).toISOString().slice(0, 10),
++    signups: 0, activeUsers: 0, creations: 0, messages: 0, reports: 0, storageBytes: 0,
++  }));
++  const positions = new Map(daily.map((item, index) => [item.date, index]));
++  const series = async (column: keyof Omit<AnalyticsDay, 'date'>, sql: string, values: unknown[] = [start]) => {
++    const { rows } = await db.query(sql, values);
++    for (const row of rows) {
++      const index = positions.get(dayKey(row.date));
++      if (index !== undefined) daily[index][column] = asNumber(row.value);
++    }
++  };
++  await Promise.all([
++    series('signups', `SELECT to_char(date_trunc('day',u."createdAt" AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COUNT(*) AS value
++      FROM "user" u WHERE u."createdAt">=${sinceClause} GROUP BY 1`),
++    series('activeUsers', `SELECT to_char(date_trunc('day',s."updatedAt" AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COUNT(DISTINCT s."userId") AS value
++      FROM session s JOIN "user" u ON u.id=s."userId" WHERE s."updatedAt">=${sinceClause} AND u.deleted_at IS NULL GROUP BY 1`),
++    series('creations', `SELECT to_char(date_trunc('day',to_timestamp(p.created_at::double precision/1000) AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COUNT(*) AS value
++      FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.created_at>=$1 AND p.deleted_at IS NULL AND a.deleted_at IS NULL AND COALESCE(a.is_demo,0)=0 GROUP BY 1`),
++    series('messages', `SELECT to_char(date_trunc('day',to_timestamp(m.created_at::double precision/1000) AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COUNT(*) AS value
++      FROM messages m JOIN profiles sender ON sender.id=m.sender_id WHERE m.created_at>=$1 AND m.deleted_at IS NULL AND sender.deleted_at IS NULL AND COALESCE(sender.is_demo,0)=0 GROUP BY 1`),
++    series('reports', `SELECT to_char(date_trunc('day',to_timestamp(r.created_at::double precision/1000) AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COUNT(*) AS value
++      FROM reports r LEFT JOIN profiles reporter ON reporter.id=r.reporter_id WHERE r.created_at>=$1 AND (reporter.id IS NULL OR COALESCE(reporter.is_demo,0)=0) GROUP BY 1`),
++    series('storageBytes', `SELECT to_char(date_trunc('day',to_timestamp(a.created_at::double precision/1000) AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS date,COALESCE(SUM(a.size+COALESCE(a.source_retained_bytes,0)),0) AS value
++      FROM assets a LEFT JOIN profiles owner ON owner.id=COALESCE(a.storage_owner,a.owner_id) WHERE a.created_at>=$1 AND (owner.id IS NULL OR COALESCE(owner.is_demo,0)=0) GROUP BY 1`),
++  ]);
++
++  const liveValues = [start, now];
++  const [{ rows: topPosts }, { rows: topCreators }, { rows: categories }, { rows: hashtags }, { rows: [funnel] }] = await Promise.all([
++    db.query(`SELECT p.id,p.caption,p.category,p.kind,a.username,a.name,p.created_at,
++      (SELECT COUNT(*) FROM reactions r WHERE r.post_id=p.id AND r.kind='like') AS likes,
++      (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND c.hidden_at IS NULL AND c.deleted_at IS NULL) AS comments,
++      (SELECT COUNT(*) FROM reactions v WHERE v.post_id=p.id AND v.kind='seen') AS views
++      FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.created_at>=$1 AND ${publicLivePost}
++      ORDER BY (SELECT COUNT(*) FROM reactions r WHERE r.post_id=p.id AND r.kind='like')+
++        (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND c.hidden_at IS NULL AND c.deleted_at IS NULL) DESC,p.created_at DESC,p.id LIMIT 10`, liveValues),
++    db.query(`WITH live AS (
++      SELECT p.id,p.author_id,
++        (SELECT COUNT(*) FROM reactions r WHERE r.post_id=p.id AND r.kind='like') AS likes,
++        (SELECT COUNT(*) FROM comments c WHERE c.post_id=p.id AND c.hidden_at IS NULL AND c.deleted_at IS NULL) AS comments
++      FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.created_at>=$1 AND ${publicLivePost}
++    ) SELECT a.id,a.username,a.name,COUNT(live.id) AS creations,COALESCE(SUM(live.likes),0) AS likes,COALESCE(SUM(live.comments),0) AS comments
++      FROM live JOIN profiles a ON a.id=live.author_id GROUP BY a.id,a.username,a.name
++      ORDER BY COUNT(live.id) DESC,SUM(live.likes+live.comments) DESC,a.username LIMIT 10`, liveValues),
++    db.query(`SELECT p.category,COUNT(*) AS creations FROM posts p JOIN profiles a ON a.id=p.author_id
++      WHERE p.created_at>=$1 AND ${publicLivePost} GROUP BY p.category ORDER BY creations DESC,p.category LIMIT 12`, liveValues),
++    db.query(`SELECT lower(matches.matched[1]) AS hashtag,COUNT(*) AS uses
++      FROM posts p JOIN profiles a ON a.id=p.author_id
++      CROSS JOIN LATERAL regexp_matches(p.caption,'#([[:alnum:]_]{1,50})','g') AS matches(matched)
++      WHERE p.created_at>=$1 AND ${publicLivePost} GROUP BY lower(matches.matched[1]) ORDER BY uses DESC,hashtag LIMIT 20`, liveValues),
++    db.query(`SELECT COUNT(*) AS members,COUNT(*) FILTER(WHERE EXISTS(
++        SELECT 1 FROM posts p WHERE p.author_id=profiles.id AND p.kind='post' AND p.deleted_at IS NULL
++      )) AS first_post_members
++      FROM "user" u JOIN profiles ON profiles.id=u.id
++      WHERE u.role='user' AND u.deleted_at IS NULL AND profiles.deleted_at IS NULL AND COALESCE(profiles.is_demo,0)=0`),
++  ]);
++  const members = asNumber(funnel.members), firstPostMembers = asNumber(funnel.first_post_members);
++  return {
++    days, daily,
++    topPosts: topPosts.map(row => ({ ...row, id: String(row.id), created_at: asNumber(row.created_at), likes: asNumber(row.likes), comments: asNumber(row.comments), views: asNumber(row.views) })) as AnalyticsSnapshot['topPosts'],
++    topCreators: topCreators.map(row => ({ ...row, id: String(row.id), creations: asNumber(row.creations), likes: asNumber(row.likes), comments: asNumber(row.comments) })) as AnalyticsSnapshot['topCreators'],
++    categories: categories.map(row => ({ category: String(row.category), creations: asNumber(row.creations) })),
++    hashtags: hashtags.map(row => ({ hashtag: String(row.hashtag), uses: asNumber(row.uses) })),
++    funnel: { members, firstPostMembers, conversionRate: members ? Math.round(firstPostMembers * 1000 / members) / 10 : 0 },
++  };
++}
+diff --git a/lib/admin/exports.ts b/lib/admin/exports.ts
+new file mode 100644
+index 0000000..e05fc43
+--- /dev/null
++++ b/lib/admin/exports.ts
+@@ -0,0 +1,118 @@
++import { createHash } from 'node:crypto';
++import type { PoolLike, QueryExecutor } from '../postgres';
++import { listUsers, userFilters } from './queries';
++import { contentFilters, listContent } from './content';
++import { reportQueue } from './moderation';
++import { auditFilters, listAudit } from './audit';
++import { authorizeAdmin, insertAudit, transaction } from './core';
++import { requirePermission, type AdminPermission } from './permissions';
++import { AdminError } from './validation';
++
++export const ADMIN_EXPORT_CAP = 1000;
++type ExportResource = 'users' | 'posts' | 'reports' | 'audit';
++type ExportFormat = 'csv' | 'json';
++type ExportPage = { rows: Record<string, unknown>[]; total: number; pageSize: number };
++
++function object(value: unknown): Record<string, unknown> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AdminError('Choose valid export filters.');
++  return value as Record<string, unknown>;
++}
++function allowed(source: Record<string, unknown>, keys: readonly string[]) {
++  return Object.fromEntries(keys.filter(key => source[key] !== undefined).map(key => [key, source[key]]));
++}
++function normalizeFilters(resource: ExportResource, input: unknown) {
++  const source = object(input ?? {});
++  if (resource === 'users') return userFilters(allowed(source, ['q','status','role']));
++  if (resource === 'posts') return contentFilters({ ...allowed(source, ['q','author','kind','status','category','from','to','flagged']), resource: 'posts', page: 1 });
++  if (resource === 'reports') return { ...allowed(source, ['reason','target','q']), ...{ status: source.status ?? 'all', page: 1 } };
++  return auditFilters(allowed(source, ['q','action','actor','targetType','targetId','from','to']));
++}
++function permissionFor(resource: ExportResource): AdminPermission {
++  if (resource === 'users') return 'users.manage';
++  if (resource === 'posts') return 'content.read';
++  if (resource === 'reports') return 'moderation.read';
++  return 'audit.read';
++}
++async function pageFor(db: QueryExecutor, resource: ExportResource, filters: Record<string, unknown>, page: number): Promise<ExportPage> {
++  if (resource === 'users') {
++    const result = await listUsers(db, userFilters({ ...filters, page, limit: 100 }));
++    return { rows: result.users.map(({ id,email,name,username,role,emailVerified,banned,deleted_at,createdAt,storage_bytes }) => ({ id,email,name,username,role,emailVerified,banned,deleted_at,createdAt,storage_bytes })), total: result.total, pageSize: 100 };
++  }
++  if (resource === 'posts') {
++    const result = await listContent(db, contentFilters({ ...filters, resource: 'posts', page }));
++    return { rows: result.items.map(row => ({ id: row.id,author_id: row.author_id,username: row.username,name: row.name,kind: row.kind,caption: row.caption,category: row.category,location: row.location,created_at: row.created_at,hidden_at: row.hidden_at,deleted_at: row.deleted_at,pinned_at: row.pinned_at })), total: result.total, pageSize: 50 };
++  }
++  if (resource === 'reports') {
++    const result = await reportQueue(db, { ...filters, status: filters.status ?? 'all', page });
++    return { rows: result.items.map(row => ({ id: row.id,reporter_id: row.reporter_id,reporter_username: row.reporter_username,target_type: row.target_type,target_id: row.target_id,target_username: row.target_username,reason: row.reason,details: row.details,created_at: row.created_at,status: row.status,assigned_to: row.assigned_to,handled_by: row.handled_by,handled_at: row.handled_at,notes: row.notes,action_taken: row.action_taken,action_target_type: row.action_target_type,action_target_id: row.action_target_id })), total: result.total, pageSize: 50 };
++  }
++  const result = await listAudit(db, auditFilters({ ...filters, page, limit: 100 }));
++  return { rows: result.rows.map(row => ({ id: row.id,actor_id: row.actor_id,actor_email: row.actor_email,action: row.action,target_type: row.target_type,target_id: row.target_id,reason: row.reason,before: row.before,after: row.after,ip: row.ip,user_agent: row.user_agent,created_at: row.created_at })), total: result.total, pageSize: 100 };
++}
++function csvCell(value: unknown) {
++  let text = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
++  if (/^[\s]*[=+@-]/.test(text) || /^[\t\r\n]/.test(text)) text = "'" + text;
++  return '"' + text.replace(/"/g, '""') + '"';
++}
++const HEADERS: Record<ExportResource, string[]> = {
++  users: ['id','email','name','username','role','emailVerified','banned','deleted_at','createdAt','storage_bytes'],
++  posts: ['id','author_id','username','name','kind','caption','category','location','created_at','hidden_at','deleted_at','pinned_at'],
++  reports: ['id','reporter_id','reporter_username','target_type','target_id','target_username','reason','details','created_at','status','assigned_to','handled_by','handled_at','notes','action_taken','action_target_type','action_target_id'],
++  audit: ['id','actor_id','actor_email','action','target_type','target_id','reason','before','after','ip','user_agent','created_at'],
++};
++
++/** A bounded, paged Response stream. At most 1,000 rows are ever fetched. */
++export async function createAdminExport(pool: PoolLike, actorId: string, input: unknown): Promise<Response> {
++  const body = object(input), resource = body.resource, format = body.format;
++  if (!['users','posts','reports','audit'].includes(String(resource)) || !['csv','json'].includes(String(format))) throw new AdminError('Choose a supported export list and format.');
++  const list = resource as ExportResource, output = format as ExportFormat, filters = normalizeFilters(list, body.filters ?? {});
++  const permission = permissionFor(list);
++  const actor = await authorizeAdmin(pool, actorId); requirePermission(actor, permission);
++  const first = await pageFor(pool, list, filters, 1), limit = Math.min(first.total, ADMIN_EXPORT_CAP), truncated = first.total > ADMIN_EXPORT_CAP;
++  const filterHash = createHash('sha256').update(JSON.stringify(filters)).digest('hex');
++  await transaction(pool, async db => {
++    const current = await authorizeAdmin(db, actorId); requirePermission(current, permission);
++    await insertAudit(db, current, { action: 'exports.download', targetType: list, targetId: list, after: { format: output, available: first.total, rowCap: ADMIN_EXPORT_CAP, truncated, filterHash } });
++  });
++
++  const headers = HEADERS[list], encoder = new TextEncoder();
++  let page = 1, currentRows = first.rows, rowIndex = 0, emitted = 0, closed = false;
++  const stream = new ReadableStream<Uint8Array>({
++    start(controller) {
++      if (output === 'csv') controller.enqueue(encoder.encode(headers.map(csvCell).join(',') + '\r\n'));
++      else controller.enqueue(encoder.encode('['));
++    },
++    async pull(controller) {
++      if (closed) return;
++      try {
++        if (emitted >= limit) {
++          if (output === 'json') controller.enqueue(encoder.encode(']'));
++          closed = true; controller.close(); return;
++        }
++        while (rowIndex >= currentRows.length && (page - 1) * first.pageSize < limit) {
++          page++;
++          const next = await pageFor(pool, list, filters, page);
++          currentRows = next.rows; rowIndex = 0;
++          if (!currentRows.length) break;
++        }
++        if (rowIndex >= currentRows.length) {
++          if (output === 'json') controller.enqueue(encoder.encode(']'));
++          closed = true; controller.close(); return;
++        }
++        const row = currentRows[rowIndex++];
++        const chunk = output === 'csv'
++          ? headers.map(key => csvCell(row[key])).join(',') + '\r\n'
++          : (emitted ? ',' : '') + JSON.stringify(row, (_key, value) => typeof value === 'bigint' ? String(value) : value);
++        controller.enqueue(encoder.encode(chunk)); emitted++;
++      } catch (error) { closed = true; controller.error(error); }
++    },
++  });
++  const suffix = output === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8';
++  return new Response(stream, { headers: {
++    'Content-Type': suffix,
++    'Content-Disposition': `attachment; filename="functiongram-${list}.${output}"`,
++    'X-Export-Matched-Rows': String(first.total),
++    'X-Export-Row-Cap': String(ADMIN_EXPORT_CAP),
++    'X-Export-Truncated': truncated ? 'true' : 'false',
++  } });
++}
+diff --git a/lib/admin/permissions.ts b/lib/admin/permissions.ts
+index 4371610..c38c915 100644
+--- a/lib/admin/permissions.ts
++++ b/lib/admin/permissions.ts
+@@ -26,6 +26,13 @@ export const ADMIN_PERMISSIONS = [
+   'email.send',
+   'pages.manage',
+   'announcements.manage',
++  'analytics.read',
++  'exports.read',
++  'system.read',
++  'system.cache',
++  'system.demo',
++  'system.prune',
++  'system.sql',
+ ] as const;
+ export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
+ 
+@@ -33,7 +40,7 @@ export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
+ // deployment; permission grants are never stored in editable site settings.
+ export const ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
+   owner: ADMIN_PERMISSIONS,
+-  admin: ADMIN_PERMISSIONS.filter(permission => permission !== 'roles.manage'),
++  admin: ADMIN_PERMISSIONS.filter(permission => !['roles.manage','system.demo','system.prune','system.sql'].includes(permission)),
+   moderator: [
+     'admin.access', 'dashboard.read', 'content.read', 'content.moderate',
+     'moderation.read', 'moderation.triage',
+diff --git a/lib/admin/system.ts b/lib/admin/system.ts
+new file mode 100644
+index 0000000..2580095
+--- /dev/null
++++ b/lib/admin/system.ts
+@@ -0,0 +1,285 @@
++import { createHash } from 'node:crypto';
++import type { PoolLike, QueryExecutor } from '../postgres';
++import { DATABASE_MIGRATIONS } from '../postgres';
++import { seed } from '../seed';
++import { MEDIA_LOCK } from '../media-policy';
++import { referencedAsset } from './media';
++import { authorizeAdmin, insertAudit, transaction } from './core';
++import { requirePermission } from './permissions';
++import { AdminError } from './validation';
++
++const DAY_MS = 86_400_000;
++export const SYSTEM_PRUNE_BATCH_LIMIT = 100;
++export const EXPIRED_STORY_GRACE_DAYS = 30;
++export const ORPHAN_ASSET_GRACE_DAYS = 7;
++
++function requiredText(value: unknown, label: string, min = 8) {
++  if (typeof value !== 'string' || value.trim().length < min || value.trim().length > 500 || /[\0\r]/.test(value)) throw new AdminError(`Enter a ${label} of ${min}–500 characters.`);
++  return value.trim();
++}
++function exact(value: unknown, expected: string) {
++  if (value !== expected) throw new AdminError(`Type ${expected} to confirm this operation.`);
++}
++
++const envFlags = () => ({
++  databaseConfigured: Boolean(process.env.POSTGRES_URL || process.env.DATABASE_URL),
++  authSecretConfigured: Boolean(process.env.BETTER_AUTH_SECRET),
++  blobStorageConfigured: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
++  emailProviderConfigured: Boolean(process.env.BREVO_API_KEY),
++  bootstrapConfigured: Boolean(process.env.ADMIN_BOOTSTRAP_EMAIL),
++  adminIpRestrictionConfigured: Boolean(process.env.ADMIN_IP_ALLOWLIST?.trim()),
++  publicUrlConfigured: Boolean(process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL),
++});
++
++async function counts(db: QueryExecutor) {
++  const { rows: [demo] } = await db.query(`SELECT COUNT(*) AS profiles,
++    (SELECT COUNT(*) FROM posts p JOIN profiles a ON a.id=p.author_id WHERE a.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=a.id)) AS posts
++    FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)`);
++  const { rows: [seedState] } = await db.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1');
++  const storyCutoff = Date.now() - EXPIRED_STORY_GRACE_DAYS * DAY_MS;
++  const orphanCutoff = Date.now() - ORPHAN_ASSET_GRACE_DAYS * DAY_MS;
++  const { rows: [stories] } = await db.query("SELECT COUNT(*) AS count FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1", [storyCutoff]);
++  const { rows: [orphans] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [orphanCutoff]);
++  return {
++    demoProfiles: Number(demo.profiles), demoPosts: Number(demo.posts), demoSeedEnabled: seedState?.enabled === true,
++    expiredStories: Number(stories.count), orphanAssets: Number(orphans.count),
++    expiredStoryCutoff: storyCutoff, orphanAssetCutoff: orphanCutoff,
++  };
++}
++
++export async function systemOverview(db: QueryExecutor) {
++  const { rows } = await db.query('SELECT version,applied_at FROM functiongram_migrations ORDER BY version');
++  const applied = new Set(rows.map(row => Number(row.version)));
++  const migrations = DATABASE_MIGRATIONS.map(item => ({ version: item.version, applied: applied.has(item.version) }));
++  const countsResult = await counts(db);
++  return {
++    migrations, migrationCount: applied.size, latestRegisteredMigration: DATABASE_MIGRATIONS.at(-1)?.version ?? 0,
++    missingMigrations: migrations.filter(item => !item.applied).map(item => item.version),
++    environment: envFlags(),
++    ...countsResult,
++  };
++}
++
++export async function auditCachePurge(pool: PoolLike, actorId: string, input: Record<string, unknown>) {
++  exact(input.confirmation, 'PURGE SITE CACHE');
++  const reason = requiredText(input.reason, 'cache-purge reason');
++  await transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId); requirePermission(actor, 'system.cache');
++    await insertAudit(db, actor, { action: 'system.cache.purge', targetType: 'cache', targetId: 'settings-and-public-layout', before: null, after: { tags: ['settings'], paths: ['/', '/p/*'] }, reason });
++  });
++  return { ok: true };
++}
++
++export type SqlToken = { kind: 'word' | 'identifier' | 'literal' | 'punct'; value: string };
++const SQL_TABLES = new Set(['profiles','posts','comments','messages','reports','assets','follows','notifications','reactions','saved_collections','saved_collection_items','admin_audit_log','site_pages','announcements','admin_message_controls','admin_notification_templates','admin_email_controls','functiongram_migrations']);
++const SQL_FUNCTIONS = new Set(['count','sum','avg','min','max','coalesce','nullif','lower','upper','length','char_length','date_trunc','extract','to_char','to_timestamp','round','ceil','ceiling','floor','abs','greatest','least','cast','trim','btrim','ltrim','rtrim','replace','split_part','string_agg','array_agg','json_agg','jsonb_agg','json_build_object','jsonb_build_object','regexp_matches']);
++const SQL_DENIED = new Set(['WITH','RECURSIVE','INSERT','UPDATE','DELETE','MERGE','CALL','DO','COPY','CREATE','DROP','ALTER','TRUNCATE','GRANT','REVOKE','COMMIT','ROLLBACK','BEGIN','END','SET','RESET','VACUUM','ANALYZE','EXPLAIN','EXECUTE','PREPARE','DEALLOCATE','LOCK','INTO','FOR','SECURITY','SHOW','TABLE','VALUES','CURRENT_USER','SESSION_USER','CURRENT_ROLE','CURRENT_SCHEMA','CURRENT_CATALOG','CURRENT_SETTING']);
++function tokenizeReadOnlySql(sql: string): SqlToken[] {
++  if (Buffer.byteLength(sql, 'utf8') > 4000) throw new AdminError('SQL is limited to 4,000 bytes.');
++  if (sql.includes('\\')) throw new AdminError('Backslash escape syntax is not supported.');
++  const tokens: SqlToken[] = [];
++  let i = 0, terminalSemicolon = false;
++  while (i < sql.length) {
++    const ch = sql[i];
++    if (/\s/.test(ch)) { i++; continue; }
++    if (sql.startsWith('--', i) || sql.startsWith('/*', i) || sql.startsWith('*/', i)) throw new AdminError('SQL comments are not supported.');
++    if (ch === '$') throw new AdminError('Dollar-quoted strings and parameters are not supported.');
++    if (ch === ';') {
++      if (terminalSemicolon || sql.slice(i + 1).trim()) throw new AdminError('Run exactly one SELECT statement.');
++      terminalSemicolon = true; i++; continue;
++    }
++    if (ch === "'") {
++      let end = i + 1, closed = false;
++      while (end < sql.length) {
++        if (sql[end] === "'" && sql[end + 1] === "'") { end += 2; continue; }
++        if (sql[end] === "'") { end++; closed = true; break; }
++        end++;
++      }
++      if (!closed) throw new AdminError('Close every SQL string literal.');
++      tokens.push({ kind: 'literal', value: '' }); i = end; continue;
++    }
++    if (ch === '"') {
++      let end = i + 1, value = '', closed = false;
++      while (end < sql.length) {
++        if (sql[end] === '"' && sql[end + 1] === '"') { value += '"'; end += 2; continue; }
++        if (sql[end] === '"') { end++; closed = true; break; }
++        value += sql[end++];
++      }
++      if (!closed) throw new AdminError('Close every quoted SQL identifier.');
++      tokens.push({ kind: 'identifier', value }); i = end; continue;
++    }
++    const word = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(sql.slice(i));
++    if (word) { tokens.push({ kind: 'word', value: word[0].toUpperCase() }); i += word[0].length; continue; }
++    if (/[0-9]/.test(ch)) {
++      const number = /^[0-9]+(?:\.[0-9]+)?/.exec(sql.slice(i))![0];
++      tokens.push({ kind: 'literal', value: '' }); i += number.length; continue;
++    }
++    tokens.push({ kind: 'punct', value: ch }); i++;
++  }
++  return tokens;
++}
++
++export function validateReadOnlySelect(input: unknown) {
++  if (typeof input !== 'string' || !input.trim()) throw new AdminError('Enter a SELECT query.');
++  const tokens = tokenizeReadOnlySql(input.trim());
++  if (tokens[0]?.kind !== 'word' || tokens[0].value !== 'SELECT') throw new AdminError('Only a single SELECT statement is allowed.');
++  const words = tokens.filter(token => token.kind === 'word').map(token => token.value);
++  if (words.some(word => SQL_DENIED.has(word)) || words.filter(word => word === 'SELECT').length !== 1) throw new AdminError('Only one plain SELECT is allowed; writes, CTEs, locks and subqueries are refused.');
++  const depthAt: number[] = []; let depth = 0;
++  for (const token of tokens) {
++    depthAt.push(depth);
++    if (token.kind === 'punct' && token.value === '(') depth++;
++    if (token.kind === 'punct' && token.value === ')') { depth--; if (depth < 0) throw new AdminError('Check SQL parentheses.'); }
++  }
++  if (depth !== 0) throw new AdminError('Check SQL parentheses.');
++  for (let index = 0; index < tokens.length - 1; index++) {
++    const token = tokens[index], next = tokens[index + 1];
++    if (['word','identifier'].includes(token.kind) && next.kind === 'punct' && next.value === '(') {
++      const name = token.value.toLowerCase();
++      if (tokens[index - 1]?.value === '.') throw new AdminError('Schema-qualified functions are not allowed.');
++      if (!SQL_FUNCTIONS.has(name) && !(token.kind === 'word' && ['IN','FILTER','OVER'].includes(token.value))) throw new AdminError(`The ${token.value} function is not allowed.`);
++    }
++  }
++  const relationPositions: number[] = [];
++  for (let index = 0; index < tokens.length; index++) {
++    if (depthAt[index] === 0 && tokens[index].kind === 'word' && ['FROM','JOIN'].includes(tokens[index].value)) relationPositions.push(index + 1);
++  }
++  if (relationPositions.some(index => {
++    const relation = tokens[index];
++    if (!relation || !['word','identifier'].includes(relation.kind)) return true;
++    const name = relation.kind === 'word' ? relation.value.toLowerCase() : relation.value;
++    return !SQL_TABLES.has(name) || tokens[index + 1]?.value === '.';
++  })) throw new AdminError('Use only the read-only application tables shown in the system guide; auth and settings tables are blocked.');
++  const fromIndex = tokens.findIndex((token,index) => depthAt[index] === 0 && token.kind === 'word' && token.value === 'FROM');
++  if (fromIndex >= 0) {
++    const clauseEnd = new Set(['WHERE','GROUP','ORDER','HAVING','LIMIT','OFFSET','FETCH','WINDOW','UNION','EXCEPT','INTERSECT']);
++    for (let index = fromIndex + 1; index < tokens.length; index++) {
++      if (depthAt[index] === 0 && tokens[index].kind === 'word' && clauseEnd.has(tokens[index].value)) break;
++      if (depthAt[index] === 0 && tokens[index].kind === 'punct' && tokens[index].value === ',') throw new AdminError('Use explicit JOINs instead of comma-separated tables.');
++    }
++  }
++  const normalized = input.trim().replace(/;\s*$/, '');
++  return { sql: normalized, queryHash: createHash('sha256').update(normalized).digest('hex') };
++}
++
++export async function runReadOnlySql(pool: PoolLike, actorId: string, input: Record<string, unknown>) {
++  const query = validateReadOnlySelect(input.query), reason = requiredText(input.reason, 'SQL-run reason', 10);
++  const actor = await authorizeAdmin(pool, actorId, true); requirePermission(actor, 'system.sql');
++  await transaction(pool, async db => {
++    const current = await authorizeAdmin(db, actorId, true); requirePermission(current, 'system.sql');
++    await insertAudit(db, current, { action: 'system.sql.read', targetType: 'sqlQuery', targetId: query.queryHash, after: { queryHash: query.queryHash, queryLength: query.sql.length, rowLimit: 500, timeoutMs: 5000 }, reason });
++  });
++  const client = await pool.connect();
++  try {
++    await client.query('BEGIN');
++    await client.query('SET TRANSACTION READ ONLY');
++    await client.query("SET LOCAL statement_timeout='5s'");
++    await client.query("SET LOCAL idle_in_transaction_session_timeout='7s'");
++    const { rows } = await client.query(`SELECT * FROM (${query.sql}) AS admin_read_only_result LIMIT 501`);
++    await client.query('COMMIT');
++    const truncated = rows.length > 500;
++    const safeRows = rows.slice(0, 500);
++    return { queryHash: query.queryHash, columns: safeRows[0] ? Object.keys(safeRows[0]) : [], rows: safeRows, rowLimit: 500, truncated };
++  } catch (error) {
++    await client.query('ROLLBACK').catch(() => undefined);
++    if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === '57014') throw new AdminError('The SQL query exceeded the 5-second limit.', 408);
++    throw error;
++  } finally { client.release(); }
++}
++
++async function previewStoryIds(db: QueryExecutor, now: number) {
++  const cutoff = now - EXPIRED_STORY_GRACE_DAYS * DAY_MS;
++  const { rows } = await db.query("SELECT id FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1 ORDER BY expires_at,id LIMIT $2", [cutoff, SYSTEM_PRUNE_BATCH_LIMIT]);
++  const { rows: [total] } = await db.query("SELECT COUNT(*) AS count FROM posts WHERE kind='story' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<$1", [cutoff]);
++  return { ids: rows.map(row => String(row.id)), total: Number(total.count), cutoff };
++}
++async function previewOrphanKeys(db: QueryExecutor, now: number) {
++  const cutoff = now - ORPHAN_ASSET_GRACE_DAYS * DAY_MS;
++  const { rows } = await db.query(`SELECT a.key FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')} ORDER BY a.created_at,a.key LIMIT $2`, [cutoff, SYSTEM_PRUNE_BATCH_LIMIT]);
++  const { rows: [total] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [cutoff]);
++  return { keys: rows.map(row => String(row.key)), total: Number(total.count), cutoff };
++}
++export async function prunePreview(pool: PoolLike, now = Date.now()) {
++  const [stories, orphans] = await Promise.all([previewStoryIds(pool, now), previewOrphanKeys(pool, now)]);
++  return {
++    expiredStories: { available: stories.total, batch: stories.ids.length, confirmation: `PRUNE ${stories.ids.length} EXPIRED STORIES`, graceDays: EXPIRED_STORY_GRACE_DAYS },
++    orphanAssets: { available: orphans.total, batch: orphans.keys.length, confirmation: `MOVE ${orphans.keys.length} ORPHAN ASSETS TO TRASH`, graceDays: ORPHAN_ASSET_GRACE_DAYS },
++  };
++}
++
++export async function pruneExpiredStories(pool: PoolLike, actorId: string, input: Record<string, unknown>, now = Date.now()) {
++  const reason = requiredText(input.reason, 'prune reason');
++  return transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.prune');
++    await db.query('SELECT pg_advisory_xact_lock($1)', [MEDIA_LOCK]);
++    const preview = await previewStoryIds(db, now), confirmation = `PRUNE ${preview.ids.length} EXPIRED STORIES`;
++    exact(input.confirmation, confirmation);
++    if (!preview.ids.length) return { ok: true, removed: 0, remaining: preview.total };
++    const { rows: removed } = await db.query('DELETE FROM posts WHERE id=ANY($1::text[]) RETURNING id', [preview.ids]);
++    for (const row of removed) await insertAudit(db, actor, { action: 'system.expiredStory.prune', targetType: 'post', targetId: String(row.id), before: { expiredForAtLeastDays: EXPIRED_STORY_GRACE_DAYS }, after: null, reason });
++    await insertAudit(db, actor, { action: 'system.prune.expiredStories', targetType: 'posts', targetId: 'expired-stories', before: { candidates: preview.total }, after: { removed: removed.length, remaining: Math.max(0, preview.total - removed.length) }, reason });
++    return { ok: true, removed: removed.length, remaining: Math.max(0, preview.total - removed.length) };
++  });
++}
++
++export async function pruneOrphanAssets(pool: PoolLike, actorId: string, input: Record<string, unknown>, now = Date.now()) {
++  const reason = requiredText(input.reason, 'orphan-prune reason');
++  return transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.prune');
++    await db.query('SELECT pg_advisory_xact_lock($1)', [MEDIA_LOCK]);
++    const preview = await previewOrphanKeys(db, now), confirmation = `MOVE ${preview.keys.length} ORPHAN ASSETS TO TRASH`;
++    exact(input.confirmation, confirmation);
++    const nowStamp = Date.now();
++    for (const key of preview.keys) {
++      const { rows: [asset] } = await db.query("SELECT status FROM assets WHERE key=$1 AND status IN ('ready','quarantined') FOR UPDATE", [key]);
++      if (!asset) continue;
++      await db.query("UPDATE assets SET status='trash',deleted_at=$2,trash_origin=$3,reason=$4 WHERE key=$1", [key, nowStamp, asset.status, `System orphan prune: ${reason}`]);
++      await insertAudit(db, actor, { action: 'media.trash', targetType: 'asset', targetId: key, before: { status: asset.status }, after: { status: 'trash', origin: asset.status }, reason });
++    }
++    const { rows: [remaining] } = await db.query(`SELECT COUNT(*) AS count FROM assets a WHERE a.status IN ('ready','quarantined') AND a.created_at<$1 AND NOT ${referencedAsset('a')}`, [preview.cutoff]);
++    await insertAudit(db, actor, { action: 'system.prune.orphanAssets', targetType: 'assets', targetId: 'orphan-prune', before: { candidates: preview.total }, after: { movedToTrash: preview.keys.length, remaining: Number(remaining.count) }, reason });
++    return { ok: true, movedToTrash: preview.keys.length, remaining: Number(remaining.count) };
++  });
++}
++
++export async function wipeDemoData(pool: PoolLike, actorId: string, input: Record<string, unknown>) {
++  const reason = requiredText(input.reason, 'demo-wipe reason');
++  return transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.demo');
++    await db.query('SELECT pg_advisory_xact_lock(67291220)');
++    const { rows: [count] } = await db.query('SELECT COUNT(*) AS profiles FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)');
++    const profileCount = Number(count.profiles);
++    exact(input.confirmation, `WIPE ${profileCount} DEMO PROFILES`);
++    const { rows: [posts] } = await db.query('SELECT COUNT(*) AS count FROM posts p JOIN profiles a ON a.id=p.author_id WHERE a.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=a.id)');
++    await db.query('UPDATE admin_demo_seed_control SET enabled=false,updated_at=$1,updated_by=$2 WHERE id=1', [Date.now(), actor.userId]);
++    await db.query('DELETE FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)');
++    await insertAudit(db, actor, { action: 'system.demo.wipe', targetType: 'demoData', targetId: 'all-demo-profiles', before: { profiles: profileCount, posts: Number(posts.count), seedEnabled: true }, after: { profiles: 0, posts: 0, seedEnabled: false }, reason });
++    return { ok: true, wipedProfiles: profileCount, wipedPosts: Number(posts.count), seedEnabled: false };
++  });
++}
++
++export async function reseedDemoData(pool: PoolLike, actorId: string, input: Record<string, unknown>, runSeed: () => Promise<void> = () => seed(true)) {
++  const reason = requiredText(input.reason, 'demo-reseed reason');
++  exact(input.confirmation, 'RESEED DEMO DATA');
++  await transaction(pool, async db => {
++    const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.demo');
++    await db.query('SELECT pg_advisory_xact_lock(67291220)');
++    await db.query('UPDATE admin_demo_seed_control SET enabled=true,updated_at=$1,updated_by=$2 WHERE id=1', [Date.now(), actor.userId]);
++    await insertAudit(db, actor, { action: 'system.demo.reseed.started', targetType: 'demoData', targetId: 'seed', after: { seedEnabled: true }, reason });
++  });
++  try {
++    await runSeed();
++    const { rows: [result] } = await pool.query('SELECT COUNT(*) AS profiles FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)');
++    await transaction(pool, async db => {
++      const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.demo');
++      await insertAudit(db, actor, { action: 'system.demo.reseed.completed', targetType: 'demoData', targetId: 'seed', after: { profiles: Number(result.profiles), seedEnabled: true }, reason });
++    });
++    return { ok: true, profiles: Number(result.profiles), seedEnabled: true };
++  } catch {
++    await transaction(pool, async db => {
++      const actor = await authorizeAdmin(db, actorId, true); requirePermission(actor, 'system.demo');
++      await insertAudit(db, actor, { action: 'system.demo.reseed.failed', targetType: 'demoData', targetId: 'seed', after: { seedEnabled: true }, reason });
++    });
++    throw new AdminError('Demo data could not be reseeded. It remains enabled for a safe retry.', 503);
++  }
++}
+diff --git a/lib/postgres-schema.ts b/lib/postgres-schema.ts
+index 70f4257..2c2897b 100644
+--- a/lib/postgres-schema.ts
++++ b/lib/postgres-schema.ts
+@@ -193,3 +193,11 @@ export const adminCommsUpgradeStatements=[
+  'CREATE INDEX IF NOT EXISTS site_pages_published_footer_idx ON site_pages(published,show_in_footer,footer_order)',
+  'CREATE INDEX IF NOT EXISTS announcements_live_idx ON announcements(published,starts_at,ends_at)',
+ ];
++
++// Version 12: safe analytics/support tools and an explicit demo-seed control.
++export const adminSystemUpgradeStatements=[
++ `CREATE TABLE IF NOT EXISTS admin_demo_seed_control(id integer PRIMARY KEY CHECK(id=1),enabled boolean NOT NULL DEFAULT true,updated_at bigint NOT NULL DEFAULT 0,updated_by text NOT NULL DEFAULT '')`,
++ 'INSERT INTO admin_demo_seed_control(id,enabled) VALUES(1,true) ON CONFLICT(id) DO NOTHING',
++ 'CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC,id)',
++ 'CREATE INDEX IF NOT EXISTS idx_session_updated ON session("updatedAt" DESC,"userId")',
++];
+diff --git a/lib/postgres.ts b/lib/postgres.ts
+index 0b730e8..e4a8de3 100644
+--- a/lib/postgres.ts
++++ b/lib/postgres.ts
+@@ -2,7 +2,7 @@ import path from 'node:path';
+ import { Pool, types, type QueryResultRow } from 'pg';
+ import { serializedPool } from './serialized-pool';
+ import { postgresQuery } from './sql';
+-import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements } from './postgres-schema';
++import { schemaStatements, socialUpgradeStatements, aspectUpgradeStatements, accountUpgradeStatements, adminUpgradeStatements, adminUsersUpgradeStatements, adminContentUpgradeStatements, mediaUpgradeStatements, moderationUpgradeStatements, adminHardeningUpgradeStatements, adminCommsUpgradeStatements, adminSystemUpgradeStatements } from './postgres-schema';
+ 
+ types.setTypeParser(20, value => Number(value));
+ types.setTypeParser(1700, value => Number(value));
+@@ -28,6 +28,7 @@ export const DATABASE_MIGRATIONS = [
+   { version: 9, statements: moderationUpgradeStatements },
+   { version: 10, statements: adminHardeningUpgradeStatements },
+   { version: 11, statements: adminCommsUpgradeStatements },
++  { version: 12, statements: adminSystemUpgradeStatements },
+ ];
+ 
+ let pool: Pool | undefined;
+diff --git a/lib/seed.ts b/lib/seed.ts
+index 8a58fe6..b84697a 100644
+--- a/lib/seed.ts
++++ b/lib/seed.ts
+@@ -9,8 +9,10 @@ const demoAspect: Record<string, number> = {
+   flowers: 960/540,
+ };
+ 
+-export async function seed(){
+-  const database=db();if(await database.prepare("SELECT id FROM profiles WHERE id='demo_anaya'").first())return;
++export async function seed(force=false,database=db()){
++  const state=await database.prepare('SELECT enabled FROM admin_demo_seed_control WHERE id=1').first<{enabled:boolean}>();
++  if(!force&&state?.enabled===false)return;
++  if(!force&&await database.prepare("SELECT id FROM profiles WHERE id='demo_anaya'").first())return;
+   const now=Date.now();
+   const users=[
+     ['anaya','anaya.explores','Anaya Mehra','Collecting places, little details, and a little sunlight.','avatar-1.jpg'],
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index f66a87d..48e43b9 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -19,7 +19,8 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
+ | 8 | Moderation | Done locally | `patches/phase-08-moderation.patch` |
+ | 9 | Hardening: 2FA, roles, session policy, audit viewer | Done locally; verification below | `patches/phase-09-hardening.patch` |
+ | 10 | Messages, notifications, email, announcements, CMS pages | Done locally; verification below | `patches/phase-10-communications.patch` |
+-| 11–12 | Analytics through handover | Not started | — |
++| 11 | Analytics, exports, system tools, polish | Done locally; verification below | `phase-11-analytics-system.patch` |
++| 12 | Final QA, docs, owner handover | Not started | — |
+ 
+ No application code, environment files, secrets, or production data changed in discovery.
+ 
+@@ -513,4 +514,41 @@ Implemented locally on the complete Phase 1–9 baseline. This increment preserv
+ 2. Sign in through the existing protected admin flow and open **Communications** at `/rstmcadmin/communications`. Use break-glass access only with a documented reason; it is audited. Keep the global Messages and Notifications feature flags as independent gates.
+ 3. Leave email sending paused until Brevo is configured and verified in a deployment preview. Test dry-run first. The per-campaign maximum is 25; the global UTC daily cap applies across requests and attempts consume reserved capacity even if delivery fails.
+ 4. Publish a draft announcement only after checking its audience and UTC schedule. Create legal/CMS pages as drafts, review their preview/SEO fields, then publish. Drafts are intentionally not publicly fetchable.
+-5. No push or pull request was made. Phases 11–12 remain not started.
++5. No push or pull request was made. Phase 11 is recorded below; Phase 12 remained for the next increment at the time of handoff.
++
++## Phase 11 — Analytics, exports, system tools, polish
++
++Implemented as an incremental addition on the complete Phase 1–10 baseline. Existing bootstrap/owner rules, static role matrix, mandatory admin 2FA/session protections, audit immutability, and earlier communication/content/media safeguards remain in place. This local-only increment was not pushed and no PR was opened.
++
++### Delivered
++
++- **Dashboard analytics v2** at `/rstmcadmin/analytics`: UTC daily series for signups, active-session refresh proxy, creations, messages, reports and newly added asset bytes; ranked eligible content/creators; category/hashtag use; and a lifetime member-to-first-post funnel. Demo, hidden/deleted and unavailable content is excluded where appropriate. The UI explicitly describes the activity/storage definitions instead of presenting proxies as exact historical DAU/storage snapshots.
++- **Bounded streaming exports** at `/rstmcadmin/exports` for users, posts, reports and audit rows in CSV or JSON. Query filters reuse existing validated list services, rows are paged, capped at 1,000, sensitive session/password fields are omitted, CSV formula cells are neutralized, and each download is audited with format/cap/filter-hash metadata.
++- **System tools** at `/rstmcadmin/system`: applied/registered migration status; booleans-only environment readiness; logged single-SELECT SQL runner with a strict table/function allowlist, read-only transaction, 500-row cap and 5-second database timeout; audited cache invalidation; owner-only demo reseed/wipe and retention pruning. Each power tool verifies current permissions and records an audit event. Demo wipe disables automatic seeding and preserves demo-flagged profiles linked to real auth accounts. Expired stories older than a 30-day grace period are permanently removed in batches; orphaned assets older than 7 days are moved to Trash for recovery rather than deleted.
++- **Admin operator guide** at `/rstmcadmin/guide` documenting tool permissions, SQL boundaries, export limitations, confirmations, data-retention actions, demo-seed behavior and recovery cautions.
++- Additive, repeatable **migration 12** adds the singleton demo-seed control and analytics query indexes; previous migrations remain registered and unchanged. The normal automatic demo seed honors the persisted disable switch.
++- Preserved `/rstmcadmin` navigation and Phase 10 content; added Phase 11 styles and links without replacing prior controls.
++
++### Verification
++
++- `npm run typecheck`: passed.
++- `npm run lint`: passed, **0 errors** and 7 existing public `<img>` optimization warnings.
++- `npm run test:vercel`: **112 tests; 109 passed, 0 failed, 3 optional managed-PostgreSQL tests skipped** because no isolated managed database URL was supplied. New `tests/admin-system.test.ts`: **7/7 passed**.
++- `npm run build`: passed; analytics, exports, system, and guide pages and their APIs appeared in the production route manifest.
++- Focused PGlite integration coverage checks migration 12 repeatability, manual-SQL parity for analytics, strict SQL rejection/read-only cap/audit hash, CSV/JSON streaming/cap/formula safety/download audit, demo wipe/reseed and auth-profile preservation, retention behavior, and role restrictions.
++- `git diff --check` and independent phase-patch application verification are run as part of packaging below. No deployed preview, browser viewport/screen-reader pass, performance benchmark, or optional managed-Postgres test was performed in this phase. No production database, environment values, email, or remote service was accessed.
++
++### Boundaries and safety notes
++
++- “Active users” is based on session refresh timestamps because the app does not currently emit a per-request activity event. “Storage over time” reports asset bytes added during the selected period, not a historical retained-storage snapshot. The UI labels both definitions.
++- The SQL runner intentionally accepts a narrow subset of plain `SELECT` only: no comments, CTEs/subqueries, multiple statements, protected auth/settings tables, unapproved functions, schema-qualified relations/functions, or write/locking commands. Query text is not stored in the audit log; only a SHA-256 hash, byte-length metadata, row cap, timeout, and operator reason are recorded.
++- Exports are bounded to at most 1,000 rows per request; fetch another filtered request to retrieve more data. They are streams and do not materialize the full matching result set in memory.
++- Demo wipe excludes profiles linked to auth accounts, preventing a test/demo flag from causing deletion of a real login. Reseeding is owner-only, explicitly confirmed, audited at start/completion/failure, and invokes the bundled seeder only after enabling the durable seed switch. Story pruning requires an exact current batch count; orphan pruning rechecks under the shared media lock and moves eligible assets to recoverable Trash.
++
++### Apply and operate
++
++1. Apply the earlier phase patches in order through Phase 10, then apply only `patches/phase-11-analytics-system.patch`; do not apply the generated Phase 11 patch against raw `main` alone. Preserve migration history through 11 and append migration 12.
++2. Run `npm run install:ci`, `npm run typecheck`, `npm run lint`, `npm run test:vercel`, and `npm run build` before deployment. Keep `ADMIN_IP_ALLOWLIST`, auth secrets, storage tokens, and provider credentials out of the inspector; it reports only configured/not-configured booleans.
++3. Review the analytics definitions before comparing trends. Use CSV/JSON filters to export a bounded subset; each download is audited. SQL execution is owner-only, read-only, narrow-allowlist, capped at 500 returned rows and 5 seconds. Do not paste secrets, personal data, or query text into operator reason fields.
++4. Treat demo wipe, pruning, and cache purge as operational actions. Confirm the displayed current count/phrase and enter a meaningful reason. Wiped demo profiles are not recoverable through this tool; only orphaned assets are staged in Trash. Verify backups/recovery procedures before using destructive retention actions.
++5. The incremental patch is independently apply-checked on the reconstructed Phase 1–10 baseline. No push, pull request, or remote GitHub operation was attempted. Phase 12 remains not started.
+diff --git a/tests/admin-comms.test.ts b/tests/admin-comms.test.ts
+index 312e8ee..413e68f 100644
+--- a/tests/admin-comms.test.ts
++++ b/tests/admin-comms.test.ts
+@@ -25,7 +25,7 @@ async function fixture(){
+ test('migration 11 is additive, repeatable and registered after Phase 9',async()=>{
+  const db=new PGlite();try{
+   for(const sql of statements)await db.exec(sql);for(const sql of schema.adminCommsUpgradeStatements)await db.exec(sql);
+-  assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,11);assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements,schema.adminCommsUpgradeStatements);
++  assert.equal(DATABASE_MIGRATIONS.find(item=>item.version===11)?.statements,schema.adminCommsUpgradeStatements);
+   assert.equal((await db.query('SELECT kind FROM admin_notification_templates')).rows.length,5);
+   assert.equal((await db.query('SELECT id FROM admin_email_controls')).rows.length,1);
+   for(const table of ['admin_message_controls','admin_notification_templates','admin_email_controls']){const {rows}=await db.query<{name:string|null}>('SELECT to_regclass($1) AS name',[table]);assert.equal(rows[0].name,table);}
+diff --git a/tests/admin-system.test.ts b/tests/admin-system.test.ts
+new file mode 100644
+index 0000000..6fcbf29
+--- /dev/null
++++ b/tests/admin-system.test.ts
+@@ -0,0 +1,174 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { PGlite } from '@electric-sql/pglite';
++import { DATABASE_MIGRATIONS, type PoolLike, type QueryExecutor } from '../lib/postgres';
++import { serializedPool } from '../lib/serialized-pool';
++import { postgresQuery } from '../lib/sql';
++import { dashboardAnalytics } from '../lib/admin/analytics';
++import { createAdminExport } from '../lib/admin/exports';
++import { authorizeAdmin } from '../lib/admin/core';
++import { hasPermission } from '../lib/admin/permissions';
++import { pruneExpiredStories, pruneOrphanAssets, prunePreview, reseedDemoData, runReadOnlySql, systemOverview, validateReadOnlySelect, wipeDemoData } from '../lib/admin/system';
++import { seed } from '../lib/seed';
++
++async function fixture() {
++  const pg = new PGlite();
++  for (const migration of DATABASE_MIGRATIONS) for (const sql of migration.statements) await pg.exec(sql);
++  const pool = serializedPool({ async query(sql, values) {
++    const result = await pg.query(sql, values);
++    return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
++  } });
++  await pool.query('CREATE TABLE functiongram_migrations(version integer PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())');
++  for (const migration of DATABASE_MIGRATIONS) await pool.query('INSERT INTO functiongram_migrations(version) VALUES($1)', [migration.version]);
++  const add = async (id: string, role='user', createdAt=Date.UTC(2026,0,10), demo=0) => {
++    await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified","twoFactorEnabled",banned,"createdAt","updatedAt") VALUES($1,$2,$3,$4,true,true,false,$5,$5)', [id,id,id+'@example.test',role,new Date(createdAt).toISOString()]);
++    await pool.query('INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$2,\'\',\'\',$3,$4)', [id,id,demo,createdAt]);
++  };
++  await add('owner','owner'); await add('admin','admin'); await add('alice'); await add('bob');
++  return { pg, pool, add };
++}
++const DAY=86_400_000;
++
++test('migration 12 is additive, idempotent, registered after Phase 10 and preserves the explicit demo-seed switch', async () => {
++  const { pg, pool } = await fixture();
++  try {
++    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version,12);
++    assert.equal(DATABASE_MIGRATIONS.at(-1)?.statements, (await import('../lib/postgres-schema')).adminSystemUpgradeStatements);
++    await pool.query('UPDATE admin_demo_seed_control SET enabled=false WHERE id=1');
++    for (const sql of DATABASE_MIGRATIONS.at(-1)!.statements) await pool.query(sql);
++    assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
++    const overview=await systemOverview(pool);
++    assert.deepEqual(overview.missingMigrations,[]);assert.equal(overview.latestRegisteredMigration,12);
++  } finally { await pg.close(); }
++});
++
++test('analytics UTC series, rankings, categories, hashtags, and first-post conversion match manual SQL', async () => {
++  const { pg, pool, add } = await fixture();
++  const now=Date.UTC(2026,0,16,15);
++  try {
++    await add('recent-user','user',Date.UTC(2026,0,15,9));
++    await pool.query('INSERT INTO session(id,token,"userId","expiresAt","createdAt","updatedAt") VALUES($1,$2,$3,$4,$5,$6)', ['s1','token-1','recent-user',new Date(now+DAY).toISOString(),new Date(now).toISOString(),new Date(Date.UTC(2026,0,15,12)).toISOString()]);
++    await pool.query(`INSERT INTO posts(id,author_id,media,kind,caption,category,created_at) VALUES
++      ('p1','recent-user','[]','post','#Pune #food #Pune','Travel',$1),('p2','alice','[]','reel','#food #sunset','Nature',$2),('demo-p','bob','[]','post','#demo','Demo',$1)`,[Date.UTC(2026,0,15,10),Date.UTC(2026,0,16,10)]);
++    await pool.query("UPDATE profiles SET is_demo=1 WHERE id='bob'");
++    await pool.query("INSERT INTO reactions(user_id,post_id,kind) VALUES('alice','p1','like'),('recent-user','p1','seen')");
++    await pool.query("INSERT INTO comments(id,post_id,author_id,body,created_at) VALUES('c1','p1','alice','Nice',1)");
++    await pool.query("INSERT INTO messages(id,sender_id,recipient_id,body,created_at) VALUES('m1','alice','recent-user','Hello', $1)",[Date.UTC(2026,0,15,11)]);
++    await pool.query("INSERT INTO reports(id,reporter_id,target_type,target_id,reason,details,created_at) VALUES('r1','alice','post','p1','spam','', $1)",[Date.UTC(2026,0,15,13)]);
++    await pool.query("INSERT INTO assets(key,owner_id,mime,size,created_at) VALUES('asset-1','alice','image/jpeg',2048,$1)",[Date.UTC(2026,0,15,14)]);
++    const result=await dashboardAnalytics(pool,14,now),day=result.daily.find(item=>item.date==='2026-01-15')!;
++    assert.equal(day.signups,1);assert.equal(day.activeUsers,1);assert.equal(day.creations,1);assert.equal(day.messages,1);assert.equal(day.reports,1);assert.equal(day.storageBytes,2048);
++    assert.equal(result.topPosts[0].id,'p1');assert.equal(result.topPosts[0].likes,1);assert.equal(result.topPosts[0].comments,1);assert.equal(result.topPosts[0].views,1);
++    assert.ok(result.categories.some(item=>item.category==='Travel'&&item.creations===1));
++    assert.ok(result.hashtags.some(item=>item.hashtag==='pune'&&item.uses===2));
++    assert.equal(result.funnel.members,2);assert.equal(result.funnel.firstPostMembers,1);assert.equal(result.funnel.conversionRate,50);
++    await assert.rejects(dashboardAnalytics(pool,365,now),/14, 30, or 90/);
++  } finally { await pg.close(); }
++});
++
++test('SELECT runner rejects write/multi-statement/unsafe table and function access; owner-only, read-only, capped and audited by hash', async () => {
++  const { pg, pool } = await fixture();
++  try {
++    for(const query of ['DROP TABLE posts','SELECT 1; DELETE FROM posts','WITH x AS (SELECT 1) SELECT * FROM x','SELECT email FROM "user"','SELECT pg_sleep(9)','SELECT id FROM posts -- comment','SELECT id FROM posts p, profiles a','SELECT pg_read_file(\'/etc/passwd\')','SELECT "pg_sleep"(1)']) assert.throws(()=>validateReadOnlySelect(query));
++    assert.equal(validateReadOnlySelect('SELECT count(*) FROM posts;').sql,'SELECT count(*) FROM posts');
++    await assert.rejects(runReadOnlySql(pool,'admin',{query:'SELECT 1',reason:'Need to review rows'}),{status:403});
++    await pool.query("INSERT INTO posts(id,author_id,media,created_at) SELECT 'post-'||g,'alice','[]',g FROM generate_series(1,510) g");
++    const result=await runReadOnlySql(pool,'owner',{query:'SELECT id FROM posts ORDER BY id LIMIT 1000',reason:'Review data for operations'});
++    assert.equal(result.rows.length,500);assert.equal(result.truncated,true);assert.equal(result.rowLimit,500);assert.match(result.queryHash,/^[a-f0-9]{64}$/);
++    await assert.rejects(runReadOnlySql(pool,'owner',{query:'DELETE FROM posts',reason:'Attempt mutation'}));
++    const logs=(await pool.query("SELECT action,target_id,after FROM admin_audit_log WHERE action='system.sql.read'")).rows;
++    assert.equal(logs.length,1);assert.equal(logs[0].target_id,result.queryHash);assert.ok(!JSON.stringify(logs).includes('SELECT id FROM posts'));
++    await assert.rejects(pool.query("SELECT * FROM (DELETE FROM posts RETURNING id) AS blocked"));
++    const { rows: [postCount] }=await pool.query('SELECT COUNT(*) AS count FROM posts');assert.equal(Number(postCount.count),510);
++  } finally { await pg.close(); }
++});
++
++test('CSV and JSON exports stream supported lists, neutralize formulas, enforce caps, and audit every download', async () => {
++  const { pg, pool, add } = await fixture();
++  try {
++    await add('=formula','user');
++    await pool.query('UPDATE "user" SET name=$1 WHERE id=$2',['=HYPERLINK("https://bad.example")','=formula']);
++    await pool.query("INSERT INTO posts(id,author_id,media,caption,created_at) VALUES('p-export','alice','[]','#hello',1)");
++    await pool.query("INSERT INTO reports(id,reporter_id,target_type,target_id,reason,details,created_at) VALUES('r-export','alice','post','p-export','spam','details',1)");
++    const specs=[['users','csv'],['posts','json'],['reports','csv'],['audit','json']] as const;
++    for(const [resource,format] of specs){
++      const response=await createAdminExport(pool,'admin',{resource,format,filters:{status:'all'}});
++      assert.equal(response.status,200);assert.equal(response.headers.get('X-Export-Row-Cap'),'1000');
++      const text=await response.text();assert.ok(text.length>2);
++      if(format==='json')assert.ok(Array.isArray(JSON.parse(text)));
++      else assert.match(text,/\r\n/);
++    }
++    const csv=await createAdminExport(pool,'admin',{resource:'users',format:'csv',filters:{q:'formula'}});
++    assert.match(await csv.text(),/"'=HYPERLINK/);
++    await pool.query(`INSERT INTO "user"(id,name,email,role,"emailVerified","twoFactorEnabled",banned)
++      SELECT 'bulk-'||g,'Bulk '||g,'bulk-'||g||'@example.test','user',true,true,false FROM generate_series(1,1002) g`);
++    const capped=await createAdminExport(pool,'admin',{resource:'users',format:'json',filters:{}});
++    assert.equal(capped.headers.get('X-Export-Truncated'),'true');
++    assert.equal((JSON.parse(await capped.text()) as unknown[]).length,1000);
++    assert.equal(Number((await pool.query("SELECT COUNT(*) AS count FROM admin_audit_log WHERE action='exports.download'")).rows[0].count),6);
++  } finally { await pg.close(); }
++});
++
++type SeedStatement={execute(client?:QueryExecutor):Promise<unknown>};
++function seedDatabase(pool: PoolLike) {
++  return {
++    prepare(sql: string) {
++      let values: unknown[]=[];
++      const statement={
++        bind(...input:unknown[]){values=input;return statement;},
++        async execute(client?:QueryExecutor){return (client||pool).query(postgresQuery(sql),values);},
++        async first<T=Record<string,unknown>>(){return (await pool.query(postgresQuery(sql),values)).rows[0] as T||null;},
++        async run(){return statement.execute();},
++      };
++      return statement;
++    },
++    async batch(statements:SeedStatement[]){
++      const client=await pool.connect();try{await client.query('BEGIN');for(const statement of statements)await statement.execute(client);await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
++    },
++  };
++}
++
++test('demo wipe disables automatic seed, preserves real profiles, and owner re-seed is explicit/audited', async () => {
++  const { pg, pool, add }=await fixture();
++  try {
++    await pool.query("INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES('demo_a','demo_a','Demo A','','',1,1),('demo_b','demo_b','Demo B','','',1,1)");
++    await add('demo-auth','user');await pool.query("UPDATE profiles SET is_demo=1 WHERE id='demo-auth'");await add('real','user');
++    await pool.query("INSERT INTO posts(id,author_id,media,created_at) VALUES('demo-post','demo_a','[]',1)");
++    await assert.rejects(wipeDemoData(pool,'admin',{confirmation:'WIPE 2 DEMO PROFILES',reason:'Reset demo environment'}),{status:403});
++    const wiped=await wipeDemoData(pool,'owner',{confirmation:'WIPE 2 DEMO PROFILES',reason:'Reset demo environment'});
++    assert.equal(wiped.wipedPosts,1);assert.equal((await pool.query("SELECT COUNT(*) AS count FROM profiles WHERE id='real'")).rows[0].count,1);
++    assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,false);
++    const database=seedDatabase(pool);
++    await seed(false,database as never);assert.equal((await pool.query('SELECT COUNT(*) AS count FROM profiles WHERE id=$1',['demo_anaya'])).rows[0].count,0);assert.equal((await pool.query('SELECT COUNT(*) AS count FROM profiles WHERE id=$1 AND is_demo=1',['demo-auth'])).rows[0].count,1);
++    const result=await reseedDemoData(pool,'owner',{confirmation:'RESEED DEMO DATA',reason:'Restore preview fixtures'},()=>seed(true,database as never));
++    assert.equal(result.profiles,8);assert.equal((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled,true);
++    const actions=(await pool.query("SELECT action FROM admin_audit_log WHERE action LIKE 'system.demo.%' ORDER BY created_at,id")).rows.map(row=>row.action);
++    assert.ok(actions.includes('system.demo.wipe'));assert.ok(actions.includes('system.demo.reseed.started'));assert.ok(actions.includes('system.demo.reseed.completed'));
++  } finally { await pg.close(); }
++});
++
++test('pruning requires owner confirmation, permanently removes only 30-day-expired stories, and stages old orphans in Trash', async () => {
++  const { pg,pool }=await fixture();
++  const now=Date.UTC(2026,5,1);
++  try {
++    await pool.query("INSERT INTO posts(id,author_id,media,kind,created_at,expires_at) VALUES('expired-story','alice','[]','story',$1,$2),('recent-expired','alice','[]','story',$3,$4)",[now-40*86400000,now-31*86400000,now-31*86400000,now-29*86400000]);
++    await pool.query("INSERT INTO assets(key,owner_id,mime,size,created_at) VALUES('old-orphan','alice','image/jpeg',1024,$1),('referenced','alice','image/jpeg',1024,$1)",[now-8*86400000]);
++    await pool.query("INSERT INTO posts(id,author_id,media,created_at) VALUES('protect-asset','alice',$1,$2)",[JSON.stringify(['/api/media/referenced']),now]);
++    const preview=await prunePreview(pool,now);assert.equal(preview.expiredStories.available,1);assert.equal(preview.orphanAssets.available,1);
++    await assert.rejects(pruneExpiredStories(pool,'admin',{confirmation:'PRUNE 1 EXPIRED STORIES',reason:'Retention cleanup'},now),{status:403});
++    await assert.rejects(pruneExpiredStories(pool,'owner',{confirmation:'PRUNE 2 EXPIRED STORIES',reason:'Retention cleanup'},now),/Type PRUNE 1/);
++    const pruned=await pruneExpiredStories(pool,'owner',{confirmation:'PRUNE 1 EXPIRED STORIES',reason:'Retention cleanup'},now);assert.equal(pruned.removed,1);
++    assert.equal((await pool.query("SELECT COUNT(*) AS count FROM posts WHERE id='recent-expired'")).rows[0].count,1);
++    await assert.rejects(pruneOrphanAssets(pool,'admin',{confirmation:preview.orphanAssets.confirmation,reason:'Orphan retention cleanup'},now),{status:403});
++    const staged=await pruneOrphanAssets(pool,'owner',{confirmation:preview.orphanAssets.confirmation,reason:'Orphan retention cleanup'},now);assert.equal(staged.movedToTrash,1);
++    assert.equal((await pool.query("SELECT status FROM assets WHERE key='old-orphan'")).rows[0].status,'trash');
++    assert.equal((await pool.query("SELECT status FROM assets WHERE key='referenced'")).rows[0].status,'ready');
++    assert.equal(Number((await pool.query("SELECT COUNT(*) AS count FROM admin_audit_log WHERE action LIKE 'system.prune.%'")).rows[0].count),2);
++  } finally { await pg.close(); }
++});
++
++test('new system permissions preserve moderator restrictions and keep SQL/demo/prune owner-only', async () => {
++  assert.equal(hasPermission('owner','system.sql'),true);assert.equal(hasPermission('admin','system.sql'),false);assert.equal(hasPermission('moderator','analytics.read'),false);
++  assert.equal(hasPermission('admin','analytics.read'),true);assert.equal(hasPermission('admin','exports.read'),true);assert.equal(hasPermission('admin','system.cache'),true);
++  const { pg,pool,add }=await fixture();try{await add('moderator','moderator');assert.equal((await authorizeAdmin(pool,'moderator')).role,'moderator');}finally{await pg.close();}
++});
+diff --git a/tests/admin.test.ts b/tests/admin.test.ts
+index 49f25f9..60f5480 100644
+--- a/tests/admin.test.ts
++++ b/tests/admin.test.ts
+@@ -15,7 +15,7 @@ import { validateSetting } from '../lib/admin/validation';
+ const old = [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements];
+ async function fixture() {
+   const db = new PGlite();
+-  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements]) await db.exec(sql);
++  for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
+   const pool = serializedPool({ async query(sql, values) {
+     const result = await db.query(sql, values);
+     return { rows: result.rows as Record<string, unknown>[], rowCount: result.affectedRows ?? result.rows.length };
+@@ -26,12 +26,12 @@ async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = tru
+   await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
+ }
+ 
+-test('migrations 5–11 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
++test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
+   const db = new PGlite();
+   try {
+     for (const sql of old) await db.exec(sql);
+     await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
+-    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements]) await db.exec(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
+     const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
+     assert.deepEqual(existing, { role: 'user', banned: false });
+     const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
+@@ -40,8 +40,8 @@ test('migrations 5–11 are additive/idempotent on fresh and populated PGlite; p
+       const columns = new Set(rows.map(row => row.column_name));
+       for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
+     }
+-    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11]);
+-    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
++    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
++    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+   } finally { await db.close(); }
+ });
+ 
+@@ -170,7 +170,7 @@ test('PGlite standalone queries cannot join an open transaction', async () => {
+ });
+ 
+ // Set ONLY to a disposable PostgreSQL database. Never use a production URL.
+-test('managed PostgreSQL upgrades an isolated schema through migration 11', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
++test('managed PostgreSQL upgrades an isolated schema through migration 12', { skip: !process.env.ADMIN_TEST_DATABASE_URL }, async () => {
+   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL });
+   const client = await pool.connect();
+   try {
+@@ -178,7 +178,7 @@ test('managed PostgreSQL upgrades an isolated schema through migration 11', { sk
+     await client.query('CREATE SCHEMA admin_phase_one_test');
+     await client.query('SET LOCAL search_path TO admin_phase_one_test');
+     for (const sql of old) await client.query(sql);
+-    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements]) await client.query(sql);
++    for (let i = 0; i < 2; i++) for (const sql of [...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await client.query(sql);
+     assert.equal(Number((await client.query('SELECT COUNT(*) FROM app_settings')).rows[0].count), 0);
+   } finally { await client.query('ROLLBACK'); client.release(); await pool.end(); }
+ });
+@@ -187,7 +187,7 @@ test('managed PostgreSQL serializes concurrent bootstrap and settings transactio
+   const pool = new Pool({ connectionString: process.env.ADMIN_TEST_DATABASE_URL, options: '-c search_path=admin_phase_one_concurrency', max: 5 });
+   try {
+     await pool.query('CREATE SCHEMA admin_phase_one_concurrency');
+-    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements]) await pool.query(sql);
++    for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await pool.query(sql);
+     await user(pool, 'first', 'user');
+     await Promise.all(Array.from({ length: 5 }, () => bootstrapAdmin(pool, 'first', 'first@example.test', 'first@example.test')));
+     assert.equal((await pool.query('SELECT * FROM admin_bootstrap')).rows.length, 1);
+diff --git a/tests/moderation.test.ts b/tests/moderation.test.ts
+index f0f31a4..11485d2 100644
+--- a/tests/moderation.test.ts
++++ b/tests/moderation.test.ts
+@@ -15,7 +15,7 @@ async function addUser(id:string,role='user'){
+  await pool.query('INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,\'\',\'\',0,1)',[id]);
+ }
+ async function seed(){
+- for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements])await db.exec(sql);
++ for(const sql of [...schema.schemaStatements,...schema.socialUpgradeStatements,...schema.aspectUpgradeStatements,...schema.accountUpgradeStatements,...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements])await db.exec(sql);
+  await addUser('owner','owner');await addUser('admin','admin');await addUser('guarded-admin','admin');await addUser('reporter');await addUser('target');await addUser('viewer');
+  await pool.query("INSERT INTO posts(id,author_id,media,created_at,caption) VALUES('target-post','target','[]',1,'a safe caption'),('shadow-post','target','[]',2,'another safe caption')");
+ }
+@@ -23,7 +23,7 @@ const report=async(id:string,targetType:string,targetId:string,reason='spam')=>p
+ 
+  test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
+   await seed();
+-  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11]);
++  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
+   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
+   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
+   // Repeat only the additive version statements as the migration runner does.
+diff --git a/tests/vercel.test.ts b/tests/vercel.test.ts
+index 5ea6d5b..869f7cd 100644
+--- a/tests/vercel.test.ts
++++ b/tests/vercel.test.ts
+@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
+ import {test} from 'node:test';
+ import {readFileSync} from 'node:fs';
+ import {PGlite} from '@electric-sql/pglite';
+-import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements,adminUpgradeStatements,adminUsersUpgradeStatements,adminContentUpgradeStatements,mediaUpgradeStatements,moderationUpgradeStatements,adminHardeningUpgradeStatements,adminCommsUpgradeStatements} from '../lib/postgres-schema';
++import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements,adminUpgradeStatements,adminUsersUpgradeStatements,adminContentUpgradeStatements,mediaUpgradeStatements,moderationUpgradeStatements,adminHardeningUpgradeStatements,adminCommsUpgradeStatements,adminSystemUpgradeStatements} from '../lib/postgres-schema';
+ import {postgresQuery} from '../lib/sql';
+ import {buildFeedQuery,buildPeopleQuery} from '../lib/server';
+ import {getAuthTables} from 'better-auth/db';
+@@ -11,8 +11,8 @@ import {detectMediaType} from '../lib/media-type';
+ test('PostgreSQL schema supports actual feed, social actions, ownership and transaction rollback',async()=>{
+  const db=new PGlite();
+  try{
+-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements,...adminUsersUpgradeStatements,...adminContentUpgradeStatements,...mediaUpgradeStatements,...moderationUpgradeStatements,...adminHardeningUpgradeStatements,...adminCommsUpgradeStatements])await db.exec(sql);
+-  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements,...adminUsersUpgradeStatements,...adminContentUpgradeStatements,...mediaUpgradeStatements,...moderationUpgradeStatements,...adminHardeningUpgradeStatements,...adminCommsUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
++  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements,...adminUsersUpgradeStatements,...adminContentUpgradeStatements,...mediaUpgradeStatements,...moderationUpgradeStatements,...adminHardeningUpgradeStatements,...adminCommsUpgradeStatements,...adminSystemUpgradeStatements])await db.exec(sql);
++  for(const sql of [...schemaStatements,...socialUpgradeStatements,...aspectUpgradeStatements,...accountUpgradeStatements,...adminUpgradeStatements,...adminUsersUpgradeStatements,...adminContentUpgradeStatements,...mediaUpgradeStatements,...moderationUpgradeStatements,...adminHardeningUpgradeStatements,...adminCommsUpgradeStatements,...adminSystemUpgradeStatements])await db.exec(sql); // Safe if initialization repeats.
+   const authTables=getAuthTables({emailAndPassword:{enabled:true},rateLimit:{enabled:true,storage:'database'}});
+   for(const table of Object.values(authTables)){
+    const columns=await db.query<{column_name:string}>('SELECT column_name FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=$1',[table.modelName]);

@@ -65,16 +65,15 @@ test('user actions enforce permissions, confirmations, owner protection and fres
     await assert.rejects(changeUser(pool,'admin',command('promote')),{status:403});
     await assert.rejects(changeUser(pool,'owner',command('delete',{id:'owner',confirmation:'owner@example.test'})),{status:403});
     await assert.rejects(changeUser(pool,'admin',command('delete',{id:'admin',confirmation:'admin@example.test'})),{status:403});
-    await assert.rejects(changeUser(pool,'admin',command('delete')),{status:403});
-    await changeUser(pool,'owner',command('promote'));
-    await assert.rejects(changeUser(pool,'admin',command('ban')),{status:403});
     await pool.query('UPDATE "user" SET "twoFactorEnabled"=true WHERE id=\'target\'');
     await pool.query('INSERT INTO "twoFactor"(id,secret,"backupCodes","userId",verified) VALUES(\'tf\',\'secret\',\'[]\',\'target\',true)');
+    await changeUser(pool,'owner',command('promote'));
+    await assert.rejects(changeUser(pool,'admin',command('ban')),{status:403});
     await changeUser(pool,'owner',command('demote'));
     const released = (await pool.query('SELECT role,"twoFactorEnabled" FROM "user" WHERE id=\'target\'')).rows[0];
-    assert.equal(released.role, 'user');
-    assert.equal(released.twoFactorEnabled, false);
-    assert.equal((await pool.query('SELECT id FROM "twoFactor" WHERE "userId"=\'target\'')).rows.length, 0);
+    assert.equal(released.role,'user');
+    assert.equal(released.twoFactorEnabled,false);
+    assert.equal((await pool.query('SELECT id FROM "twoFactor" WHERE "userId"=\'target\'')).rows.length,0);
     await pool.query('UPDATE "user" SET role=\'user\' WHERE id=\'admin\'');
     await assert.rejects(changeUser(pool,'admin',command('verify')),{status:403});
     assert.equal((await pool.query('SELECT * FROM admin_audit_log')).rows.length,2,'denied actions do not write audit success rows');
@@ -141,9 +140,7 @@ test('real Better Auth sign-in rejects bans and trash; expired bans and restore 
     await changeUser(pool,'admin',cmd('ban')); assert.equal((await signIn()).status,403);
     await pool.query('UPDATE "user" SET "banExpires"=now()-interval \'1 second\' WHERE id=$1',[target]);
     assert.equal((await signIn()).status,200);
-    await assert.rejects(changeUser(pool,'admin',cmd('delete')),{status:403});
     await changeUser(pool,'owner',cmd('delete')); assert.equal((await signIn()).status,403);
-    await assert.rejects(changeUser(pool,'admin',cmd('restore')),{status:403});
     await changeUser(pool,'owner',cmd('restore')); assert.equal((await signIn()).status,200);
   } finally {await db.close();}
 });

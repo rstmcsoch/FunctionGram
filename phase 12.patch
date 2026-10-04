@@ -1,0 +1,469 @@
+diff --git a/docs/ADMIN_PANEL.md b/docs/ADMIN_PANEL.md
+new file mode 100644
+index 0000000..8c87a5b
+--- /dev/null
++++ b/docs/ADMIN_PANEL.md
+@@ -0,0 +1,152 @@
++# FunctionGram Admin Panel — Operator Guide
++
++This guide covers the guarded administrator console at `/rstmcadmin`, its security model, recovery options, and routine operating procedures. The console is not a public CMS and is not indexed. Use a deployment preview for acceptance checks; do not test destructive actions on production data.
++
++## 1. Access and authority
++
++### Roles
++
++- **Owner**: all panel permissions, including role grants/revokes, demo reseed/wipe, retention pruning, and the read-only SQL runner.
++- **Admin**: day-to-day account, content, settings, safety, communications, analytics, exports, and cache operations. Admins cannot grant/revoke roles or use owner-only demo/SQL/pruning controls.
++- **Moderator**: limited content/safety review permissions. Moderators do not have user-management, settings, security, audit, analytics, export, or system access.
++
++Permissions are compiled into server-side policy. The browser UI is not an authorization boundary: each page/API checks the current database role, verified email, account status, session age, second-factor state, and optional IP policy.
++
++### Required sign-in protections
++
++- Use a verified account with an administrator role and complete TOTP two-factor setup before using the panel. Password-only administrator sessions cannot access protected pages or APIs.
++- Administrator sessions expire after an absolute 12 hours, even if the general user session remains valid. Sign in again after expiry.
++- `ADMIN_IP_ALLOWLIST`, when non-empty, is enforced server-side and fails closed for malformed policy. Confirm the operator's actual stable network and recovery path before enabling or editing it.
++- Never share session cookies, passwords, TOTP seeds, recovery codes, auth secrets, database URLs, Blob tokens, or provider credentials. Use the deployment secret manager; the system inspector only reports configured/not-configured booleans.
++
++### Bootstrap and administrator email rotation
++
++`ADMIN_BOOTSTRAP_EMAIL` is a one-time bootstrap selector, not an ongoing owner assignment. On sign-in, a matching verified ordinary account can receive the bootstrap `admin` role only if the durable `admin_bootstrap` marker is absent and no privileged account already exists. Once the marker is written, changing the environment variable does not transfer access or reopen bootstrap. Do not delete/reset `admin_bootstrap` to rotate an address.
++
++To change an administrator's login email, sign into that account, open the public account **Settings**, start **Change email**, and complete the confirmation sent to the new address. Verify that sign-in works with the new address before changing the deployment's `ADMIN_BOOTSTRAP_EMAIL` to match (if you still want the variable aligned). Changing this variable alone does not change an account email, role, or owner. Keep at least one known-good owner account and a verified recovery route.
++
++Role grants and revocations belong to an owner in **Users**. The bootstrap admin cannot promote itself to owner. Never promote an unverified, suspended, or deleted account. If ownership must be transferred, promote and verify the replacement first, confirm its TOTP setup and owner access, then demote the previous owner.
++
++## 2. Console map
++
++All panel screens share the same protected shell and no-index policy. Navigation visibility is a convenience; page and API guards enforce the permissions.
++
++| Screen | Routine use | Restore / caution |
++| --- | --- | --- |
++| **Overview** (`/rstmcadmin`) | Community/account, recent-session, content, report, and storage summaries; migration/settings status. | Session refresh is not DAU. Use Analytics for its explicit definitions. |
++| **Users** | Search accounts, inspect profile/access state, verify accounts, ban/unban, sign out, request password reset, trash/restore accounts, and owner-only role changes. | Restore an account from the **deleted** filter and its detail page. Restore does not clear an independent ban. Account trash is reversible; permanent user deletion is not offered here. |
++| **Content** | Search and review posts, reels, stories, and comments; edit, reorder, hide, trash, restore, pin/highlight, and handle bounded bulk operations according to role. | Restore content from its trash state. Hiding, trashing, and permanent purge are different actions; purge safeguards remain owner-only and require prior trash. |
++| **Appearance** | Publish site identity, themes, navigation, banners, and footer configuration. | Uploading an asset alone does not publish it. Save/publish the validated configuration, then reload the public site to check it. |
++| **Features** | Enable/disable feature families and maintenance controls. | A navigation toggle is not the security control; the server also enforces the setting. Review consequences before maintenance changes. |
++| **Labels** | Edit supported interface copy in the label registry. | Unsupported hard-coded copy is not changed by a label entry. Preview both themes and public/admin surfaces before publishing. |
++| **Media** | Inspect asset inventory, quarantine/release, trash/restore, and owner-only permanent purge. | Trash is the recoverable state. Verify references and backup/retention policy before permanent purge. |
++| **Safety** | Review reports, moderation settings, account/content restrictions, and privacy-preserving rate-limit buckets. | Use exact displayed IDs/emails and documented reasons. Raw client IPs are not exposed in the rate-limit view. |
++| **Audit** | Filter append-only administrative history and export a bounded CSV. | Audit rows cannot be edited/deleted through the application. Treat exported IP/client details as restricted operational data. |
++| **Security & roles** | Review role matrix, owner coverage, session policy, IP policy and known device fingerprints. | Keep at least one accessible owner; do not disable an administrator's second factor through SQL or application actions. |
++| **Communications** | Audited break-glass message inspection/moderation; per-account message controls; notification templates/broadcasts; paused/capped email campaigns; announcements and CMS/legal pages. | Message bodies require break-glass reason and exact phrase. Test broadcast audience and email dry-run first. CMS drafts are private/404 to the public. Leave email paused until provider setup is verified. |
++| **Analytics** | Review daily trends, content/creator rankings, category/hashtag use, and signup-to-first-post conversion. | Active users use session-refresh timestamps; storage series is asset bytes added during the period. These are not request-level DAU or historical retained-storage snapshots. |
++| **Exports** | Stream filtered CSV/JSON for users, posts, reports, and audit records. | Each request is capped at 1,000 rows and audited. Fetch another filtered request for larger datasets. Passwords, sessions, and auth tokens are excluded. CSV cells that could be spreadsheet formulas are escaped. |
++| **System tools** | Review migration status and boolean-only environment readiness; purge selected caches; run owner-only read-only SQL; manage demo fixtures; prune expired stories/orphan assets. | Every power action is audited. SQL is a narrow single-SELECT subset, owner-only, read-only, 500-row capped, and limited to five seconds. Story deletion is permanent after a 30-day grace period; orphan assets are moved to Trash after seven days. Demo wipe is not recoverable through the panel. |
++| **Operator guide** | Open the in-console summary of system-tool boundaries and confirmations. | Use this document for the fuller recovery and handover procedure. |
++
++## 3. Routine restore and rollback
++
++1. **Trashed account:** Users → filter `deleted` → open the account → restore. Confirm the separate ban state before expecting sign-in to work.
++2. **Trashed content:** Content → select the trashed item → restore. Check hidden status and expiry independently; restore does not override moderation policy.
++3. **Trashed asset:** Media → find the asset → restore. Check that its post/profile reference and verification state are still valid before releasing it to public delivery.
++4. **Published appearance/settings:** Re-open the relevant editor, restore the known-good values, then publish. A public browser tab may need a reload; cache purge is audited and intentionally broad.
++5. **Email/communications:** Pause campaigns first. Inspect the audit entry, recipient selection, daily cap, and provider configuration before retrying. Dry-run does not send.
++6. **Demo fixtures:** Owner-only reseed is explicit and audited. Wipe disables automatic seeding and removes only demo profiles not linked to auth accounts. Re-seed is the supported way to restore demo fixtures; it does not restore unrelated content.
++7. **Retention jobs:** Story pruning permanently deletes only expired stories beyond the 30-day grace period, in a confirmed batch. Orphan pruning rechecks references and stages eligible assets in Trash. Verify backups and ownership before running either.
++
++The panel does not provide a global undo for hard deletion, published email, sent notifications, or cache invalidation. Take a database backup and use a deployment preview for irreversible procedures.
++
++## 4. SQL runner rules
++
++The runner is a support aid, not a database console. It accepts one plain `SELECT` with a restricted table/function allowlist; comments, CTEs, subqueries, multiple statements, comma joins, schema-qualified relations/functions, protected auth/settings tables, writes, locks, and unapproved functions are rejected. A read-only transaction, 500-row output cap, and five-second statement timeout are applied. The audit row stores a query SHA-256 hash and bounded metadata/reason, not the SQL text or returned rows.
++
++Use a short operational reason, inspect the selected columns before sharing output, and do not include credentials, personal data, or query text in the reason field. SQL results are still subject to access-control and data-handling obligations.
++
++## 5. Break-glass owner recovery (Neon SQL editor)
++
++Use only if no owner can sign in and the ordinary owner recovery path is unavailable. This bypasses application role-grant protections. It is intentionally manual, auditable, and should be approved under your incident/change procedure.
++
++1. Confirm the correct Neon project/branch and production database. Take or verify a recent backup. Do not paste the query into a browser console or run it against an unknown branch.
++2. Identify a known account you control. It must be an active, unbanned, non-deleted account with a verified email. If none exists, create and verify one through the normal signup flow first. Do not use another person's account.
++3. Confirm the target row and current state with a read-only query. Replace both placeholders below with the exact account ID and verified email; do not use a broad email/domain match.
++4. Run the transaction once. It serializes with application role changes, promotes only the exact eligible row, revokes that account's existing sessions, and appends an audit entry. If it returns no audit row, stop and investigate rather than weakening the conditions.
++5. Sign in through the normal application flow, complete the required TOTP enrollment if prompted, check `/rstmcadmin/security`, and confirm owner-only controls are available. Test from the approved network if an IP allowlist is configured. Remove or demote any temporary recovery owner only after another owner has verified access.
++
++Read-only preflight:
++
++```sql
++SELECT id, email, role, "emailVerified", "twoFactorEnabled", banned, "banExpires", deleted_at
++FROM "user"
++WHERE id = 'REPLACE_WITH_EXACT_USER_ID'
++  AND lower(email) = lower('REPLACE_WITH_VERIFIED_EMAIL');
++```
++
++Recovery transaction:
++
++```sql
++BEGIN;
++SELECT pg_advisory_xact_lock(67291007);
++
++WITH candidate AS MATERIALIZED (
++  SELECT id, email, role AS previous_role
++  FROM "user"
++  WHERE id = 'REPLACE_WITH_EXACT_USER_ID'
++    AND lower(email) = lower('REPLACE_WITH_VERIFIED_EMAIL')
++    AND role IN ('user', 'admin', 'moderator')
++    AND "emailVerified" = true
++    AND banned = false
++    AND ("banExpires" IS NULL OR "banExpires" <= now())
++    AND deleted_at IS NULL
++  FOR UPDATE
++), promoted AS (
++  UPDATE "user" AS target
++  SET role = 'owner', "updatedAt" = now()
++  FROM candidate
++  WHERE target.id = candidate.id
++  RETURNING target.id, target.email, candidate.previous_role
++), revoked_sessions AS (
++  DELETE FROM session
++  WHERE "userId" IN (SELECT id FROM promoted)
++  RETURNING "userId"
++)
++INSERT INTO admin_audit_log (
++  id, actor_id, actor_email, action, target_type, target_id,
++  "before", "after", reason, created_at
++)
++SELECT gen_random_uuid()::text,
++       'neon-break-glass',
++       'REPLACE_WITH_OPERATOR_EMAIL',
++       'admin.owner.recovery',
++       'user', promoted.id,
++       json_build_object('role', promoted.previous_role)::text,
++       json_build_object('role', 'owner')::text,
++       'Emergency owner recovery; approved change/incident: REPLACE_WITH_TICKET',
++       (extract(epoch FROM clock_timestamp()) * 1000)::bigint
++FROM promoted
++RETURNING target_id, action, actor_email;
++
++COMMIT;
++```
++
++The SQL is written for PostgreSQL/Neon. Review the returned row before leaving the editor. If it returns zero rows, the account did not satisfy the exact eligibility conditions; do not remove the email, verification, ban, role, or trash predicates as a workaround. If the statement errors, roll back and have a second operator review it. Keep the change/ticket reference and audit row for incident follow-up. Do not delete the durable `admin_bootstrap` marker or change `ADMIN_BOOTSTRAP_EMAIL` as a substitute for this recovery.
++
++This procedure does not bypass TOTP, the 12-hour session limit, or an enabled IP allowlist. If the selected account has no enrolled factor, normal sign-in should direct it through isolated TOTP setup before panel access. If the block is an IP allowlist error, first recover the deployment configuration using the documented secret/configuration process. Do not edit TOTP seeds or recovery codes directly in the database.
++
++## 6. Local quality checks
++
++The codebase includes isolated PGlite integration tests and local-only HTTP/browser QA utilities. Never point their seed commands at a managed or production database.
++
++```bash
++npm run install:ci
++npm run typecheck
++npm run lint
++npm run test:vercel
++npm run build
++```
++
++For a repeatable local administrator browser pass, first install optional tooling outside the repository's tracked files with `npm install --prefix .local/browser-tools --no-save playwright-core @sparticuz/chromium`. The host still needs Chromium's shared system libraries. Use `scripts/admin-check.mts seed` to prepare an isolated `.local` PGlite database, start the local app with the printed test-only environment, run `scripts/admin-check.mts check`, then run `scripts/phase12-browser.mjs`. Stop the server before reseeding. `scripts/phase12-perf.mts` benchmarks analytics against a synthetic in-memory PGlite fixture. These checks are useful regressions, not a substitute for deployment-preview verification against the actual configured mail, database, storage, IP, and authentication providers.
+diff --git a/patches/ADMIN_PROGRESS.md b/patches/ADMIN_PROGRESS.md
+index 8e42a77..8197b87 100644
+--- a/patches/ADMIN_PROGRESS.md
++++ b/patches/ADMIN_PROGRESS.md
+@@ -20,7 +20,7 @@ Discovery baseline: `0df8f69dae4d6e775b46597de6e10dc233630e8a`
+ | 9 | Hardening: 2FA, roles, session policy, audit viewer | Done locally; verification below | `patches/phase-09-hardening.patch` |
+ | 10 | Messages, notifications, email, announcements, CMS pages | Done locally; verification below | `patches/phase-10-communications.patch` |
+ | 11 | Analytics, exports, system tools, polish | Done locally; verification below | `phase-11-analytics-system.patch` |
+-| 12 | Final QA, docs, owner handover | Not started | — |
++| 12 | Final QA, docs, owner handover | Done locally; deployment-preview/browser QA pending | `phase-12-qa-docs.patch` |
+ 
+ No application code, environment files, secrets, or production data changed in discovery.
+ 
+@@ -514,7 +514,7 @@ Implemented locally on the complete Phase 1–9 baseline. This increment preserv
+ 2. Sign in through the existing protected admin flow and open **Communications** at `/rstmcadmin/communications`. Use break-glass access only with a documented reason; it is audited. Keep the global Messages and Notifications feature flags as independent gates.
+ 3. Leave email sending paused until Brevo is configured and verified in a deployment preview. Test dry-run first. The per-campaign maximum is 25; the global UTC daily cap applies across requests and attempts consume reserved capacity even if delivery fails.
+ 4. Publish a draft announcement only after checking its audience and UTC schedule. Create legal/CMS pages as drafts, review their preview/SEO fields, then publish. Drafts are intentionally not publicly fetchable.
+-5. No push or pull request was made. Phase 12 remains not started.
++5. No push or pull request was made. Phase 11 is recorded below; Phase 12 remained for the next increment at the time of handoff.
+ 
+ ## Phase 11 — Analytics, exports, system tools, polish
+ 
+@@ -552,3 +552,38 @@ Implemented as an incremental addition on the complete Phase 1–10 baseline. Ex
+ 3. Review the analytics definitions before comparing trends. Use CSV/JSON filters to export a bounded subset; each download is audited. SQL execution is owner-only, read-only, narrow-allowlist, capped at 500 returned rows and 5 seconds. Do not paste secrets, personal data, or query text into operator reason fields.
+ 4. Treat demo wipe, pruning, and cache purge as operational actions. Confirm the displayed current count/phrase and enter a meaningful reason. Wiped demo profiles are not recoverable through this tool; only orphaned assets are staged in Trash. Verify backups/recovery procedures before using destructive retention actions.
+ 5. The incremental patch is independently apply-checked on the reconstructed Phase 1–10 baseline. No push, pull request, or remote GitHub operation was attempted. Phase 12 is now recorded below.
++
++## Phase 12 — Final QA, docs, and owner handover
++
++Completed the local documentation, recovery, HTTP, migration-fixture, and synthetic-performance work on top of the full Phase 1–11 state. No Phase 1–11 application policy or production data was changed for handover. The tracker marks this phase locally complete while explicitly leaving deployment-preview and real-browser QA pending; those acceptance checks cannot be honestly certified without an isolated deployed preview and a browser runtime with its system libraries.
++
++### Delivered
++
++- Added `docs/ADMIN_PANEL.md`: operator guide for all panel screens, the owner/admin/moderator matrix, mandatory 2FA and 12-hour sessions, bootstrap semantics, verified email rotation, restores and operational cautions, SQL-runner boundaries, and owner recovery.
++- Added a Neon SQL-editor owner-recovery transaction. It requires an exact verified active account, serializes with application role changes, changes only that account to owner, revokes its existing sessions, and writes an append-only audit record. It preserves verified-email, ban/expiry, and soft-delete checks, and does not change TOTP secrets or the durable bootstrap marker. The statement's CTE/trigger behavior was exercised against migrated PGlite.
++- Updated `scripts/admin-check.mts` to seed the full migration registry through version 12, create fresh session fixtures and profiles, and check every admin page plus the legacy and Phase 11 APIs across guest, ordinary, active admin, banned, unverified, expired, revoked, and forged sessions.
++- Added `scripts/phase12-browser.mjs` for the requested viewport/theme/admin-page loop, layout and touch-target checks, keyboard focus, button/form naming, and semantic table checks. It uses browser tooling under `.local` only and commits no browser binaries.
++- Added `scripts/phase12-perf.mts`, an isolated in-memory PGlite analytics benchmark with synthetic data; it cannot connect to a managed or production database.
++
++### Local verification
++
++- `npm run typecheck`: passed after Phase 12 changes.
++- `npm run lint`: passed with 0 errors and the same 7 existing public-image warnings.
++- `npm run test:vercel`: 112 tests; 109 passed, 0 failed, 3 optional managed-Postgres tests skipped because no isolated managed database URL was supplied.
++- `npm run build`: passed; all current admin routes/APIs were included in the production manifest.
++- `node --import tsx scripts/admin-check.mts seed` and `check`: passed locally against isolated `.local/admin-check-db`; the HTTP matrix returned 401 to guests, 403 to normal/banned accounts, 401 to unverified/expired/revoked/forged sessions, and 200 to the active admin for all checked admin pages and APIs. The export endpoint was checked across those identities; SQL execution returned 403 for admin and 200 for owner; owner-only role-action and legacy page-export regressions also passed.
++- `node --import tsx scripts/phase12-perf.mts`: seven warmed dashboard runs on synthetic in-memory PGlite (120 members, 1,000 sessions, 3,000 posts/reactions, 450 comments, 400 messages, 80 reports, 120 assets) measured median **65 ms**, max **76 ms** over 14 days. This is a local query benchmark, not a production performance SLA.
++- The recovery SQL was executed against migrated PGlite and returned the intended new owner/audit row. No Neon editor or production database was used.
++- Browser automation was attempted, but the sandbox Chromium binary could not start because system libraries `libnspr4.so` and `libnss3.so` are unavailable. Therefore no viewport/theme screenshots, keyboard-only full pass, or screen-reader/browser audit is claimed. No Vercel/Neon preview was available for full end-to-end acceptance re-verification.
++
++### Owner handover
++
++- Keep at least one verified, active owner account with working TOTP and access from the approved network. Confirm a second recovery path before changing `ADMIN_IP_ALLOWLIST`, email, 2FA, or owner roles.
++- `ADMIN_BOOTSTRAP_EMAIL` is not an account-rotation control after the durable marker exists. Change login email through the account's confirmed Change email flow; use the reviewed Neon procedure only as an emergency owner recovery.
++- The Neon recovery transaction is a last resort and should be reviewed, ticketed, backed up, and applied only to the exact account in the correct project/branch. Do not delete `admin_bootstrap`, bypass account eligibility predicates, or manipulate stored TOTP material.
++- Before production release, run the documented test/typecheck/lint/build commands and the Phase 12 browser script in an environment with supported Chromium libraries; then repeat the phase acceptance criteria on a private deployment preview using isolated test data and configured test providers. Verify Vercel/Neon/Blob/Brevo behavior there; no real email campaigns or production retention tools are part of this local handoff.
++
++### Patch and status
++
++- `patches/phase-12-qa-docs.patch` is a separate incremental patch intended to apply after Phase 11. It adds documentation and local QA tooling only; it does not replace any earlier patch.
++- Phase 12 is **done locally**. Preview deployment, real browser/screen-reader QA, and production-provider verification remain deployment-owner tasks. No remote GitHub operation, push, or PR was attempted.
+diff --git a/scripts/admin-check.mts b/scripts/admin-check.mts
+index d7e1827..e24d149 100644
+--- a/scripts/admin-check.mts
++++ b/scripts/admin-check.mts
+@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from 'node:crypto';
+ import { mkdir, readFile, writeFile } from 'node:fs/promises';
+ import path from 'node:path';
+ import { PGlite } from '@electric-sql/pglite';
+-import * as schema from '../lib/postgres-schema';
++import { DATABASE_MIGRATIONS } from '../lib/postgres';
+ import { ADMIN_BASE_PATH } from '../lib/admin/config';
+ 
+ const directory = path.resolve(process.env.ADMIN_CHECK_DB||'.local/admin-check-db');
+@@ -21,15 +21,22 @@ if (process.argv[2] === 'seed') {
+   const db = new PGlite(directory);
+   const cookies: Record<string, string> = {};
+   try {
+-    for (const sql of [...schema.schemaStatements, ...schema.socialUpgradeStatements, ...schema.aspectUpgradeStatements, ...schema.accountUpgradeStatements, ...schema.adminUpgradeStatements,...schema.adminUsersUpgradeStatements,...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements]) await db.exec(sql);
++    await db.exec('CREATE TABLE IF NOT EXISTS functiongram_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
++    for (const migration of DATABASE_MIGRATIONS) {
++      for (const sql of migration.statements) await db.exec(sql);
++      await db.query('INSERT INTO functiongram_migrations(version) VALUES($1) ON CONFLICT DO NOTHING', [migration.version]);
++    }
+     for (const [id, role, verified, banned] of [
+       ['owner', 'owner', true, false], ['regular', 'user', true, false], ['admin', 'admin', true, false],
+       ['banned', 'admin', true, true], ['unverified', 'admin', false, false],
+       ['expired', 'admin', true, false], ['revoked', 'admin', true, false],
+     ] as const) {
+-      await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)
+-        ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,"emailVerified"=EXCLUDED."emailVerified",banned=EXCLUDED.banned`,
+-      [id, `${id}@example.test`, role, verified, banned]);
++      await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified",banned,"twoFactorEnabled") VALUES($1,$1,$2,$3,$4,$5,$6)
++        ON CONFLICT(id) DO UPDATE SET role=EXCLUDED.role,"emailVerified"=EXCLUDED."emailVerified",banned=EXCLUDED.banned,"twoFactorEnabled"=EXCLUDED."twoFactorEnabled",deleted_at=NULL`,
++      [id, `${id}@example.test`, role, verified, banned, role === 'owner' || role === 'admin']);
++      await db.query('DELETE FROM session WHERE "userId"=$1', [id]);
++      await db.query(`INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,'','',0,$2)
++        ON CONFLICT(id) DO UPDATE SET deleted_at=NULL,is_demo=0`, [id, Date.now()]);
+       const token = randomBytes(32).toString('hex');
+       if (id !== 'revoked') await db.query('INSERT INTO session(id,token,"userId","expiresAt") VALUES($1,$1,$2,$3)', [token, id, new Date(Date.now() + (id === 'expired' ? -3600000 : 86400000))]);
+       cookies[id] = 'better-auth.session_token=' + encodeURIComponent(`${token}.${createHmac('sha256', secret).update(token).digest('base64')}`);
+@@ -43,7 +50,7 @@ if (process.argv[2] === 'seed') {
+   if (process.env.ADMIN_TEST_SECURE_COOKIES === '1') for (const key of Object.keys(cookies)) cookies[key] = '__Secure-' + cookies[key];
+   await fetch(origin+'/api/social');
+   for (const [who, expected] of [['guest', 401], ['regular', 403], ['admin', 200], ['banned', 403], ['unverified', 401], ['expired', 401], ['revoked', 401], ['forged', 401]] as const) {
+-    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/content/demo_coast', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings']) {
++    for (const route of [ADMIN_BASE_PATH, ADMIN_BASE_PATH+'/users', ADMIN_BASE_PATH+'/users/regular', ADMIN_BASE_PATH+'/content', ADMIN_BASE_PATH+'/appearance', ADMIN_BASE_PATH+'/features', ADMIN_BASE_PATH+'/labels', ADMIN_BASE_PATH+'/media', ADMIN_BASE_PATH+'/moderation', ADMIN_BASE_PATH+'/audit', ADMIN_BASE_PATH+'/security', ADMIN_BASE_PATH+'/communications', ADMIN_BASE_PATH+'/analytics', ADMIN_BASE_PATH+'/exports', ADMIN_BASE_PATH+'/system', ADMIN_BASE_PATH+'/guide', '/api/admin?ping=1', '/api/admin?resource=users', '/api/admin?resource=user&id=regular', '/api/admin?resource=content&type=posts', '/api/admin?resource=content&type=comments', '/api/admin?resource=contentSettings', '/api/admin/analytics?days=14', '/api/admin/system']) {
+       const response = await fetch(origin + route, { headers: { cookie: who === 'forged' ? 'better-auth.session_token=forged' : cookies[who] || '' } });
+       const body = await response.text();
+       assert.equal(response.status, expected, `${who} ${route}: ${body.slice(0, 160)}`);
+@@ -53,7 +60,7 @@ if (process.argv[2] === 'seed') {
+       if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
+       else if (route === ADMIN_BASE_PATH) {
+         assert.match(body, /A pulse on your community./);
+-        assert.match(body, /1, 2, 3, 4, 5, 6, 7/);
++        assert.match(body, /Applied migrations:[\s\S]*?1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12/);
+         assert.match(body, /noindex/);
+       }
+       assert.ok(!body.includes(secret), 'No server secret in responses');
+@@ -64,6 +71,17 @@ if (process.argv[2] === 'seed') {
+     const response = await fetch(origin + '/api/admin', { method, headers: { cookie: cookies.admin, origin: 'https://foreign.example.test' } });
+     assert.equal(response.status, method === 'POST' ? 403 : 405, 'Foreign-origin POST is denied; unsupported methods remain unavailable');
+   }
++  const exportChecks = [['guest',401],['regular',403],['admin',200],['banned',403],['unverified',401],['expired',401],['revoked',401],['forged',401]] as const;
++  for (const [who, expected] of exportChecks) {
++    const response = await fetch(origin+'/api/admin/exports',{method:'POST',headers:{cookie:who==='forged'?'better-auth.session_token=forged':cookies[who],origin,'content-type':'application/json'},body:JSON.stringify({resource:'users',format:'json',filters:{}})});
++    assert.equal(response.status,expected,`${who} Phase 11 export API`);
++    if(who==='admin'){assert.equal(response.headers.get('X-Export-Row-Cap'),'1000');assert.ok(Array.isArray(await response.json()));}
++  }
++  const sqlCheck=await fetch(origin+'/api/admin/system',{method:'POST',headers:{cookie:cookies.admin,origin,'content-type':'application/json'},body:JSON.stringify({action:'readOnlySql',query:'SELECT 1',reason:'Check owner-only access'})});
++  assert.equal(sqlCheck.status,403,'The SQL tool remains owner-only over HTTP');
++  const ownerSql=await fetch(origin+'/api/admin/system',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action:'readOnlySql',query:'SELECT 1',reason:'Local owner access check'})});
++  const ownerResult=await ownerSql.json() as {rows:Record<string,unknown>[]};
++  assert.equal(ownerSql.status,200);assert.equal(ownerResult.rows[0]['?column?'],1);
+   for (const who of ['guest','regular']) {
+     const response = await fetch(origin + '/api/admin', { method: 'POST', headers: { cookie: cookies[who] || '', origin, 'content-type': 'application/json' }, body: JSON.stringify({action:'verify',id:'regular',confirmation:'regular@example.test'}) });
+     assert.equal(response.status,who === 'guest' ? 401 : 403);
+@@ -79,7 +97,7 @@ if (process.argv[2] === 'seed') {
+   assert.equal((await action('verify')).status,200);
+   const csv = await action('exportUsers',{limit:200}); assert.equal(csv.status,200); assert.match(csv.headers.get('content-type') || '',/text\/csv/);
+   assert.equal((await fetch(origin + '/api/admin?resource=users&limit=201',{headers:{cookie:cookies.admin}})).status,400);
+-  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test'})});
++  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test',reason:'Local HTTP recovery check'})});
+   assert.equal((await ownerAction('promote')).status,200);
+   assert.equal((await action('ban')).status,403,'Admins cannot act on another administrator');
+   assert.equal((await ownerAction('demote')).status,200);
+diff --git a/scripts/phase12-browser.mjs b/scripts/phase12-browser.mjs
+new file mode 100644
+index 0000000..60729c4
+--- /dev/null
++++ b/scripts/phase12-browser.mjs
+@@ -0,0 +1,90 @@
++// Local-only final admin smoke/accessibility pass; requires .local/browser-tools.
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import { createRequire } from 'node:module';
++const require = createRequire(path.resolve('.local/browser-tools/package.json'));
++const { chromium: playwright } = require('playwright-core');
++const { default: chromium } = await import(require.resolve('@sparticuz/chromium'));
++const cookies = JSON.parse(fs.readFileSync('.local/admin-check.json', 'utf8'));
++const baseUrl = process.env.ADMIN_TEST_ORIGIN || 'http://localhost:3000';
++const routes = [
++  '/rstmcadmin', '/rstmcadmin/users', '/rstmcadmin/users/regular', '/rstmcadmin/content',
++  '/rstmcadmin/appearance', '/rstmcadmin/features', '/rstmcadmin/labels', '/rstmcadmin/media',
++  '/rstmcadmin/moderation', '/rstmcadmin/audit', '/rstmcadmin/security',
++  '/rstmcadmin/communications', '/rstmcadmin/analytics', '/rstmcadmin/exports',
++  '/rstmcadmin/system', '/rstmcadmin/guide',
++];
++const widths = [320, 360, 390, 430, 768, 1024, 1200, 1440];
++const browser = await playwright.launch({ executablePath: await chromium.executablePath(), args: chromium.args.filter(arg => arg !== '--single-process'), headless: true });
++const summaries = [];
++try {
++  for (const width of widths) for (const theme of ['light', 'dark']) {
++    const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
++    await context.addInitScript(value => localStorage.setItem('rstmc-theme', value), theme);
++    const [name, ...value] = cookies.admin.split('=');
++    await context.addCookies([{ name, value: value.join('='), domain: 'localhost', path: '/' }]);
++    const page = await context.newPage();
++    const errors = [];
++    page.on('pageerror', error => errors.push(error.message));
++    let routeMs = [];
++    for (const route of routes) {
++      const start = performance.now();
++      const response = await page.goto(baseUrl + route, { waitUntil: 'domcontentloaded' });
++      assert.equal(response?.status(), 200, `${route} returned ${response?.status()}`);
++      await page.locator('.admin-shell').waitFor({ state: 'visible' });
++      await page.evaluate(() => document.fonts?.ready);
++      const durationMs = Math.round(performance.now() - start);
++      routeMs.push({ route, durationMs });
++      const result = await page.evaluate(() => {
++        const tables = [...document.querySelectorAll('.admin-shell table')].map(table => {
++          const section = table.closest('section');
++          const name = table.getAttribute('aria-label') || table.querySelector('caption')?.textContent?.trim() ||
++            table.closest('[role="region"][aria-label]')?.getAttribute('aria-label') || section?.querySelector('h2,h3')?.textContent?.trim() || '';
++          return { name, headers: [...table.querySelectorAll('thead th')].map(th => th.textContent?.trim()).filter(Boolean) };
++        });
++        const unlabeledButtons = [...document.querySelectorAll('.admin-shell button')].filter(button => {
++          const name = button.getAttribute('aria-label') || button.getAttribute('title') || button.innerText;
++          return !name?.trim();
++        }).map(button => button.outerHTML.slice(0, 160));
++        const unnamedInputs = [...document.querySelectorAll('.admin-shell input:not([type="hidden"]),.admin-shell select,.admin-shell textarea')].filter(input => {
++          const element = input;
++          return !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby') && !(element.labels?.length);
++        }).map(input => input.outerHTML.slice(0, 160));
++        return {
++          width: innerWidth,
++          scrollWidth: document.documentElement.scrollWidth,
++          theme: document.documentElement.dataset.theme,
++          heading: document.querySelector('main h1')?.textContent?.trim() || '',
++          tables,
++          unlabeledButtons,
++          unnamedInputs,
++        };
++      });
++      assert.equal(result.theme, theme, `${route} did not apply ${theme} theme`);
++      assert.ok(result.scrollWidth <= result.width, `Horizontal document overflow at ${width}px: ${route} (${result.scrollWidth}px)`);
++      assert.ok(result.heading, `Missing main heading: ${route}`);
++      for (const table of result.tables) {
++        assert.ok(table.name, `Table has no accessible context on ${route}`);
++        assert.ok(table.headers.length, `Table is missing column headers on ${route}: ${table.name}`);
++      }
++      assert.deepEqual(result.unlabeledButtons, [], `Unlabeled button on ${route}`);
++      assert.deepEqual(result.unnamedInputs, [], `Form control without an accessible label on ${route}`);
++      if (width <= 430) {
++        for (const control of await page.locator('.admin-shell button:visible,.admin-shell input:visible,.admin-shell select:visible,.admin-shell nav a:visible').all()) {
++          const box = await control.boundingBox();
++          if (box) assert.ok(box.height >= 44, `Touch target below 44px at ${width}px on ${route}: ${await control.evaluate(el => el.outerHTML.slice(0, 120))}`);
++        }
++      }
++      await page.keyboard.press('Tab');
++      assert.ok(await page.evaluate(() => document.activeElement !== document.body), `Keyboard focus did not enter the page at ${route}`);
++    }
++    assert.equal(errors.length, 0, errors.join('\n'));
++    summaries.push({ width, theme, pages: routes.length, medianNavigationMs: routeMs.toSorted((a,b) => a.durationMs-b.durationMs)[Math.floor(routeMs.length/2)].durationMs, slowest: routeMs.toSorted((a,b) => b.durationMs-a.durationMs)[0] });
++    await context.close();
++    console.log(`Phase 12 UI pass: ${width}px ${theme}`);
++  }
++  console.log(JSON.stringify({ scope: 'local isolated PGlite + production/dev server only; no preview/provider verification', summaries }, null, 2));
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/phase12-perf.mts b/scripts/phase12-perf.mts
+new file mode 100644
+index 0000000..4460a58
+--- /dev/null
++++ b/scripts/phase12-perf.mts
+@@ -0,0 +1,63 @@
++/** Synthetic, in-memory PGlite benchmark. Never connects to a managed database. */
++import { PGlite } from '@electric-sql/pglite';
++import { DATABASE_MIGRATIONS, type QueryExecutor } from '../lib/postgres';
++import { dashboardAnalytics } from '../lib/admin/analytics';
++
++const db = new PGlite();
++try {
++  for (const migration of DATABASE_MIGRATIONS) for (const statement of migration.statements) await db.exec(statement);
++  const now = Date.now();
++  await db.query(`INSERT INTO "user"(id,name,email,role,"emailVerified","twoFactorEnabled","createdAt","updatedAt")
++    SELECT 'perf-user-'||g,'Benchmark '||g,'perf-'||g||'@example.test','user',true,false,
++      to_timestamp(($1::bigint-(g%90)::bigint*86400000)::double precision/1000),now()
++    FROM generate_series(1,120) g`, [now]);
++  await db.query(`INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at)
++    SELECT 'perf-user-'||g,'perf_'||g,'Benchmark '||g,'','',0,$1-(g%90)::bigint*86400000
++    FROM generate_series(1,120) g`, [now]);
++  await db.query(`INSERT INTO session(id,token,"userId","expiresAt","createdAt","updatedAt")
++    SELECT 'perf-session-'||g,'perf-token-'||g,'perf-user-'||((g%120)+1),
++      to_timestamp(($1::bigint+86400000)::double precision/1000),
++      to_timestamp(($1::bigint-(g%14)::bigint*86400000)::double precision/1000),
++      to_timestamp(($1::bigint-(g%14)::bigint*86400000)::double precision/1000)
++    FROM generate_series(1,1000) g`, [now]);
++  await db.query(`INSERT INTO posts(id,author_id,media,kind,caption,category,created_at)
++    SELECT 'perf-post-'||g,'perf-user-'||((g%120)+1),'[]',
++      CASE WHEN g%31=0 THEN 'story' WHEN g%11=0 THEN 'reel' ELSE 'post' END,
++      '#Pune #benchmark #analytics','Testing',$1-(g%90)::bigint*86400000
++    FROM generate_series(1,3000) g`, [now]);
++  await db.query(`INSERT INTO reactions(user_id,post_id,kind)
++    SELECT 'perf-user-'||((g%120)+1),'perf-post-'||g,CASE WHEN g%3=0 THEN 'seen' ELSE 'like' END
++    FROM generate_series(1,3000) g`);
++  await db.query(`INSERT INTO comments(id,post_id,author_id,body,created_at)
++    SELECT 'perf-comment-'||g,'perf-post-'||g,'perf-user-'||((g%120)+1),'Benchmark comment',$1-(g%14)::bigint*86400000
++    FROM generate_series(1,450) g`, [now]);
++  await db.query(`INSERT INTO messages(id,sender_id,recipient_id,body,created_at)
++    SELECT 'perf-message-'||g,'perf-user-'||((g%120)+1),'perf-user-'||(((g+1)%120)+1),'Benchmark',$1-(g%14)::bigint*86400000
++    FROM generate_series(1,400) g`, [now]);
++  await db.query(`INSERT INTO reports(id,reporter_id,target_type,target_id,reason,details,created_at)
++    SELECT 'perf-report-'||g,'perf-user-'||((g%120)+1),'post','perf-post-'||g,'spam','Benchmark',$1-(g%14)::bigint*86400000
++    FROM generate_series(1,80) g`, [now]);
++  await db.query(`INSERT INTO assets(key,owner_id,mime,size,created_at)
++    SELECT 'perf-asset-'||g,'perf-user-'||((g%120)+1),'image/jpeg',1048576,$1-(g%90)::bigint*86400000
++    FROM generate_series(1,120) g`, [now]);
++
++  const executor = db as unknown as QueryExecutor;
++  await dashboardAnalytics(executor, 14, now); // warm cache/prepare plans
++  const timings: number[] = [];
++  for (let run = 0; run < 7; run++) {
++    const start = performance.now();
++    await dashboardAnalytics(executor, 14, now);
++    timings.push(performance.now() - start);
++  }
++  timings.sort((a,b) => a-b);
++  console.log(JSON.stringify({
++    scope: 'synthetic in-memory PGlite only; not a managed/production database',
++    fixture: { members: 120, sessions: 1000, posts: 3000, reactions: 3000, comments: 450, messages: 400, reports: 80, assets: 120 },
++    analyticsWindowDays: 14,
++    runs: timings.length,
++    medianMs: Math.round(timings[Math.floor(timings.length/2)]),
++    maxMs: Math.round(timings.at(-1)!),
++  }, null, 2));
++} finally {
++  await db.close();
++}
