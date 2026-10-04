@@ -30,7 +30,7 @@ test('Turso migrations are additive/idempotent and cover admin schema without Po
   const { createTursoFixture, TURSO_MIGRATION_VERSIONS } = await import('./support/turso-db');
   const first = await createTursoFixture();
   try {
-    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19]);
+    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20]);
     // Re-applying every statement must stay safe on an already-migrated database.
     for (const migration of DATABASE_MIGRATIONS) {
       for (const sql of migration.statements) {
