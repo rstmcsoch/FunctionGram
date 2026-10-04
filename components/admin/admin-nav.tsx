@@ -29,14 +29,14 @@ const ICONS = {
 
 export type AdminNavIcon = keyof typeof ICONS;
 export type AdminNavItem = { label: string; href: string; icon: AdminNavIcon; match: 'exact' | 'prefix' | 'none'; external?: boolean };
-export type AdminNavGroup = { label: string; hint?: string; items: AdminNavItem[] };
+export type AdminNavGroup = { label: string; items: AdminNavItem[] };
 
 const FOCUSABLE = 'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 export function AdminNav({ groups, wordmark, account }: {
   groups: AdminNavGroup[];
   wordmark: string;
-  account: { email: string; role: string };
+  account: { email: string; role: string; userId: string };
 }) {
   const pathname = usePathname() || '';
   const [open, setOpen] = useState(false);
@@ -123,7 +123,7 @@ export function AdminNav({ groups, wordmark, account }: {
       {brand}
       <nav className="admin-nav" aria-label="Admin navigation">
         {groups.map(group => <div key={group.label} className="admin-nav-group" role="group" aria-label={group.label}>
-          <p className="admin-nav-group-label">{group.label}{group.hint && <span className="admin-nav-group-hint">{group.hint}</span>}</p>
+          <p className="admin-nav-group-label">{group.label}</p>
           {group.items.map(item => {
             const Icon = ICONS[item.icon];
             return <Link
@@ -145,7 +145,7 @@ export function AdminNav({ groups, wordmark, account }: {
       </nav>
       <ThemeToggle />
       <div className="admin-account">
-        <Avatar seed={account.email} email={account.email} size={40} />
+        <Avatar seed={account.userId || account.email} email={account.email} size={40} />
         <span className="admin-account-body">
           <span className="admin-account-email" title={account.email}>{account.email}</span>
           <Badge tone={toneFor(account.role)}>{account.role}</Badge>

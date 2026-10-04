@@ -32,13 +32,10 @@ export async function listUsers(db: QueryExecutor, filter: UserFilters) {
     deleted: 'u.deleted_at IS NOT NULL', demo: 'p.is_demo=1', real: 'COALESCE(p.is_demo,0)=0',
   };
   if (conditions[filter.status]) where.push(conditions[filter.status]);
-  const whereSql = where.join(' AND ');
-  const from = 'FROM "user" u LEFT JOIN profiles p ON p.id=u.id WHERE ' + whereSql;
+  const from = 'FROM "user" u LEFT JOIN profiles p ON p.id=u.id WHERE ' + where.join(' AND ');
   const { rows: [count] } = await db.query('SELECT COUNT(*) AS total ' + from, values);
-  // One grouped scan of assets, not a correlated SUM per account row.
-  const listed = 'FROM "user" u LEFT JOIN profiles p ON p.id=u.id LEFT JOIN (SELECT owner_id, SUM(size) AS bytes FROM assets GROUP BY owner_id) storage ON storage.owner_id=u.id WHERE ' + whereSql;
   const { rows } = await db.query(`SELECT u.id,u.name,u.email,u.role,u."emailVerified",u.banned,u."banReason",u."banExpires",u.deleted_at,u."createdAt",p.username,p.is_demo,${activeBan} AS ban_active,
-    COALESCE(storage.bytes,0) AS storage_bytes ${listed}
+    (SELECT COALESCE(SUM(size),0) FROM assets WHERE owner_id=u.id) AS storage_bytes ${from}
     ORDER BY u."createdAt" DESC,u.id LIMIT ${bind(filter.limit)} OFFSET ${bind((filter.page-1)*filter.limit)}`, values);
   return { users: rows as UserRow[], total: Number(count.total), ...filter };
 }
@@ -46,19 +43,15 @@ export async function userDetail(db: QueryExecutor, id: string) {
   const { rows: [user] } = await db.query(`SELECT u.id,u.name,u.email,u.role,u."emailVerified",u.banned,u."banReason",u."banExpires",u.deleted_at,u."createdAt",
     p.username,p.bio,p.website,p.avatar,p.is_private,p.is_demo FROM "user" u LEFT JOIN profiles p ON p.id=u.id WHERE u.id=$1`, [id]);
   if (!user) throw new AdminError('Account not found.', 404);
-  // Counts, sessions and messaging flags do not depend on each other.
-  const [{ rows: [counts] }, { rows: sessions }, messaging] = await Promise.all([
-    db.query(`SELECT
+  const { rows: [counts] } = await db.query(`SELECT
     (SELECT COUNT(*) FROM posts WHERE author_id=$1) AS posts,
     (SELECT COUNT(*) FROM comments WHERE author_id=$1) AS comments,
     (SELECT COUNT(*) FROM messages WHERE sender_id=$1) AS messages,
     (SELECT COALESCE(SUM(size),0) FROM assets WHERE owner_id=$1) AS storage_bytes,
-    (SELECT COUNT(*) FROM session WHERE "userId"=$1 AND "expiresAt">now()) AS sessions`, [id]),
-    // NEVER return session tokens, account password hashes or OAuth credentials.
-    db.query('SELECT id,"createdAt","expiresAt","ipAddress","userAgent" FROM session WHERE "userId"=$1 AND "expiresAt">now() ORDER BY "createdAt" DESC LIMIT 50', [id]),
-    userMessagingState(db, id),
-  ]);
-  return { user, counts, sessions, messaging };
+    (SELECT COUNT(*) FROM session WHERE "userId"=$1 AND "expiresAt">now()) AS sessions`, [id]);
+  // NEVER return session tokens, account password hashes or OAuth credentials.
+  const { rows: sessions } = await db.query('SELECT id,"createdAt","expiresAt","ipAddress","userAgent" FROM session WHERE "userId"=$1 AND "expiresAt">now() ORDER BY "createdAt" DESC LIMIT 50', [id]);
+  return { user, counts, sessions, messaging: await userMessagingState(db, id) };
 }
 /**
  * An account's messaging restrictions, read-only: changing them belongs to the

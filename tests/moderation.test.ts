@@ -21,23 +21,14 @@ async function seed(){
 }
 const report=async(id:string,targetType:string,targetId:string,reason='spam')=>pool.query('INSERT INTO reports(id,reporter_id,target_type,target_id,reason,details,created_at) VALUES($1,\'reporter\',$2,$3,$4,\'details\',$5)',[id,targetType,targetId,reason,Date.now()]);
 
- test('moderation tables ship in Turso schema and private flags stay off profiles',async()=>{
+ test('migration 9 is additive, repeatable and registered after Phase 7',async()=>{
   await seed();
-  assert.equal(DATABASE_MIGRATIONS.find(item=>item.version===9),undefined);
+  const migration=DATABASE_MIGRATIONS.find(item=>item.version===9);assert.ok(migration);assert.equal(migration.statements,schema.moderationUpgradeStatements);assert.deepEqual(DATABASE_MIGRATIONS.map(item=>item.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
   const shadow=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='profiles' AND column_name IN ('shadow_banned','comment_banned')")).rows;assert.equal(shadow.length,0,'private enforcement flags never enter public profile projections');
   const status=(await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='reports' AND column_name='assigned_to'")).rows;assert.equal(status.length,1);
+  // Repeat only the additive version statements as the migration runner does.
+  for(const sql of schema.moderationUpgradeStatements)await db.exec(sql);
   assert.equal((await pool.query("SELECT profile_id FROM profile_moderation")).rows.length,0);
-  const {createTursoFixture}=await import('./support/turso-db');
-  const fixture=await createTursoFixture();
-  try{
-   const profileCols=(await fixture.pool.query('PRAGMA table_info(profiles)')).rows.map(row=>String(row.name));
-   assert.equal(profileCols.includes('shadow_banned'),false);
-   assert.equal(profileCols.includes('comment_banned'),false);
-   const reportCols=(await fixture.pool.query('PRAGMA table_info(reports)')).rows.map(row=>String(row.name));
-   assert.ok(reportCols.includes('assigned_to'));
-   const {rows}=await fixture.pool.query("SELECT name FROM sqlite_master WHERE type='table' AND name='profile_moderation'");
-   assert.equal(rows.length,1);
-  }finally{await fixture.close();}
  });
 
 test('filter config rejects unsafe input and previews token and subdomain matches',()=>{
@@ -74,20 +65,9 @@ test('report ban respects roles, revokes sessions and records the actor',async()
 
 test('shadow bans remain private and self-visible; comment bans are enforced',async()=>{
  await setProfileModeration(pool,'admin',{profileId:'target',shadowBanned:true,commentBanned:true,reason:'Safety review'});
- // Visibility SQL uses libSQL unixepoch(); exercise it on TursoPool, not PGlite.
- const {createTursoFixture}=await import('./support/turso-db');
- const fixture=await createTursoFixture();
- try{
-  for(const id of ['target','viewer']){
-   await fixture.pool.query('INSERT INTO "user"(id,name,email,"emailVerified","createdAt","updatedAt") VALUES($1,$1,$2,1,$3,$3)',[id,id+'@moderation.test',Date.now()]);
-   await fixture.pool.query('INSERT INTO profiles(id,username,name,bio,avatar,is_demo,created_at) VALUES($1,$1,$1,\'\',\'\',0,1)',[id]);
-  }
-  await fixture.pool.query("INSERT INTO posts(id,author_id,media,created_at,caption) VALUES('shadow-post','target','[]',2,'another safe caption')");
-  await fixture.pool.query('INSERT INTO profile_moderation(profile_id,shadow_banned,comment_banned,shadow_reason,comment_reason,updated_at,updated_by) VALUES($1,1,1,$2,$2,$3,$4)',['target','Safety review',Date.now(),'admin']);
-  const sql=`SELECT p.id FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=$1 AND ${readablePost().replaceAll('?','$2')}`;
-  assert.equal((await fixture.pool.query(sql,['shadow-post','target'])).rows.length,1,'author can see own shadow-banned post');
-  assert.equal((await fixture.pool.query(sql,['shadow-post','viewer'])).rows.length,0,'other viewers cannot see shadow-banned post');
- }finally{await fixture.close();}
+ const sql=`SELECT p.id FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=$1 AND ${readablePost().replaceAll('?','$2')}`;
+ assert.equal((await pool.query(sql,['shadow-post','target'])).rows.length,1,'author can see own shadow-banned post');
+ assert.equal((await pool.query(sql,['shadow-post','viewer'])).rows.length,0,'other viewers cannot see shadow-banned post');
  await assert.rejects(requireCommentPermission(pool,'target'),{status:403});assert.equal((await accountModeration(pool,'target')).shadow_banned,true);
  await setProfileModeration(pool,'admin',{profileId:'target',shadowBanned:false,commentBanned:false,reason:''});await requireCommentPermission(pool,'target');
  const projection=(await pool.query('SELECT p.* FROM profiles p WHERE p.id=\'target\'')).rows[0];assert.equal('shadow_banned' in projection,false);assert.equal('comment_banned' in projection,false);

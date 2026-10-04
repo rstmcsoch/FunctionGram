@@ -13,10 +13,6 @@ const PREVIEW_EMAIL = 'you@preview.functiongram.local';
 const PREVIEW_USERNAME = 'you.preview';
 const COOKIE = 'better-auth.session_token';
 
-function previewDisabled() {
-  return !localDevDatabase() || process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
-}
-
 // Signs the session cookie exactly like better-auth does:
 // encodeURIComponent(`${token}.${base64(HMAC-SHA256(secret, token))}`)
 async function signCookie(token: string) {
@@ -29,7 +25,7 @@ async function signCookie(token: string) {
 
 export async function POST(request: Request) {
   try {
-    if (previewDisabled()) throw new AppError('Not found.', 404);
+    if (!localDevDatabase()) throw new AppError('Not found.', 404);
     sameOrigin(request);
     const database = db();
     const existing = await database.prepare('SELECT id FROM "user" WHERE email=?').bind(PREVIEW_EMAIL).first<{ id: string }>();
@@ -51,7 +47,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    if (previewDisabled()) throw new AppError('Not found.', 404);
+    if (!localDevDatabase()) throw new AppError('Not found.', 404);
     sameOrigin(request);
     const cookies = request.headers.get('cookie') || '';
     const match = cookies.match(/(?:^|;\s*)better-auth\.session_token=([^;]+)/);

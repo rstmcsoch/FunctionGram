@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements, tursoPushTokenStatements } from './turso-schema';
 import { ROLE_TABLES } from './admin/role-matrix';
 import { VERIFICATION_TABLES } from './verification-schema';
 
@@ -143,6 +143,13 @@ export const DATABASE_MIGRATIONS: Migration[] = [
   {
     version: 20,
     statements: VERIFICATION_TABLES,
+  },
+  {
+    version: 21,
+    statements: [
+      "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
+      ...tursoPushTokenStatements,
+    ],
   },
 ];
 

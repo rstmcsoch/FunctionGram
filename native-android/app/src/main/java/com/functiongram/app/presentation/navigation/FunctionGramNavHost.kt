@@ -1,30 +1,93 @@
 package com.functiongram.app.presentation.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.functiongram.app.presentation.home.FoundationHomeRoute
-import com.functiongram.app.presentation.splash.SplashRoute
+import com.functiongram.app.data.auth.AuthSessionRepository
+import com.functiongram.app.data.directory.DirectoryRepository
+import com.functiongram.app.data.feed.FeedRepository
+import com.functiongram.app.presentation.directory.DevicePreferences
+import com.functiongram.app.data.messaging.MessagingRepository
+import com.functiongram.app.presentation.auth.AuthPhase
+import com.functiongram.app.presentation.auth.AuthViewModel
+import com.functiongram.app.presentation.auth.SignInRoute
+import com.functiongram.app.presentation.shell.SignedInShell
+import com.functiongram.app.push.DeepLinkInbox
+import com.functiongram.app.push.PushLifecycle
+import com.functiongram.app.presentation.splash.SplashReveal
+import com.functiongram.app.presentation.theme.SystemBarIcons
+import com.functiongram.app.presentation.ui.FgLoading
 
 @Composable
-fun FunctionGramNavHost() {
+fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository, feed: FeedRepository, directory: DirectoryRepository, preferences: DevicePreferences, darkTheme: Boolean, deepLinks: DeepLinkInbox, push: PushLifecycle) {
+    val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(repository, push))
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val navController = rememberNavController()
-    NavHost(
-        navController = navController,
-        startDestination = AppDestination.Splash.route,
+    SystemBarIcons(light = !darkTheme || !state.splashFinished)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        composable(AppDestination.Splash.route) {
-            SplashRoute(
-                onFinished = {
-                    navController.navigate(AppDestination.Home.route) {
-                        popUpTo(AppDestination.Splash.route) { inclusive = true }
-                    }
-                },
-            )
+        NavHost(
+            navController = navController,
+            startDestination = AppDestination.SignIn.route,
+        ) {
+            composable(AppDestination.SignIn.route) {
+                if (state.phase == AuthPhase.Checking) {
+                    FgLoading(message = "Checking your session", showSkeleton = true)
+                } else {
+                    SignInRoute(
+                        state = state,
+                        onSignIn = viewModel::signIn,
+                        onVerify = viewModel::verifyTotp,
+                        onRetry = viewModel::restore,
+                        onSignOut = viewModel::signOut,
+                        onStartOver = viewModel::startOver,
+                    )
+                }
+            }
+            composable(AppDestination.Home.route) {
+                SignedInShell(
+                    profile = state.profile,
+                    busy = state.busy,
+                    onSignOut = viewModel::signOut,
+                    messaging = messaging,
+                    viewerId = state.profile?.userId.orEmpty(),
+                    feed = feed,
+                    directory = directory,
+                    preferences = preferences,
+                    pendingLink = deepLinks.pending,
+                    onLinkHandled = deepLinks::consume,
+                    onNotificationsEnabled = push::onNotificationsEnabled,
+                )
+            }
         }
-        composable(AppDestination.Home.route) {
-            FoundationHomeRoute()
+        if (!state.splashFinished) {
+            SplashReveal(onFinished = viewModel::onSplashFinished)
+        }
+    }
+    LaunchedEffect(state.phase) {
+        if (state.phase == AuthPhase.Checking) return@LaunchedEffect
+        val route = if (state.phase == AuthPhase.SignedIn) {
+            AppDestination.Home.route
+        } else {
+            AppDestination.SignIn.route
+        }
+        if (navController.currentDestination?.route == route) return@LaunchedEffect
+        navController.navigate(route) {
+            popUpTo(navController.graph.id) { inclusive = true }
+            launchSingleTop = true
         }
     }
 }

@@ -26,31 +26,23 @@ async function user(pool: PoolLike, id = 'admin', role = 'admin', verified = tru
   await pool.query('INSERT INTO "user"(id,name,email,role,"emailVerified",banned) VALUES($1,$1,$2,$3,$4,$5)', [id, `${id}@example.test`, role, verified, banned]);
 }
 
-test('Turso migrations are additive/idempotent and cover admin schema without PostgreSQL phase numbers', async () => {
-  const { createTursoFixture, TURSO_MIGRATION_VERSIONS } = await import('./support/turso-db');
-  const first = await createTursoFixture();
+test('migrations 5–12 are additive/idempotent on fresh and populated PGlite; plugin schema is ready', async () => {
+  const db = new PGlite();
   try {
-    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20]);
-    // Re-applying every statement must stay safe on an already-migrated database.
-    for (const migration of DATABASE_MIGRATIONS) {
-      for (const sql of migration.statements) {
-        if (/^\s*ALTER\s+TABLE\b/i.test(sql) && /\bADD\s+COLUMN\b/i.test(sql)) continue;
-        await first.pool.query(sql);
-      }
+    for (const sql of old) await db.exec(sql);
+    await db.exec(`INSERT INTO "user"(id,name,email) VALUES('old','Old','old@example.test')`);
+    for (let i = 0; i < 2; i++) for (const sql of [...old, ...schema.adminUpgradeStatements, ...schema.adminUsersUpgradeStatements, ...schema.adminContentUpgradeStatements,...schema.mediaUpgradeStatements,...schema.moderationUpgradeStatements,...schema.adminHardeningUpgradeStatements,...schema.adminCommsUpgradeStatements,...schema.adminSystemUpgradeStatements]) await db.exec(sql);
+    const { rows: [existing] } = await db.query('SELECT role,banned FROM "user" WHERE id=\'old\'');
+    assert.deepEqual(existing, { role: 'user', banned: false });
+    const tables = getAuthTables({ plugins: [admin(), twoFactor()] });
+    for (const table of Object.values(tables)) {
+      const { rows } = await db.query<{ column_name: string }>('SELECT column_name FROM information_schema.columns WHERE table_name=$1', [table.modelName]);
+      const columns = new Set(rows.map(row => row.column_name));
+      for (const [key, field] of Object.entries(table.fields)) assert.ok(columns.has(field.fieldName || key), `${table.modelName}.${field.fieldName || key}`);
     }
-    const tables = ['admin_audit_log','admin_message_controls','admin_notification_templates','admin_email_controls','admin_login_devices','admin_demo_seed_control','profile_moderation','assets','reports'];
-    for (const table of tables) {
-      const { rows } = await first.pool.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table]);
-      assert.equal(rows.length, 1, table);
-    }
-    // Admin phase DDL from the legacy PostgreSQL registry is already folded into
-    // tursoSchemaStatements (migration 1); those phase numbers are intentionally unused.
-    for (const version of [5, 6, 7, 8, 9, 10, 11, 12]) {
-      assert.equal(DATABASE_MIGRATIONS.find(migration => migration.version === version), undefined);
-    }
-  } finally {
-    await first.close();
-  }
+    assert.deepEqual(DATABASE_MIGRATIONS.map(migration=>migration.version),[1,2,3,4,5,6,7,8,9,10,11,12]);
+    for(const [version,statements] of [[5,schema.adminUpgradeStatements],[6,schema.adminUsersUpgradeStatements],[7,schema.adminContentUpgradeStatements],[8,schema.mediaUpgradeStatements],[9,schema.moderationUpgradeStatements],[10,schema.adminHardeningUpgradeStatements],[11,schema.adminCommsUpgradeStatements],[12,schema.adminSystemUpgradeStatements]] as const)assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===version)?.statements,statements);
+  } finally { await db.close(); }
 });
 
 test('guard denies guests, users, missing/blank roles, unverified/banned admins; role changes apply immediately', async () => {
@@ -142,8 +134,7 @@ test('settings default, validate, authorize, serialize before/after and roll bac
     await pool.query('UPDATE app_settings SET value=\'not json\' WHERE key=\'brand.name\'');
     assert.equal((await loadSettings(pool))['brand.name'], SETTINGS_DEFAULTS['brand.name']);
     const adapter = readFileSync('lib/admin/settings.ts', 'utf8');
-    const cache = readFileSync('lib/settings-cache.ts', 'utf8');
-    assert.match(cache, /tags: \['settings'\]/);
+    assert.match(adapter, /tags: \['settings'\]/);
     assert.match(adapter, /revalidateTag\('settings', \{ expire: 0 \}\)/);
   } finally { await db.close(); }
 });

@@ -195,12 +195,7 @@ const MEDIA_ITEMS = section('/media', 'Media', 'Upload controls', [
 ], 'media.manage');
 
 const CONTENT_ITEMS = section('/content', 'Content', 'Story & reel controls', [
-  { title: 'Stories enabled', keywords: ['content.storiesEnabled', 'stories', 'on', 'off'] },
   { title: 'New story lifetime', keywords: ['content.storyHours', 'story', 'hours', 'lifetime', 'expiry'] },
-  { title: 'Photo story duration', keywords: ['content.storyPhotoSeconds', 'story', 'photo', 'seconds', 'timer'] },
-  { title: 'Story video max length', keywords: ['content.storyVideoMaxSeconds', 'story', 'video', 'seconds', 'cap'] },
-  { title: 'Story tray on home', keywords: ['content.storyTrayEnabled', 'story', 'tray', 'home'] },
-  { title: 'Story ring on profile', keywords: ['content.storyRingEnabled', 'story', 'ring', 'profile', 'avatar'] },
   { title: 'Reels enabled', keywords: ['content.reelsEnabled', 'reels', 'on', 'off'] },
   { title: 'New reel duration cap', keywords: ['content.reelMaxSeconds', 'reel', 'duration', 'seconds'] },
   { title: 'Reel credit text', keywords: ['content.reelCredit', 'reel', 'credit'] },

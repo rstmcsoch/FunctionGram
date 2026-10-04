@@ -1,4 +1,4 @@
-export type Person={id:string;username:string;name:string;bio:string;website?:string;avatar:string;is_demo:number;is_private?:number;followers:number;following:number;post_count:number;followed:number;blocked?:number;last_message?:string|null;verification_batch?:string|null};
+export type Person={id:string;username:string;name:string;bio:string;website?:string;avatar:string;is_demo:number;is_private?:number;followers:number;following:number;post_count:number;followed:number;blocked?:number;last_message?:string|null};
 export type MediaOption={ratio:'original'|'1:1'|'4:5'|'16:9';fit:'contain'|'cover';alt:string};
 export type Post={display_likes?:number|null;display_comments?:number|null;display_views?:number|null;reel_credit?:string;id:string;author_id:string;media:string[];aspects?:number[]|null;media_options?:MediaOption[];tagged_users?:string[];highlighted?:boolean;edited_at?:number|null;media_type:'image'|'video';kind:'post'|'reel'|'story';caption:string;location:string;category:string;created_at:number;expires_at:number|null;likes:number;liked:number;saved:number;seen:number;comment_count:number;comment_preview?:{body:string;username:string}|null;author:Person};
 export type Comment={id:string;post_id:string;author_id:string;body:string;created_at:number;username:string;avatar:string};
@@ -44,5 +44,5 @@ export type { Sticker } from './stickers';
 import type { ChatTheme } from './messaging';
 export type UserPresence={user_id:string;last_seen_at:number;is_online:number};
 export type StoryViewer={username:string;name:string;avatar:string};
-export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;stories?:import('./story-playback').PublicStorySettings;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
+export type SocialData={features?:import('./features').Flags;messaging?:import('./messaging-policy').MessagingPolicy;me:Person|null;people:Person[];posts:Post[];notifications:Notification[];unreadMessages:number;hasMore:boolean};
 export type SearchResults={people:Person[];posts:Post[]};

@@ -7,7 +7,6 @@ import { Shield, Plus, Trash2, Mail, Lock, Bookmark } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { Modal, Busy, request } from "./common";
-import { VerificationSettings } from "./verification-settings";
 import type { Person, SavedCollection } from "@/lib/types";
 
 export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
@@ -126,7 +125,6 @@ export function SettingsDialog({ me, onClose, onSaved, onSignOut }: {
           )}
         </section></Feature>
 
-        <VerificationSettings />
         <section className="settings-section">
           <h3><Mail size={18} />{t("settings.account_email")}</h3>
           <p className="settings-hint">{t("settings.currently_signed_in_as")}<strong>{me.username}</strong>{t("settings.changing_your_email_sends_a_confirmation_to_the_new_address")}</p>

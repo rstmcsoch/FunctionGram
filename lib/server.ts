@@ -1,7 +1,5 @@
 import {AdminError} from './admin/validation';
 import {featurePolicy,requirePublic,requireFeature,FeatureError} from './feature-policy';
-import { readAppSettings } from './settings-cache';
-import { publicStorySettings } from './story-settings';
 import { readMessagingPolicy } from './messaging-policy';
 import {ALL_FEATURES,DEFAULT_FEATURES,type Flags,type FeatureConfig} from './features';
 import {displayCounterColumns} from './counters';
@@ -247,8 +245,7 @@ export async function bootstrap(requestHeaders?:Headers):Promise<SocialData>{
     viewer&&policy.flags.messages?unreadTotal(viewer).then(count=>({count})):Promise.resolve({count:0}),
   ]);
   const messaging=await readMessagingPolicy();
-  const stories=publicStorySettings(await readAppSettings());
-  return {features:policy.flags,messaging,stories,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
+  return {features:policy.flags,messaging,me:users.find(p=>p.id===viewer)||null,people:users,posts,notifications:notifs.results as SocialData['notifications'],unreadMessages:unread?.count||0,hasMore:posts.length===20};
 }
 
 /* ------------------------------ lightweight activity ------------------------------ */

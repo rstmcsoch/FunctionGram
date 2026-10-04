@@ -14,10 +14,10 @@ export async function checkAssets(db:QueryExecutor,urls:string[],owners:string[]
  if(!urls.length||urls.length>config.maxMedia||new Set(urls).size!==urls.length)throw new AdminError('Check the current media-per-post limit.');
  const assets=[];
  for(const url of urls){if(!/^\/api\/media\/[a-f0-9-]{36}$/.test(url))throw new AdminError('Use registered media.');
-    const ownerPlaceholders = owners.map((_, index) => '$' + (index + 2)).join(',');
+    const ownerPlaceholders = owners.map(() => '?').join(',');
     const { rows: [asset] } = await db.query(
      `SELECT * FROM assets
-            WHERE key=$1
+            WHERE key=?
              AND owner_id IN (${ownerPlaceholders})`,
      [url.slice(11), ...owners],
     );

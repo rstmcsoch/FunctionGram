@@ -5,8 +5,7 @@ export function visibleComment(c = 'c') {
 }
 export function visiblePost(p = 'p') {
   return `${p}.hidden_at IS NULL AND ${p}.deleted_at IS NULL AND EXISTS(SELECT 1 FROM profiles pa WHERE pa.id=${p}.author_id AND pa.deleted_at IS NULL)
-    AND (${p}.kind!='reel' OR COALESCE((SELECT value FROM app_settings WHERE key='content.reelsEnabled'),'true')='true')
-    AND (${p}.kind!='story' OR COALESCE((SELECT value FROM app_settings WHERE key='content.storiesEnabled'),'true')='true')`;
+    AND (${p}.kind!='reel' OR COALESCE((SELECT value FROM app_settings WHERE key='content.reelsEnabled'),'true')='true')`;
 }
 export function livePost(p = 'p') {
   return `(${visiblePost(p)}) AND (${p}.expires_at IS NULL OR ${p}.expires_at > unixepoch()*1000)`;

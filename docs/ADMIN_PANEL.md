@@ -166,3 +166,16 @@ npm run build
 ```
 
 For a repeatable local administrator browser pass, first install optional tooling outside the repository's tracked files with `npm install --prefix .local/browser-tools --no-save playwright-core @sparticuz/chromium`. The host still needs Chromium's shared system libraries. Use `scripts/admin-check.mts seed` to prepare an isolated `.local` PGlite database, start the local app with the printed test-only environment, run `scripts/admin-check.mts check`, then run `scripts/phase12-browser.mjs`. Stop the server before reseeding. `scripts/phase12-perf.mts` benchmarks analytics against a synthetic in-memory PGlite fixture. These checks are useful regressions, not a substitute for deployment-preview verification against the actual configured mail, database, storage, IP, and authentication providers.
+
+## 7. Native Android consumer
+
+The native app under `native-android/` reads the same viewer `features` object from `GET /api/social` that the website receives after `featurePolicy` / `resolveFeatures`. Operators continue to change flags only on **Features** (`/admin-panel/features`). There is no Android-only admin UI and no second `features.config` document.
+
+When a flag is off:
+
+- The Android shell hides the matching destination (see `VIEW_FEATURES` in `lib/features.ts`: reels, search, explore, messages, notifications, saved→`saves`, create→`uploads`).
+- Screens that already loaded the flag skip the related HTTPS call when the client already knows it is off.
+- The social API still enforces `requireFeature`; a direct call can still return `403` with `This feature is currently unavailable.`
+
+Maintenance mode is the same public `503` path used by the website. Do not invent separate Android maintenance text. Do not put Turso or other database credentials in the APK. See `native-android/POLICY.md` for the client mapping.
+

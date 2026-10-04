@@ -13,10 +13,13 @@ class SameOriginHeaderInterceptor(
     private val origin: String,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request().newBuilder()
+        val builder = chain.request().newBuilder()
             .header("Origin", origin.trimEnd('/'))
-            .header("Accept", "application/json")
-            .build()
-        return chain.proceed(request)
+        // JSON is the default for the API. Media playback sets its own Accept
+        // so a video or image request is not forced into application/json.
+        if (chain.request().header("Accept").isNullOrBlank()) {
+            builder.header("Accept", "application/json")
+        }
+        return chain.proceed(builder.build())
     }
 }

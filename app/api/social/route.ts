@@ -5,9 +5,8 @@ import {flushPerf} from '@/lib/perf';
 import {MIB} from '@/lib/media-config';
 import {featurePolicy,requirePublic,requireFeature} from '@/lib/feature-policy';
 import {QUERY_FEATURES,ACTION_FEATURES} from '@/lib/features';
-import { checkReelDuration, storyVideoLimit } from '@/lib/reel-duration';
+import { checkReelDuration } from '@/lib/reel-duration';
 import { AdminError } from '@/lib/admin/validation';
-import { activeHold } from '@/lib/admin/roles';
 import { visibleComment, visiblePost } from '@/lib/content-visibility';
 import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
@@ -274,8 +273,6 @@ export async function POST(request:Request){
   if(action==='message'&&input.post_id)requireFeature(policy,'shares');
   if(!policy.flags.tagging){if(action==='update_post')delete input.tagged_users;else if(Array.isArray(input.tagged_users)&&input.tagged_users.length)requireFeature(policy,'tagging');}
   if(action==='profile'&&!policy.flags.uploads){const existing=await database.prepare('SELECT avatar FROM profiles WHERE id=?').bind(user).first<{avatar:string}>();if(input.avatar!==undefined&&input.avatar!==existing?.avatar)requireFeature(policy,'uploads');input.avatar=existing?.avatar||'';}
-  const holdKind=action==='comment'?'comment':action==='reaction'&&input.kind==='like'?'like':action==='create_post'?'upload':null;
-  if(holdKind){const hold=await activeHold(await getPool(),user,holdKind);if(hold)throw new AppError('This action is paused by moderation until the hold expires.',403);}
   const id=typeof input.id==='string'?clean(input.id,100):'';const now=Date.now();
   if(action==='reaction'){
     const kind=clean(input.kind,20,true);if(!['like','save','seen','hidden'].includes(kind)||typeof input.active!=='boolean')throw new AppError('Invalid action.');
@@ -327,7 +324,6 @@ export async function POST(request:Request){
     const contentSettings=await loadSettings(await getPool());const mediaPolicy=await readMediaConfig(await getPool());
     const kind=clean(input.kind,10,true);if(!['post','reel','story'].includes(kind))throw new AppError('Choose a post, story, or reel.');
     if(kind==='reel'&&!contentSettings['content.reelsEnabled'])throw new AppError('Reels are currently paused.',403);
-    if(kind==='story'&&!contentSettings['content.storiesEnabled'])throw new AppError('Stories are currently paused.',403);
     const caption=clean(input.caption,2200),location=clean(input.location,100);await requireAllowedText(caption);const media=input.media;
     if(!Array.isArray(media)||media.length<1||media.length>mediaPolicy.maxMedia||media.some(m=>typeof m!=='string'||!/^\/api\/media\/[a-f0-9-]{36}$/.test(m)))throw new AppError('Check the current media-per-post limit.');
     const options=mediaOptions(input.media_options,media.length);
@@ -336,7 +332,7 @@ export async function POST(request:Request){
     const category=clean(input.category||'For you',50);if(!categories.includes(category))throw new AppError('Choose a valid category.');
     const assets=await checkAssets(await getPool(),media,[user],mediaPolicy);const types=assets.map(asset=>String(asset.mime));
     const video=types.some(t=>t.startsWith('video/'));if((video&&media.length!==1)||(kind==='reel'&&!video)||(kind==='story'&&media.length!==1))throw new AppError('Stories and reels need one file. Photo posts must contain only images.');
-    if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?contentSettings['content.reelMaxSeconds']:0,kind==='story'?storyVideoLimit(contentSettings['content.storyVideoMaxSeconds']):0].filter(n=>n>0);if(caps.length)await checkReelDuration(await getPool(),media,Math.min(...caps),mediaPolicy.maxFileMb*MIB,kind==='story'?'Stories':'Reels');}
+    if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?contentSettings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(await getPool(),media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
     // Optional per-item aspect ratios (width/height) let the feed render media
     // at its true size without cropping or layout shift.
     const ratios=aspectRatios(input.aspects,media.length);

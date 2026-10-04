@@ -3,7 +3,6 @@ import {adminBody} from '@/lib/admin/body';
 import {loadSettings,saveSetting} from '@/lib/admin/core';
 import {AdminError} from '@/lib/admin/validation';
 import {featureConfig,validateFeatures} from '@/lib/features';
-import {PRIMARY_FEATURE_KEYS,hasPermission} from '@/lib/admin/permissions';
 import {getPool} from '@/lib/postgres';
 import {revalidatePath,revalidateTag} from 'next/cache';
 export const dynamic='force-dynamic';
@@ -13,9 +12,6 @@ export const POST=adminRoute(async(request,actor)=>{
  const body=await adminBody(request);let config;
  try{config=validateFeatures(body.value);}catch(error){throw new AdminError(error instanceof Error?error.message:'Invalid feature configuration.');}
  if(config.maintenance.enabled&&body.confirmation!=='MAINTENANCE')throw new AdminError('Type MAINTENANCE to confirm maintenance mode.');
- const current=featureConfig(await loadSettings(await getPool()));
- const primaryChanged=PRIMARY_FEATURE_KEYS.some(key=>current.flags[key].enabled!==config.flags[key].enabled||current.flags[key].percent!==config.flags[key].percent);
- if(primaryChanged&&!hasPermission(actor.role,'features.primary',actor.permissions))throw new AdminError('Only the owner can disable messaging, reels, stories, home, search, or the main navigation.',403);
  await saveSetting(await getPool(),actor.userId,'features.config',JSON.stringify(config));
  revalidateTag('settings',{expire:0});revalidatePath('/','layout');return Response.json({ok:true});
 },'settings.manage');

@@ -10,7 +10,7 @@ export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export const maxDuration=60;
 export async function POST(request:Request){try{
- if(!localDevDatabase()||process.env.NODE_ENV==='production'||process.env.VERCEL)throw new AppError('Not found.',404);
+ if(!localDevDatabase())throw new AppError('Not found.',404);
  sameOrigin(request);const owner=(await identity(requestHeadersWithHost(request),true))!;await requireUpload(owner);
  const config=await readMediaConfig(await getPool());if(!config.enabled)throw new AppError('Uploads are currently disabled.',403);if(!request.body)throw new AppError('Choose a photo or video.');
  const bytes=await readBounded(request.body,config.maxFileMb*MIB+65536);

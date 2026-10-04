@@ -7,3 +7,15 @@
 /captures/
 .cxx/
 .externalNativeBuild/
+*.jks
+*.keystore
+keystore.properties
+
+# Properties files that hold release signing secrets. The example file is tracked.
+keystore.properties
+!keystore.properties.example
+
+
+# Optional Firebase Android config. The example file stays tracked.
+google-services.json
+!google-services.json.example

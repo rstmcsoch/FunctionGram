@@ -22,15 +22,7 @@ export const GET = adminRoute(async (request, actor) => {
     return Response.json(await listContent(db,contentFilters({...Object.fromEntries(params),resource})));
   }
   if(params.get('resource')==='contentSettings'){requirePermission(actor,'settings.manage');return Response.json(await readSettings());}
-  if (params.get('resource') === 'users') {
-    requirePermission(actor,'users.read');
-    const filters = userFilters(Object.fromEntries(params));
-    if (actor.role === 'moderator') filters.role = 'user';
-    const result = await listUsers(db, filters);
-    if (actor.role === 'admin') result.users = result.users.map(user => user.role === 'owner' ? { ...user, email: '' } : user);
-    if (actor.role === 'moderator') result.users = result.users.filter(user => user.role === 'user');
-    return Response.json(result);
-  }
+  if (params.get('resource') === 'users') {requirePermission(actor,'users.read');return Response.json(await listUsers(db, userFilters(Object.fromEntries(params))));}
   if (params.get('resource') === 'user' && params.get('id')) {requirePermission(actor,'users.read');return Response.json(await userDetail(db, params.get('id')!));}
   return Response.json({ error: 'Unknown admin action.' }, { status: 400 });
 });

@@ -2,45 +2,33 @@
 import {useLabels} from "./labels";
 
 import {Feature} from "./features";
-import { useState, useEffect, useRef, useCallback, useEffectEvent, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useEffectEvent } from "react";
 import { Plus, ChevronLeft, ChevronRight, X, Pause, Play, Volume2, VolumeX, MessageCircle, Eye, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, IconButton, timeAgo, request, Busy } from "./common";
 import { Caption } from "./post-card";
 import { toast } from "sonner";
 import type { Person, Post } from "@/lib/types";
-import { classifyStoryPointer, groupByAuthor, orderStoryGroups, stepAuthor, stepSegment, storyCursorForAuthor, type StoryCursor } from "@/lib/story-playback";
 
-export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me: Person | null; onOpen: (authorId: string) => void; onCreate: () => void }) {
+export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me: Person | null; onOpen: (index: number) => void; onCreate: () => void }) {
   const t=useLabels();
   const rail = useRef<HTMLDivElement>(null);
-  const groups = orderStoryGroups(groupByAuthor(stories), me?.id);
-  const mine = me ? groups.find(group => group[0].author_id === me.id) : undefined;
-  const rest = groups.filter(group => group !== mine);
-  const mineSeen = !!mine && mine.every(post => post.seen);
-  const openMine = () => { if (mine) onOpen(mine[0].author_id); else onCreate(); };
   return (
     <div className="stories-wrapper">
       <div className="stories" ref={rail}>
-        <div className={"story story-yours" + (mineSeen ? " story-seen" : "")}>
+        <Feature name="uploads"><button className="story story-yours" onClick={onCreate}>
           <span className="your-story">
-            <button type="button" className="story-open" onClick={openMine}>
-              <Avatar person={me} size={66} ring={!!mine} />
-            </button>
-            <Feature name="uploads"><button type="button" className="story-plus" aria-label={t("stories.add_to_story")} onClick={onCreate}><Plus size={15} /></button></Feature>
+            <Avatar person={me} size={66} />
+            <span className="story-plus"><Plus size={15} /></span>
           </span>
-          <button type="button" className="story-open" onClick={openMine}><span>{t("stories.your_story")}</span></button>
-        </div>
-        {rest.map(group => {
-          const post = group[0];
-          const seen = group.every(item => item.seen);
-          return (
-            <button className={"story " + (seen ? "story-seen" : "")} key={post.author_id} onClick={() => onOpen(post.author_id)}>
-              <Avatar person={post.author} size={70} ring />
-              <span>{post.author.username}</span>
-            </button>
-          );
-        })}
+          <span>{t("stories.your_story")}</span>
+        </button></Feature>
+        {stories.map((post, index) => (
+          <button className={"story " + (post.seen ? "story-seen" : "")} key={post.id} onClick={() => onOpen(index)}>
+            <Avatar person={post.author} size={70} ring />
+            <span>{post.author.username}</span>
+          </button>
+        ))}
       </div>
       <IconButton className="stories-next" label={t("stories.more_stories")} onClick={() => rail.current?.scrollBy({ left: 280, behavior: "smooth" })}>
         <ChevronRight size={18} />
@@ -49,100 +37,68 @@ export function Stories({ stories, me, onOpen, onCreate }: { stories: Post[]; me
   );
 }
 
-export function StoryViewer({ stories, startAuthorId, me, people, photoSeconds, videoMaxSeconds, onClose, onSeen, onProfile, onTag }: {
-  stories: Post[]; startAuthorId: string; me: Person | null; people: Person[]; photoSeconds: number; videoMaxSeconds: number;
-  onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
+export function StoryViewer({ stories, start, me, people, onClose, onSeen, onProfile, onTag }: {
+  stories: Post[]; start: number; me: Person | null; people: Person[]; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
 }) {
-  const model = useMemo(() => {
-    const groups = orderStoryGroups(groupByAuthor(stories), me?.id);
-    return { groups, lengths: groups.map(group => group.length), ids: groups.map(group => group[0].author_id) };
-  }, [stories, me?.id]);
-  const [cursor, setCursor] = useState<StoryCursor>(() => storyCursorForAuthor(model.ids, startAuthorId));
-  const [motion, setMotion] = useState<"next" | "prev" | null>(null);
-  const [muted, setMuted] = useState(true);
-  const post = model.groups[cursor.author]?.[cursor.segment];
-  const segments = model.groups[cursor.author] || [];
-  const upcoming = segments[cursor.segment + 1] || model.groups[cursor.author + 1]?.[0] || null;
-
-  const go = useCallback((direction: 1 | -1, mode: "segment" | "author") => {
-    const next = mode === "author" ? stepAuthor(model.lengths, cursor, direction) : stepSegment(model.lengths, cursor, direction);
-    if (!next) { if (direction > 0) onClose(); return; }
-    if (next.author === cursor.author && next.segment === cursor.segment) return;
-    setMotion(next.author !== cursor.author ? (direction > 0 ? "next" : "prev") : null);
-    setCursor(next);
-  }, [model.lengths, cursor, onClose]);
-
+  const [index, setIndex] = useState(start);
+  const post = stories[index];
+  const next = useCallback(() => {
+    if (index < stories.length - 1) setIndex(index + 1);
+    else onClose();
+  }, [index, stories.length, onClose]);
   useEffect(() => { if (!post) onClose(); }, [post, onClose]);
   if (!post) return null;
   return (
-    <StoryPlayback key={post.id} stories={segments} index={cursor.segment} post={post} me={me} people={people} muted={muted} setMuted={setMuted}
-      motion={motion} upcoming={upcoming} photoSeconds={photoSeconds} videoMaxSeconds={videoMaxSeconds}
-      atStart={cursor.author === 0 && cursor.segment === 0}
-      go={go} onClose={onClose} onSeen={onSeen} onProfile={onProfile} onTag={onTag} />
+    <StoryPlayback key={post.id} stories={stories} index={index} setIndex={setIndex} post={post} me={me} people={people} next={next} onClose={onClose} onSeen={onSeen} onProfile={onProfile} onTag={onTag} />
   );
 }
 
-function StoryPlayback({ stories, index, post, me, people, muted, setMuted, motion, upcoming, photoSeconds, videoMaxSeconds, atStart, go, onClose, onSeen, onProfile, onTag }: {
-  stories: Post[]; index: number; post: Post; me: Person | null; people: Person[]; muted: boolean; setMuted: React.Dispatch<React.SetStateAction<boolean>>;
-  motion: "next" | "prev" | null; upcoming: Post | null; photoSeconds: number; videoMaxSeconds: number; atStart: boolean;
-  go: (direction: 1 | -1, mode: "segment" | "author") => void; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
+function StoryPlayback({ stories, index, setIndex, post, me, people, next, onClose, onSeen, onProfile, onTag }: {
+  stories: Post[]; index: number; setIndex: React.Dispatch<React.SetStateAction<number>>; post: Post; me: Person | null; people: Person[];
+  next: () => void; onClose: () => void; onSeen: (post: Post) => void; onProfile: (id: string) => void; onTag: (tag: string) => void;
 }) {
   const t=useLabels();
   const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [replyTo, setReplyTo] = useState(false);
   const [showViewers, setShowViewers] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const elapsed = useRef(0);
-  const finished = useRef(false);
-  const gesture = useRef<{ x: number; y: number; t: number } | null>(null);
+  const holdPaused = useRef(false);
   const markSeen = useEffectEvent(() => onSeen(post));
   const isOwn = me?.id === post.author_id;
   const canReply = !isOwn && !post.author.is_demo;
-  const photoMs = Math.min(15, Math.max(3, photoSeconds)) * 1000;
-  const videoCap = Math.min(15, Math.max(1, videoMaxSeconds));
-  const frozen = paused || replyTo || showViewers;
-  const finish = useCallback(() => { if (finished.current) return; finished.current = true; go(1, "segment"); }, [go]);
 
   useEffect(() => { markSeen(); }, [post.id]);
 
   useEffect(() => {
-    if (frozen || !ready || post.media_type === "video") return;
+    if (paused || !ready || post.media_type === "video") return;
     const timer = setInterval(() => {
       elapsed.current += 50;
-      setProgress(Math.min(1, elapsed.current / photoMs));
-      if (elapsed.current >= photoMs) finish();
+      setProgress(elapsed.current / 6000);
+      if (elapsed.current >= 6000) next();
     }, 50);
     return () => clearInterval(timer);
-  }, [frozen, ready, post, finish, photoMs]);
+  }, [paused, ready, post, next]);
 
   useEffect(() => {
-    const node = video.current;
-    if (!node) return;
-    if (frozen) node.pause();
-    else void node.play().catch(() => setPaused(true));
-  }, [frozen, post]);
+    if (video.current) {
+      if (paused) video.current.pause();
+      else void video.current.play().catch(() => setPaused(true));
+    }
+  }, [paused, post]);
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest("input,textarea")) return;
-      if (event.key === "ArrowRight") go(1, "segment");
-      if (event.key === "ArrowLeft") go(-1, "segment");
+      if (event.key === "ArrowRight") next();
+      if (event.key === "ArrowLeft") setIndex(value => Math.max(0, value - 1));
       if (event.key === " ") { event.preventDefault(); setPaused(value => !value); }
     };
     document.addEventListener("keydown", handle);
     return () => document.removeEventListener("keydown", handle);
-  }, [go]);
-
-  const onTime = (node: HTMLVideoElement) => {
-    if (node.currentTime >= videoCap) { node.pause(); finish(); return; }
-    const duration = Number.isFinite(node.duration) && node.duration > 0 ? Math.min(node.duration, videoCap) : videoCap;
-    setProgress(Math.min(1, node.currentTime / duration));
-  };
-
-  const controlTarget = (target: EventTarget | null) => target instanceof Element && !!target.closest("button,a,input,textarea,label");
+  }, [next, setIndex]);
 
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
@@ -153,73 +109,50 @@ function StoryPlayback({ stories, index, post, me, people, muted, setMuted, moti
           <span className="story-brand">{t("stories.rstmc")}<span>{t("stories.symbol")}</span></span>
           <IconButton className="close-story" label={t("stories.close_story")} onClick={onClose}><X /></IconButton>
           <div className="story-player"
-            onPointerDown={event => {
-              if (controlTarget(event.target)) return;
-              gesture.current = { x: event.clientX, y: event.clientY, t: performance.now() };
-              setPaused(true);
-              try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch { /* already released */ }
-            }}
-            onPointerUp={event => {
-              const start = gesture.current;
-              gesture.current = null;
-              if (!start) return;
-              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-              const action = classifyStoryPointer({
-                durationMs: performance.now() - start.t,
-                dx: event.clientX - start.x,
-                dy: event.clientY - start.y,
-                startXRatio: rect.width ? (start.x - rect.left) / rect.width : 0.5,
-              });
-              setPaused(false);
-              if (action.kind === "swipe") go(action.direction === "next" ? 1 : -1, "author");
-              else if (action.kind === "tap") go(action.side === "right" ? 1 : -1, "segment");
-            }}
-            onPointerCancel={() => { gesture.current = null; setPaused(false); }}>
-            <div key={post.author_id} className={"story-frame" + (motion ? " story-slide-" + motion : "")}>
-              <div className="story-progress">
-                {stories.map((item, position) => (
-                  <span key={item.id}><i style={{ width: (position < index ? 100 : position === index ? progress * 100 : 0) + "%" }} /></span>
-                ))}
-              </div>
-              <header>
-                <Avatar person={post.author} size={36} />
-                <button onClick={() => { onClose(); onProfile(post.author_id); }}>{post.author.username}</button>
-                <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
-                <div className="story-tools">
-                  {isOwn && <IconButton label={t("stories.view_who_saw_this_story")} onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
-                  {canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? t("stories.close_reply") : t("stories.reply_to_this_story")} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}
-                  <IconButton label={paused ? t("stories.play_story") : t("stories.pause_story")} onClick={() => setPaused(value => !value)}>
-                    {paused ? <Play size={20} /> : <Pause size={20} />}
-                  </IconButton>
-                  {post.media_type === "video" && (
-                    <IconButton label={muted ? t("stories.unmute_story") : t("stories.mute_story")} onClick={() => setMuted(value => !value)}>
-                      {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                    </IconButton>
-                  )}
-                </div>
-              </header>
-              {post.media_type === "video"
-                ? <video key={post.id} ref={video} src={post.media[0]} autoPlay muted={muted} playsInline
-                    onLoadedData={() => setReady(true)}
-                    onTimeUpdate={event => onTime(event.currentTarget)}
-                    onEnded={finish} />
-                : <img key={post.id} src={post.media[0]} alt={post.caption || t("stories.story_photo")} onLoad={() => setReady(true)} />}
-              {post.caption && <p className="story-caption"><Caption text={post.caption} people={people} onProfile={id => { onClose(); onProfile(id); }} onTag={tag => { onClose(); onTag(tag); }} /></p>}
-              {replyTo && <ReplyComposer post={post} onClose={() => setReplyTo(false)} />}
-              {showViewers && <StoryViewers post={post} onClose={() => setShowViewers(false)} />}
+            onPointerDown={event => { if ((event.target as Element).closest("button")) return; holdPaused.current = paused; setPaused(true); }}
+            onPointerUp={event => { if (!(event.target as Element).closest("button")) setPaused(holdPaused.current); }}
+            onPointerCancel={() => setPaused(holdPaused.current)}>
+            <div className="story-progress">
+              {stories.map((item, position) => (
+                <span key={item.id}><i style={{ width: (position < index ? 100 : position === index ? progress * 100 : 0) + "%" }} /></span>
+              ))}
             </div>
-            {upcoming && upcoming.id !== post.id && (upcoming.media_type === "video"
-              ? <video className="story-preload" src={upcoming.media[0]} preload="auto" muted playsInline aria-hidden="true" />
-              : <img className="story-preload" src={upcoming.media[0]} alt="" aria-hidden="true" />)}
+            <header>
+              <Avatar person={post.author} size={36} />
+              <button onClick={() => { onClose(); onProfile(post.author_id); }}>{post.author.username}</button>
+              <span suppressHydrationWarning>{timeAgo(post.created_at, t)}</span>
+              <div className="story-tools">
+                {isOwn && <IconButton label={t("stories.view_who_saw_this_story")} onClick={() => setShowViewers(true)}><Eye size={20} /></IconButton>}
+                {canReply && <Feature name="messages"><Feature name="shares"><IconButton label={replyTo ? t("stories.close_reply") : t("stories.reply_to_this_story")} onClick={() => setReplyTo(value => !value)}><MessageCircle size={20} /></IconButton></Feature></Feature>}
+                <IconButton label={paused ? t("stories.play_story") : t("stories.pause_story")} onClick={() => setPaused(value => !value)}>
+                  {paused ? <Play size={20} /> : <Pause size={20} />}
+                </IconButton>
+                {post.media_type === "video" && (
+                  <IconButton label={muted ? t("stories.unmute_story") : t("stories.mute_story")} onClick={() => setMuted(value => !value)}>
+                    {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                  </IconButton>
+                )}
+              </div>
+            </header>
+            {post.media_type === "video"
+              ? <video key={post.id} ref={video} src={post.media[0]} autoPlay muted={muted} playsInline
+                  onLoadedData={() => setReady(true)}
+                  onTimeUpdate={event => setProgress(event.currentTarget.currentTime / (event.currentTarget.duration || 1))}
+                  onEnded={next} />
+              : <img key={post.id} src={post.media[0]} alt={post.caption || t("stories.story_photo")} onLoad={() => setReady(true)} />}
+            <button type="button" className="story-tap previous" aria-label={t("stories.previous_story")} onClick={() => setIndex(value => Math.max(0, value - 1))} />
+            <button type="button" className="story-tap next" aria-label={t("stories.next_story")} onClick={next} />
+            {post.caption && <p className="story-caption"><Caption text={post.caption} people={people} onProfile={id => { onClose(); onProfile(id); }} onTag={tag => { onClose(); onTag(tag); }} /></p>}
+            {replyTo && <ReplyComposer post={post} onClose={() => setReplyTo(false)} />}
+            {showViewers && <StoryViewers post={post} onClose={() => setShowViewers(false)} />}
           </div>
-          <IconButton className="story-prev" label={t("stories.previous_story")} disabled={atStart} onClick={() => go(-1, "segment")}><ChevronLeft /></IconButton>
-          <IconButton className="story-next" label={t("stories.next_story")} onClick={() => go(1, "segment")}><ChevronRight /></IconButton>
+          <IconButton className="story-prev" label={t("stories.previous_story")} disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft /></IconButton>
+          <IconButton className="story-next" label={t("stories.next_story")} onClick={next}><ChevronRight /></IconButton>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
-
 function ReplyComposer({ post, onClose }: { post: Post; onClose: () => void }) {
   const t=useLabels();
   const [body, setBody] = useState("");

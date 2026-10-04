@@ -22,18 +22,14 @@ async function fixture(){
  return {db,pool,add};
 }
 
-test('comms admin tables ship in the Turso schema (legacy Phase 11 is folded into migration 1)',async()=>{
- const {createTursoFixture}=await import('./support/turso-db');
- const {pool,close}=await createTursoFixture();
- try{
-  assert.equal(DATABASE_MIGRATIONS.find(item=>item.version===11),undefined);
-  assert.equal((await pool.query('SELECT kind FROM admin_notification_templates')).rows.length,5);
-  assert.equal((await pool.query('SELECT id FROM admin_email_controls')).rows.length,1);
-  for(const table of ['admin_message_controls','admin_notification_templates','admin_email_controls','admin_message_restrictions']){
-   const {rows}=await pool.query('SELECT name FROM sqlite_master WHERE type=? AND name=?',['table',table]);
-   assert.equal(rows.length,1,table);
-  }
- }finally{await close();}
+test('migration 11 is additive, repeatable and registered after Phase 9',async()=>{
+ const db=new PGlite();try{
+  for(const sql of statements)await db.exec(sql);for(const sql of schema.adminCommsUpgradeStatements)await db.exec(sql);
+  assert.equal(DATABASE_MIGRATIONS.find(item=>item.version===11)?.statements,schema.adminCommsUpgradeStatements);
+  assert.equal((await db.query('SELECT kind FROM admin_notification_templates')).rows.length,5);
+  assert.equal((await db.query('SELECT id FROM admin_email_controls')).rows.length,1);
+  for(const table of ['admin_message_controls','admin_notification_templates','admin_email_controls']){const {rows}=await db.query<{name:string|null}>('SELECT to_regclass($1) AS name',[table]);assert.equal(rows[0].name,table);}
+ }finally{await db.close();}
 });
 
 test('private message inspection is break-glass audited; redaction/deletion require exact ID, reason and permission',async()=>{

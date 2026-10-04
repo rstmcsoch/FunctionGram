@@ -1,5 +1,4 @@
 import { db } from './server';
-import { flagIsTrue } from './account-policy';
 
 // Aspect ratios (width / height) of the bundled demo media, measured from the
 // actual files. Posts store one ratio per media item so the UI can reserve the
@@ -11,9 +10,8 @@ const demoAspect: Record<string, number> = {
 };
 
 export async function seed(force=false,database=db()){
-  const state=await database.prepare('SELECT enabled FROM admin_demo_seed_control WHERE id=1').first<{enabled:unknown}>();
-  // libSQL stores the switch as 0/1; a strict `=== false` would keep seeding forever.
-  if(!force&&!flagIsTrue(state?.enabled))return;
+  const state=await database.prepare('SELECT enabled FROM admin_demo_seed_control WHERE id=1').first<{enabled:boolean}>();
+  if(!force&&state?.enabled===false)return;
   if(!force&&await database.prepare("SELECT id FROM profiles WHERE id='demo_anaya'").first())return;
   const now=Date.now();
   const users=[

@@ -50,7 +50,6 @@ const FloatingDock = loadSurface(() => import("./floating-dock").then(m => m.Flo
 const Reels = loadSurface(() => import("./reels").then(m => m.Reels));
 const StoryViewer = loadSurface(() => import("./stories").then(m => m.StoryViewer));
 import type { SocialData, Post, Person, Comment, Notification } from "@/lib/types";
-import { DEFAULT_STORY_SETTINGS } from "@/lib/story-playback";
 import { parseLocation, profileShareLink, resolvePerson, viewLocation } from "@/lib/profile-url";
 
 const emptyData: SocialData = { me: null, people: [], posts: [], notifications: [], unreadMessages: 0, hasMore: false };
@@ -105,7 +104,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const [edit, setEdit] = useState(false);
   const [login, setLogin] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
-  const [storySession, setStorySession] = useState<{ authorId: string; extra: Post[] } | null>(null);
+  const [story, setStory] = useState<number | null>(null);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [sharePost, setSharePost] = useState<Post | null>(null);
   const [shareProfile, setShareProfile] = useState<Person | null>(null);
@@ -343,8 +342,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   const openAuth = (mode: "signin" | "signup" = "signin") => { setAuthMode(mode); setLogin(true); };
   const needsLogin = () => { if (!data.me) { openAuth(); return true; } return false; };
-  const storyConfig = data.stories ?? DEFAULT_STORY_SETTINGS;
-  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&(!flags.stories||!storyConfig.enabled))||!targetEnabled(appearance,"create")){toast(t("app.creation_is_not_available"));return;} if (!needsLogin()) setCreate(kind); };
+  const openCreate = (kind: "post" | "story" | "reel" = "post") => { if(!flags.uploads||(kind==="reel"&&!flags.reels)||(kind==="story"&&!flags.stories)||!targetEnabled(appearance,"create")){toast(t("app.creation_is_not_available"));return;} if (!needsLogin()) setCreate(kind); };
 
   const setFollowPendingFor = (id: string, pending: boolean) => {
     setFollowPending(current => {
@@ -584,15 +582,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   /* ---------------------------------- derived ---------------------------------- */
 
-  const stories = data.posts.filter(post => flags.stories && storyConfig.enabled && post.kind === "story" && (!post.expires_at || post.expires_at > now));
-  const storyPlaylist = (() => {
-    if (!storySession) return stories;
-    const merged = new Map<string, Post>();
-    for (const post of [...stories, ...storySession.extra]) {
-      if (post.kind === "story" && (!post.expires_at || post.expires_at > now)) merged.set(post.id, post);
-    }
-    return [...merged.values()];
-  })();
+  const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
   const reelsPosts = useMemo(() => {
     const isVideo = (post: Post) => post.media_type === "video" && (post.kind === "reel" || post.kind === "post");
     const ids = new Set(reelsFeed.posts.map(post => post.id));
@@ -669,7 +659,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
 
   // Full-screen viewers and bottom sheets own the screen, so the floating dock
   // steps aside instead of floating over them.
-  const dockCovered = !!create || !!edit || (flags.stories && storySession !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation || chooser;
+  const dockCovered = !!create || !!edit || (flags.stories && story !== null) || !!selectedPost || login || !!deleteTarget || about || !!relation || chooser;
 
   return (
     <FeatureContext value={flags}><div className="app-shell" data-header-position={appearance.headerPosition} data-sidebar-mode={appearance.sidebarMode}>
@@ -697,8 +687,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
             {view === "create" && <Empty icon={<Info/>} heading={t("app.share_a_moment")} body={t("app.create_a_post_story_or_reel")} action={<button className="primary-button" onClick={()=>openCreate()}>{t("nav.create")}</button>}/>}
             {view === "home" && (
               <HomeView data={data} feedTab={feedTab} setFeedTab={setFeedTab} stories={stories}
-                showStoryTray={flags.stories && storyConfig.enabled && storyConfig.tray}
-                onOpenStory={authorId => setStorySession({ authorId, extra: [] })} onCreateStory={() => openCreate("story")}
+                onOpenStory={setStory} onCreateStory={() => openCreate("story")}
                 feedPosts={feedPosts} following={followingFeed} onLoadFollowing={offset => void loadFollowing(offset)}
                 actions={actions}
                 moreLoading={moreLoading} onLoadMore={() => void loadMore()}
@@ -721,8 +710,6 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
                   follow={person => void follow(person)} followPending={followPending} onShare={() => setShareProfile(profile)}
                   onRelations={(person, kind) => setRelation({ person, kind })}
                   onReport={person => setReportTarget(person)} onBlock={person => void toggleBlock(person)}
-                  storyRing={flags.stories && storyConfig.enabled && storyConfig.ring}
-                  onOpenStory={(authorId, extra) => setStorySession({ authorId, extra })}
                   onMessage={person => { if (person.is_demo) toast(t("app.this_is_a_sample_profile_message_real_members_in_messages")); else if (person.blocked) toast(t("app.you_cannot_message_this_profile_while_it_is_blocked")); else navigate("messages", person.id); }} />
               : <Empty icon={<UserRound />} heading={t("app.your_own_corner_of_rstmc")} body={t("app.sign_in_to_create_a_profile_and_share_your_world")}
                   action={<button className="primary-button" onClick={() => openAuth()}>{t("auth.signIn")}</button>} />)}
@@ -742,13 +729,11 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       </main>
       <FloatingDock items={appearance.nav.filter(item=>item.enabled&&item.dock)} active={view} me={data.me} onSelect={nav} covered={dockCovered} />
 
-      {flags.uploads && create && (create!=="reel"||flags.reels) && (create!=="story"||(flags.stories&&storyConfig.enabled)) && data.me && <CreateDialog kind={create} me={data.me} people={data.people} storyVideoMaxSeconds={storyConfig.videoMaxSeconds} storyHours={storyConfig.hours} onClose={() => setCreate(null)} onCreated={refresh} />}
+      {flags.uploads && create && (create!=="reel"||flags.reels) && (create!=="story"||flags.stories) && data.me && <CreateDialog kind={create} me={data.me} people={data.people} onClose={() => setCreate(null)} onCreated={refresh} />}
       {flags.postEditing && editingPost && data.me && <EditPostDialog post={editingPost} people={data.people} onClose={() => setEditingPost(null)} onSaved={refresh} />}
       {edit && data.me && <EditProfile me={data.me} onClose={() => setEdit(false)} onSaved={refresh} />}
-      {storySession && storyPlaylist.length > 0 && (
-        <StoryViewer stories={storyPlaylist} startAuthorId={storySession.authorId} me={data.me} people={data.people}
-          photoSeconds={storyConfig.photoSeconds} videoMaxSeconds={storyConfig.videoMaxSeconds}
-          onClose={() => setStorySession(null)}
+      {story !== null && stories[story] && (
+        <StoryViewer stories={stories} start={story} me={data.me} people={data.people} onClose={() => setStory(null)}
           onSeen={post => { if (data.me && !post.seen) void react(post, "seen", true); }}
           onProfile={id => navigate("profile", id)} onTag={tag => navigate("tag", tag)} />
       )}

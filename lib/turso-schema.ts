@@ -1106,3 +1106,16 @@ export const tursoMessagingV17Statements: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_message_hidden_user ON message_hidden(user_id, message_id)`,
   `ALTER TABLE view_once_state ADD COLUMN served_at INTEGER`,
 ];
+
+
+/** Convergence migration for native Android device push tokens (migration 21). */
+export const tursoPushTokenStatements: string[] = [
+  `CREATE TABLE IF NOT EXISTS device_push_tokens (
+    token TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_device_push_tokens_user ON device_push_tokens(user_id)`,
+];

@@ -1,4 +1,4 @@
-import {AdminError} from './admin/errors';
+import {AdminError} from './admin/validation';
 import {getPool} from './postgres';
 export type ModerationConfig={enabled:boolean;regexMode:boolean;blockedWords:string[];blockedDomains:string[]};
 export const DEFAULT_MODERATION:ModerationConfig={enabled:false,regexMode:false,blockedWords:[],blockedDomains:[]};

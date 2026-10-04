@@ -3,10 +3,9 @@ import {MIB} from '../media-config';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { authorizeAdmin, insertAudit, loadSettings, transaction } from './core';
 import { AdminError } from './validation';
-import { requirePermission, hasPermission } from './permissions';
-import { queueDeletion } from './roles';
+import { requirePermission } from './permissions';
 import { contentConfirmationName } from './content-label';
-import { checkReelDuration, storyVideoLimit } from '../reel-duration';
+import { checkReelDuration } from '../reel-duration';
 import { inPlaceholders } from '../sql';
 
 export type ContentResource = 'posts' | 'comments';
@@ -89,10 +88,7 @@ async function editPost(db:QueryExecutor,actorId:string,row:Record<string,unknow
   if(aspects!==null&&(!Array.isArray(aspects)||aspects.length!==media.length||aspects.some(r=>typeof r!=='number'||!Number.isFinite(r)||r<0.2||r>5)))throw new AdminError('Provide one valid aspect ratio (0.2–5) per item, or clear all.');
   if(Array.isArray(aspects)&&!aspects.length)aspects=null;
   const settings=await loadSettings(db);
-  if(video){
-    const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0,kind==='story'?storyVideoLimit(settings['content.storyVideoMaxSeconds']):0].filter(n=>n>0);
-    if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB,kind==='story'?'Stories':'Reels');
-  }
+  if(video){const caps=[mediaPolicy.videoMaxSeconds,kind==='reel'?settings['content.reelMaxSeconds']:0].filter(n=>n>0);if(caps.length)await checkReelDuration(db,media,Math.min(...caps),mediaPolicy.maxFileMb*MIB);}
   const expires=input.expires_at===undefined?(kind==='story'&&row.kind!=='story'?Date.now()+settings['content.storyHours']*3600000:row.expires_at):input.expires_at;
   if(expires!==null&&(typeof expires!=='number'||!Number.isSafeInteger(expires)||expires<0||expires>8640000000000000))throw new AdminError('Invalid expiry.');
   return {caption,location,category,kind,media:JSON.stringify(media),media_options:JSON.stringify(options),aspects:aspects?JSON.stringify(aspects):null,tagged_users:JSON.stringify(tags),media_type:video?'video':'image',expires_at:expires};
@@ -110,8 +106,7 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   if(resource==='comments'&&['pin','unpin','expire','highlight','counters'].includes(action))throw new AdminError('This operation is only for posts.');
   const initialActor=await authorizeAdmin(pool,actorId,action==='purge');
   requirePermission(initialActor,'content.moderate');
-  if(initialActor.role==='moderator'&&!['hide','unhide','delete'].includes(action))throw new AdminError('Moderators can hide content or request deletion. They cannot edit details.',403);
-  if(['edit','counters','pin','unpin','expire','highlight'].includes(action))requirePermission(initialActor,'content.edit');
+  if(initialActor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
   // Metadata probing may read a Blob. Do it BEFORE opening a DB transaction;
   // compare the row again under lock so a concurrent edit cannot be overwritten.
   let original:Record<string,unknown>|undefined,patch:Record<string,unknown>|undefined;
@@ -123,15 +118,7 @@ export async function moderateContent(pool:PoolLike,actorId:string,body:Record<s
   return transaction(pool,async db=>{
     const actor=await authorizeAdmin(db,actorId,action==='purge');
     requirePermission(actor,'content.moderate');
-    if(actor.role==='moderator'&&!['hide','unhide','delete'].includes(action))throw new AdminError('Moderators can hide content or request deletion. They cannot edit details.',403);
-    if(action==='delete'&&!hasPermission(actor.role,'content.delete',actor.permissions)){
-      requirePermission(actor,'content.deleteRequest');
-      if(!reason)throw new AdminError('A reason is required before a moderator can request deletion.');
-      const queued=await queueDeletion(db,actor.userId,resource,String(ids[0]),reason);
-      await insertAudit(db,actor,{action:'content.delete.request',targetType:resource,targetId:String(ids[0]),after:queued,reason});
-      return {ok:true,queued:true,executeAt:queued.executeAt,changed:0};
-    }
-    if(action==='purge'||action==='delete')requirePermission(actor,'content.delete');
+    if(actor.role==='moderator'&&!['hide','unhide'].includes(action))throw new AdminError('Moderators may only hide or unhide content.',403);
     if(resource==='posts')await db.query('SELECT pg_advisory_xact_lock($1)',[MEDIA_LOCK]);
     if(action==='edit'&&resource==='posts'&&patch&&original){const oldMedia=JSON.parse(String(original.media)) as string[];const added=(JSON.parse(String(patch.media)) as string[]).filter(url=>!oldMedia.includes(url));if(added.length)await checkAssets(db,added,[actorId,String(original.author_id)],await readMediaConfig(db));}
     // Always lock in ID order to avoid deadlocks between overlapping bulk selections.
