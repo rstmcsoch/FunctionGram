@@ -9,6 +9,8 @@ import com.functiongram.app.data.messaging.MessageMediaRef
 import com.functiongram.app.data.messaging.MessagingCall
 import com.functiongram.app.data.messaging.MessagingRepository
 import com.functiongram.app.data.messaging.PhotoPayload
+import com.functiongram.app.data.policy.FeaturePolicy
+import com.functiongram.app.data.policy.ServerFeatures
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -28,6 +30,11 @@ class MessagingViewModel(
 
     init {
         refreshList()
+    }
+
+    fun applyFeatures(features: ServerFeatures) {
+        if (_state.value.features == features) return
+        _state.update { it.copy(features = features) }
     }
 
     fun refreshList() {
@@ -135,6 +142,10 @@ class MessagingViewModel(
         val peer = current.openPeerId ?: return
         val body = current.draft
         if (body.trim().isEmpty() || current.sending) return
+        if (!FeaturePolicy.canOpenMessages(current.features)) {
+            _state.update { it.copy(sendMessage = FeaturePolicy.FEATURE_OFF) }
+            return
+        }
         send(peer, body) {
             withContext(Dispatchers.IO) { repository.sendText(peer, body) }
         }
@@ -143,6 +154,10 @@ class MessagingViewModel(
     fun sendPickedPhoto(read: () -> PhotoPayload) {
         val peer = _state.value.openPeerId ?: return
         if (_state.value.sending) return
+        if (!FeaturePolicy.canSendPhoto(_state.value.features)) {
+            _state.update { it.copy(sendMessage = FeaturePolicy.FEATURE_OFF) }
+            return
+        }
         _state.update { it.copy(sending = true, sendMessage = null) }
         viewModelScope.launch {
             val photo = try {
@@ -169,6 +184,10 @@ class MessagingViewModel(
         val current = _state.value
         val peer = current.openPeerId ?: return
         if (current.sending) return
+        if (!FeaturePolicy.canSendPhoto(current.features)) {
+            _state.update { it.copy(sendMessage = FeaturePolicy.FEATURE_OFF) }
+            return
+        }
         val caption = current.draft
         send(peer, caption) {
             withContext(Dispatchers.IO) { repository.sendPhoto(peer, caption, photo) }

@@ -1,5 +1,7 @@
 package com.functiongram.app.data.feed
 
+import com.functiongram.app.data.policy.ServerFeatures
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -194,17 +196,7 @@ object FeedCodec {
         return CommentPreview(body = body, username = username)
     }
 
-    private fun flags(element: JsonElement?): FeedFlags {
-        val objectItem = element as? JsonObject ?: return FeedFlags()
-        return FeedFlags(
-            stories = flag(objectItem["stories"]),
-            reels = flag(objectItem["reels"]),
-            follow = flag(objectItem["follow"]),
-            comments = flag(objectItem["comments"]),
-            likes = flag(objectItem["likes"]),
-            saves = flag(objectItem["saves"]),
-        )
-    }
+    private fun flags(element: JsonElement?): FeedFlags = ServerFeatures.parse(element)
 
     private fun storySettings(element: JsonElement?): StorySettings {
         val objectItem = element as? JsonObject ?: return StorySettings()

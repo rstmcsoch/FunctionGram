@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.functiongram.app.data.policy.ServerFeatures
 import com.functiongram.app.presentation.shell.ShellCatalog
 import com.functiongram.app.presentation.shell.ShellDestination
 import com.functiongram.app.presentation.theme.ChromeMetrics
@@ -91,6 +92,7 @@ fun FunctionGramShell(
     selected: ShellDestination,
     onSelect: (ShellDestination) -> Unit,
     onCreate: () -> Unit,
+    features: ServerFeatures = ServerFeatures(),
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val status = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -110,6 +112,7 @@ fun FunctionGramShell(
                     selected = selected,
                     onSelect = onSelect,
                     onCreate = onCreate,
+                    features = features,
                 )
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     content(PaddingValues(top = status, bottom = navigation))
@@ -125,6 +128,7 @@ fun FunctionGramShell(
                     statusBar = status,
                     selected = selected,
                     onSelect = onSelect,
+                    features = features,
                 )
                 FloatingDock(
                     metrics = metrics,
@@ -134,6 +138,7 @@ fun FunctionGramShell(
                     selected = selected,
                     onSelect = onSelect,
                     onCreate = onCreate,
+                    features = features,
                 )
             }
         }
@@ -170,6 +175,7 @@ private fun Sidebar(
     selected: ShellDestination,
     onSelect: (ShellDestination) -> Unit,
     onCreate: () -> Unit,
+    features: ServerFeatures,
 ) {
     val tokens = LocalFgTokens.current
     Column(
@@ -198,7 +204,7 @@ private fun Sidebar(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            ShellCatalog.sidebarIds.forEach { id ->
+            ShellCatalog.sidebarIds(features).forEach { id ->
                 if (id == ShellCatalog.CREATE_ID) {
                     SidebarRow(
                         label = "Create",
@@ -274,6 +280,7 @@ private fun FloatingHeader(
     statusBar: Dp,
     selected: ShellDestination,
     onSelect: (ShellDestination) -> Unit,
+    features: ServerFeatures,
 ) {
     val tokens = LocalFgTokens.current
     val top = maxOf(metrics.headerTopMinDp.dp, statusBar + metrics.headerTopSafeExtraDp.dp)
@@ -306,7 +313,7 @@ private fun FloatingHeader(
                     .weight(1f)
                     .clickable(role = Role.Button, onClick = { onSelect(ShellDestination.HOME) }),
             )
-            ShellCatalog.headerIds.forEach { id ->
+            ShellCatalog.headerIds(features).forEach { id ->
                 val destination = ShellCatalog.destination(id) ?: return@forEach
                 HeaderAction(
                     destination = destination,
@@ -358,6 +365,7 @@ private fun FloatingDock(
     selected: ShellDestination,
     onSelect: (ShellDestination) -> Unit,
     onCreate: () -> Unit,
+    features: ServerFeatures,
 ) {
     val tokens = LocalFgTokens.current
     val bottom = maxOf(SiteMetrics.DOCK_BOTTOM_MIN_DP.dp, navigationBar + SiteMetrics.DOCK_BOTTOM_SAFE_EXTRA_DP.dp)
@@ -389,6 +397,7 @@ private fun FloatingDock(
                 selected = selected,
                 onSelect = onSelect,
                 onCreate = onCreate,
+                features = features,
             )
         }
     }
@@ -400,9 +409,10 @@ private fun DockRow(
     selected: ShellDestination,
     onSelect: (ShellDestination) -> Unit,
     onCreate: () -> Unit,
+    features: ServerFeatures,
 ) {
     val tokens = LocalFgTokens.current
-    val slots = ShellCatalog.dockIds
+    val slots = ShellCatalog.dockIds(features)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val itemWidth = if (slots.isEmpty()) maxWidth else maxWidth / slots.size
         val indicator = minOf(48.dp, maxHeight)
