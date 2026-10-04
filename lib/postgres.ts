@@ -126,6 +126,14 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     version: 17,
     statements: tursoMessagingV17Statements,
   },
+  {
+    // Media trash restore needs the prior status. Folded into the base assets
+    // CREATE for new databases; this additive column covers existing Turso DBs.
+    version: 18,
+    statements: [
+      "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
+    ],
+  },
 ];
 
 /** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not

@@ -8,7 +8,7 @@ import { referencedAsset } from './media';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
 import { AdminError } from './validation';
-import { inPlaceholders } from '../sql';
+import { dialectOf, inPlaceholders } from '../sql';
 
 const DAY_MS = 86_400_000;
 export const SYSTEM_PRUNE_BATCH_LIMIT = 100;
@@ -180,9 +180,13 @@ export async function runReadOnlySql(pool: PoolLike, actorId: string, input: Rec
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SET TRANSACTION READ ONLY');
-    await client.query("SET LOCAL statement_timeout='5s'");
-    await client.query("SET LOCAL idle_in_transaction_session_timeout='7s'");
+    // PostgreSQL session guards have no libSQL equivalent; TursoPool already
+    // runs each statement independently, and the SELECT itself is capped below.
+    if (dialectOf(client) !== 'sqlite') {
+      await client.query('SET TRANSACTION READ ONLY');
+      await client.query("SET LOCAL statement_timeout='5s'");
+      await client.query("SET LOCAL idle_in_transaction_session_timeout='7s'");
+    }
     const { rows } = await client.query(`SELECT * FROM (${query.sql}) AS admin_read_only_result LIMIT 501`);
     await client.query('COMMIT');
     const truncated = rows.length > 500;
@@ -260,7 +264,7 @@ export async function wipeDemoData(pool: PoolLike, actorId: string, input: Recor
     exact(input.confirmation, `WIPE ${profileCount} DEMO PROFILES`);
     const { rows: [posts] } = await db.query('SELECT COUNT(*) AS count FROM posts p JOIN profiles a ON a.id=p.author_id WHERE a.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=a.id)');
     await db.query('UPDATE admin_demo_seed_control SET enabled=false,updated_at=$1,updated_by=$2 WHERE id=1', [Date.now(), actor.userId]);
-    await db.query('DELETE FROM profiles p WHERE p.is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=p.id)');
+    await db.query('DELETE FROM profiles WHERE is_demo=1 AND NOT EXISTS(SELECT 1 FROM "user" u WHERE u.id=profiles.id)');
     await insertAudit(db, actor, { action: 'system.demo.wipe', targetType: 'demoData', targetId: 'all-demo-profiles', before: { profiles: profileCount, posts: Number(posts.count), seedEnabled: true }, after: { profiles: 0, posts: 0, seedEnabled: false }, reason });
     return { ok: true, wipedProfiles: profileCount, wipedPosts: Number(posts.count), seedEnabled: false };
   });
