@@ -29,9 +29,9 @@ Production media answers `307` to `https://*.public.blob.vercel-storage.com`. Ok
 
 ## Routes that exist and are not opened here
 
-- `GET /api/social?explore=` and `GET /api/social?hashtag=` and `GET /api/social?search=` — Search and Explore are still placeholders.
-- `GET /api/social?saved=` and `GET /api/social?collections=` — Saved is still a placeholder.
-- `GET /api/social?profile=` — Profiles are still a placeholder. That route is also where a profile's stories would come from.
+- `GET /api/social?explore=` and `GET /api/social?hashtag=` — Explore is still a placeholder.
+- `GET /api/social?search=`, `GET /api/social?person=`, `GET /api/social?profile=`, `GET /api/social?notifications=`, and account settings are Phase 8. See `PROFILES.md`.
+- The Saved destination in the dock is still a placeholder. A profile's saved tab uses `GET /api/social?saved=` when that profile is your own and saves are enabled.
 - `GET /api/social?highlights=<owner>` — story highlights. Not shown. An unknown owner returned `200 []` while signed out.
 - `GET /api/social?story-viewers=<id>` — owner-only. Not shown. Signed out it returned `401` `{"error":"Sign in to join the conversation."}`.
 - `POST /api/social` actions `create_post`, `reaction`, `comment`, `highlight`, and story replies — not called.

@@ -1,7 +1,6 @@
 package com.functiongram.app.presentation.navigation
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -15,7 +14,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.functiongram.app.data.auth.AuthSessionRepository
+import com.functiongram.app.data.directory.DirectoryRepository
 import com.functiongram.app.data.feed.FeedRepository
+import com.functiongram.app.presentation.directory.DevicePreferences
 import com.functiongram.app.data.messaging.MessagingRepository
 import com.functiongram.app.presentation.auth.AuthPhase
 import com.functiongram.app.presentation.auth.AuthViewModel
@@ -26,12 +27,11 @@ import com.functiongram.app.presentation.theme.SystemBarIcons
 import com.functiongram.app.presentation.ui.FgLoading
 
 @Composable
-fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository, feed: FeedRepository) {
+fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository, feed: FeedRepository, directory: DirectoryRepository, preferences: DevicePreferences, darkTheme: Boolean) {
     val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(repository))
     val state by viewModel.state.collectAsStateWithLifecycle()
     val navController = rememberNavController()
-    val dark = isSystemInDarkTheme()
-    SystemBarIcons(light = !dark || !state.splashFinished)
+    SystemBarIcons(light = !darkTheme || !state.splashFinished)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -63,6 +63,8 @@ fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingR
                     messaging = messaging,
                     viewerId = state.profile?.userId.orEmpty(),
                     feed = feed,
+                    directory = directory,
+                    preferences = preferences,
                 )
             }
         }

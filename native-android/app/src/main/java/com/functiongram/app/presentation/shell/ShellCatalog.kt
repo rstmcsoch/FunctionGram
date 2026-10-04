@@ -2,8 +2,9 @@ package com.functiongram.app.presentation.shell
 
 /**
  * Website default navigation from lib/appearance.ts NAV_TARGETS.
- * Create is an action, not a destination. Home and Reels load the social API.
- * Search, Explore, profiles, and saved posts stay placeholders.
+ * Create is an action, not a destination. Home, Reels, Search, Notifications,
+ * and Profile load the social API. Profile opens the signed-in username, not
+ * a generic /profile path. Explore and the Saved destination stay placeholders.
  */
 enum class ShellDestination(
     val id: String,

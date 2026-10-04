@@ -71,12 +71,20 @@ fun MessagingRoute(
     repository: MessagingRepository,
     viewerId: String,
     shellBottom: Dp,
+    pendingPeerId: String? = null,
+    pendingTitle: String = "",
+    onPendingPeerConsumed: () -> Unit = {},
 ) {
     val viewModel: MessagingViewModel = viewModel(
         key = "messages-$viewerId",
         factory = MessagingViewModel.factory(repository, viewerId),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingPeerId) {
+        val peer = pendingPeerId ?: return@LaunchedEffect
+        viewModel.openPeer(peer, pendingTitle)
+        onPendingPeerConsumed()
+    }
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(PickVisualMedia()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
