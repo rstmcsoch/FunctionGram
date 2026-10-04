@@ -271,6 +271,7 @@ export const tursoSchemaStatements: string[] = [
     source_retained_bytes INTEGER NOT NULL DEFAULT 0,
     verified INTEGER NOT NULL DEFAULT 1,
     storage_owner TEXT,
+    trash_origin TEXT NOT NULL DEFAULT 'ready',
 
     FOREIGN KEY (owner_id)
       REFERENCES profiles(id)

@@ -34,6 +34,6 @@ test('feature wrappers omit disabled controls from SSR rather than merely hiding
  const flags=resolveFeatures(DEFAULT_FEATURES,null);flags.likes=false;
  const html=renderToStaticMarkup(React.createElement(FeatureContext,{value:flags},React.createElement(Feature,{name:'likes'},React.createElement('button',null,'Like'))));
  assert.equal(html,'');
- assert.equal(counterSql('0','base_likes','likes',{multiplier:1,jitter:0,hide:true}),'NULL::bigint');
- assert.match(counterSql('0','base_likes','likes',{multiplier:2,jitter:10,hide:false}),/hashtext/);
+ assert.equal(counterSql('0','base_likes','likes',{multiplier:1,jitter:0,hide:true}),'NULL');
+ assert.match(counterSql('0','base_likes','likes',{multiplier:2,jitter:10,hide:false}),/length\(p\.id \|\| ':likes'\)/);
 });
