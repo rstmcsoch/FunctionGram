@@ -5,6 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {schemaStatements,socialUpgradeStatements,aspectUpgradeStatements,accountUpgradeStatements,adminUpgradeStatements,adminUsersUpgradeStatements,adminContentUpgradeStatements,mediaUpgradeStatements,moderationUpgradeStatements,adminHardeningUpgradeStatements,adminCommsUpgradeStatements,adminSystemUpgradeStatements} from '../lib/postgres-schema';
 import {postgresQuery} from '../lib/sql';
 import {buildFeedQuery,buildPeopleQuery} from '../lib/server';
+import {ALL_FEATURES} from '../lib/features';
 import {getAuthTables} from 'better-auth/db';
 import {detectMediaType} from '../lib/media-type';
 
@@ -74,4 +75,12 @@ test('Vercel application routes do not import Cloudflare bindings or trust Sites
  for(const path of ['../lib/server.ts','../lib/auth.ts','../lib/email.ts','../lib/uploads.ts','../app/api/social/route.ts','../app/api/dev-session/route.ts','../app/api/dev-upload/route.ts','../app/api/upload/route.ts','../app/api/upload/complete/route.ts','../app/api/media/[key]/route.ts','../app/api/health/route.ts','../app/api/auth/[...all]/route.ts']){
   const source=readFileSync(new URL(path,import.meta.url),'utf8');assert.ok(!source.includes('cloudflare:workers'));assert.ok(!source.includes('oai-authenticated-user-id'));
  }
+});
+
+test('reels feed returns reel and video posts, and still drops reels when the feature is off',()=>{
+ const on=buildFeedQuery('bob',20,0,{reels:true});
+ assert.match(on.sql,/\(p\.kind='reel' OR \(p\.media_type='video' AND p\.kind='post'\)\)/);
+ const off=buildFeedQuery('bob',20,0,{reels:true},{...ALL_FEATURES,reels:false});
+ assert.match(off.sql,/p\.kind!='reel'/);
+ assert.match(off.sql,/\(p\.kind='reel' OR \(p\.media_type='video' AND p\.kind='post'\)\)/);
 });

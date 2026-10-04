@@ -7,7 +7,7 @@ import {readdirSync,readFileSync} from 'node:fs';
 import {LABEL_DEFAULTS,MAX_LABEL_BYTES,MAX_LABEL_IMPORT_BYTES,parseLabelsImport,validateLabels,labelsFromSettings,createTranslator,navigationLabel,type LabelKey} from '../lib/admin/labels';
 import {validateSetting} from '../lib/admin/validation';
 import {LabelsProvider} from '../components/social/labels';
-import {Reels} from '../components/social/reels';
+import {Reels,reelFrame} from '../components/social/reels';
 import {Busy} from '../components/social/common';
 import type {PostActions} from '../components/social/post-card';
 test('labels default exactly to registry text, overrides are isolated and imports roundtrip',()=>{
@@ -67,3 +67,16 @@ test('migrated public surfaces contain no literal JSX copy, static text props or
  assert.throws(()=>parseLabelsImport(' '.repeat(MAX_LABEL_IMPORT_BYTES+1)));
  assert.throws(()=>parseLabelsImport(JSON.stringify(Object.fromEntries(Object.keys(overrides).map(key=>[key,'é'.repeat(1000)])))));
  });
+
+test('reel frames are only 9:16 or 3:4 and a missing ratio stays vertical',()=>{
+ assert.equal(reelFrame(9/16),'9/16');
+ assert.equal(reelFrame(3/4),'3/4');
+ assert.equal(reelFrame(1),'3/4');
+ assert.equal(reelFrame(16/9),'3/4');
+ assert.equal(reelFrame(9/20),'9/16');
+ assert.equal(reelFrame(0.65625),'9/16');
+ assert.equal(reelFrame(0.65626),'3/4');
+ assert.equal(reelFrame(null),'9/16');
+ assert.equal(reelFrame(undefined),'9/16');
+ assert.equal(reelFrame(0),'9/16');
+});

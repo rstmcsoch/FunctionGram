@@ -7,7 +7,7 @@ import {navigationLabel} from "@/lib/admin/labels";
 import {ALL_FEATURES,VIEW_FEATURES} from "@/lib/features";
 import { Brand, Banners, LiveAnnouncements, PublicFooter, navIcons, type CmsFooterPage, type LiveAnnouncement } from './appearance';
 import { DEFAULT_APPEARANCE, targetEnabled, type Appearance } from '@/lib/appearance';
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore, useMemo } from "react";
 import {
   Send, UserRound, Menu, Bookmark,
   Sun, Moon, Info, LogIn, Link as LinkIcon, RefreshCw,
@@ -123,6 +123,11 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [reportTarget, setReportTarget] = useState<Person | null>(null);
   const [followingFeed, setFollowingFeed] = useState<{ posts: Post[]; hasMore: boolean; loading: boolean }>({ posts: [], hasMore: false, loading: false });
+  // Dedicated reels pages. The home feed is only the first mixed slice, so the
+  // viewer asks ?reels=1 itself and still folds in videos already on hand.
+  const [reelsFeed, setReelsFeed] = useState<{ posts: Post[]; hasMore: boolean }>({ posts: [], hasMore: true });
+  const [reelsAttempted, setReelsAttempted] = useState(false);
+  const reelsInFlight = useRef(false);
 
   const theme = useSyncExternalStore(subscribeTheme, readTheme, () => "light" as const);
   const [now, setNow] = useState(Date.now);
@@ -190,6 +195,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const patchPost = useCallback((id: string, update: (post: Post) => Post) => {
     setData(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
     setSelectedPost(current => (current?.id === id ? update(current) : current));
+    setReelsFeed(current => ({ ...current, posts: current.posts.map(post => post.id === id ? update(post) : post) }));
   }, [setData,setSelectedPost]);
 
   /* --------------------------------- navigation --------------------------------- */
@@ -375,6 +381,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     if (kind === "hidden") {
       if (!active) return;
       setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
+      setReelsFeed(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
       setSelectedPost(null);
       try {
         await request("/api/social", { action: "reaction", id: post.id, kind, active: true }, t);
@@ -388,6 +395,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
         });
       } catch (e) {
         setData(current => ({ ...current, posts: [post, ...current.posts] }));
+        setReelsFeed(current => ({ ...current, posts: [post, ...current.posts.filter(item => item.id !== post.id)] }));
         toast.error((e as Error).message);
       }
       return;
@@ -425,6 +433,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     if (!deleteTarget) return;
     const post = deleteTarget;
     setData(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
+    setReelsFeed(current => ({ ...current, posts: current.posts.filter(item => item.id !== post.id) }));
     setSelectedPost(null); setDeleteTarget(null);
     try {
       // The post is gone locally the moment the user confirms; the server call
@@ -434,6 +443,7 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
       await request("/api/social", { action: "delete_post", id: post.id }, t);
     } catch (e) {
       setData(current => ({ ...current, posts: [post, ...current.posts] }));
+      setReelsFeed(current => ({ ...current, posts: [post, ...current.posts.filter(item => item.id !== post.id)] }));
       toast.error((e as Error).message);
     }
   };
@@ -495,6 +505,47 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
     if (flags.follow && view === "home" && feedTab === "following" && data.me && !followingFeed.posts.length && !followingFeed.loading && !followingInFlight.current) void loadFollowing(0);
   }, [flags.follow, view, feedTab, data.me, followingFeed.posts.length, followingFeed.loading, loadFollowing]);;
 
+  const loadReels = useCallback(async (offset = 0) => {
+    if (!flags.reels || reelsInFlight.current) return;
+    reelsInFlight.current = true;
+    try {
+      const page = await request<Post[]>("/api/social?reels=1&offset=" + offset, undefined, t);
+      setReelsFeed(current => ({
+        posts: offset === 0 ? page : [...current.posts, ...page.filter(item => !current.posts.some(existing => existing.id === item.id))],
+        hasMore: page.length === 20,
+      }));
+    } catch (e) {
+      if (offset === 0) setReelsFeed(current => ({ ...current, hasMore: false }));
+      toast.error((e as Error).message);
+    } finally {
+      reelsInFlight.current = false;
+      setReelsAttempted(true);
+    }
+  }, [flags.reels, t]);
+
+  // State updates stay in the promise callback. A direct call here is what the
+  // set-state-in-effect lint treats as a synchronous render cascade.
+  useEffect(() => {
+    if (view !== "reels" || !flags.reels || reelsAttempted) return;
+    let active = true;
+    void request<Post[]>("/api/social?reels=1&offset=0", undefined, t).then(page => {
+      if (!active) return;
+      setReelsFeed({ posts: page, hasMore: page.length === 20 });
+      setReelsAttempted(true);
+    }).catch(e => {
+      if (!active) return;
+      setReelsFeed(current => ({ ...current, hasMore: false }));
+      setReelsAttempted(true);
+      toast.error((e as Error).message);
+    });
+    return () => { active = false; };
+  }, [view, flags.reels, reelsAttempted, t]);
+
+  const loadMoreReels = useCallback(() => {
+    if (!reelsFeed.hasMore || !reelsAttempted) return;
+    void loadReels(reelsFeed.posts.length);
+  }, [reelsFeed.hasMore, reelsFeed.posts.length, reelsAttempted, loadReels]);
+
   // Blocking removes the follow in both directions on the server; the local
   // copy just reflects it for instant feedback.
   // Blocking also removes follows in both directions server-side. The local
@@ -532,6 +583,12 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   /* ---------------------------------- derived ---------------------------------- */
 
   const stories = data.posts.filter(post => flags.stories && post.kind === "story" && (!post.expires_at || post.expires_at > now));
+  const reelsPosts = useMemo(() => {
+    const isVideo = (post: Post) => post.media_type === "video" && (post.kind === "reel" || post.kind === "post");
+    const ids = new Set(reelsFeed.posts.map(post => post.id));
+    const extras = data.posts.filter(post => isVideo(post) && !ids.has(post.id));
+    return [...reelsFeed.posts.filter(isVideo), ...extras].sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  }, [reelsFeed.posts, data.posts]);
   const feedPosts = data.posts.filter(post => post.kind !== "story" && post.kind !== "reel"
     && (feedTab === "for-you" || data.people.find(user => user.id === post.author_id)?.followed || post.author_id === data.me?.id));
   const profile = view === "profile" ? resolvePerson(data.people, data.me, profileId) : null;
@@ -642,7 +699,9 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
                   openPost={actions.openPost} follow={person => void follow(person)} followPending={followPending}
                   navigate={(target, id) => navigate(target, id)} />
               : <ExploreView category={category} setCategory={setCategory} openPost={actions.openPost} />)}
-            {view === "reels" && <Reels posts={data.posts} actions={actions} onCreate={() => openCreate("reel")} />}
+            {view === "reels" && (reelsPosts.length || reelsAttempted || !flags.reels
+              ? <Reels posts={reelsPosts} actions={actions} onCreate={() => openCreate("reel")} onNearEnd={loadMoreReels} />
+              : <div className="reels-view reels-loading"><Busy /></div>)}
             {view === "profile" && (invalidProfile || (profileId && !profile)
               ? <Empty icon={<UserRound />} heading={t("app.profile_not_found")} body={t("app.this_profile_is_unavailable")} />
               : profile
