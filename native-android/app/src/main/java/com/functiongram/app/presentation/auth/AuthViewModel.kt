@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.functiongram.app.data.auth.AuthCallResult
 import com.functiongram.app.data.auth.AuthSessionRepository
+import com.functiongram.app.push.PushLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.withContext
 
 class AuthViewModel(
     private val repository: AuthSessionRepository,
+    private val push: PushLifecycle? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(AuthUiState())
     val state: StateFlow<AuthUiState> = _state.asStateFlow()
@@ -57,6 +59,13 @@ class AuthViewModel(
     fun signOut() {
         viewModelScope.launch {
             _state.update { it.copy(busy = true, banner = null) }
+            withContext(Dispatchers.IO) {
+                try {
+                    push?.prepareSignOut()
+                } catch (_: RuntimeException) {
+                    // Push is optional. Sign-out still runs.
+                }
+            }
             val result = withContext(Dispatchers.IO) { repository.signOut() }
             publish(result, AuthApplySource.SIGN_OUT)
         }
@@ -86,14 +95,23 @@ class AuthViewModel(
                 hasSession = repository.hasSession(),
             )
         }
+        if (result is AuthCallResult.SignedIn) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    push?.onSignedIn()
+                } catch (_: RuntimeException) {
+                    // A missing push token must not change the session.
+                }
+            }
+        }
     }
 
     companion object {
-        fun factory(repository: AuthSessionRepository): ViewModelProvider.Factory {
+        fun factory(repository: AuthSessionRepository, push: PushLifecycle? = null): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return AuthViewModel(repository) as T
+                    return AuthViewModel(repository, push) as T
                 }
             }
         }

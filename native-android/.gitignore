@@ -15,3 +15,7 @@ keystore.properties
 keystore.properties
 !keystore.properties.example
 
+
+# Optional Firebase Android config. The example file stays tracked.
+google-services.json
+!google-services.json.example

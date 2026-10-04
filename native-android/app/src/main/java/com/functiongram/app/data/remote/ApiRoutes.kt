@@ -13,6 +13,7 @@ object ApiRoutes {
     const val MEDIA = "/api/media"
     const val MESSAGE_ATTACHMENT = "/api/message-attachment"
     const val MESSAGE_MEDIA = "/api/message-media"
+    const val PUSH = "/api/push"
     const val SIGN_IN_EMAIL = "sign-in/email"
     const val GET_SESSION = "get-session"
     const val SIGN_OUT = "sign-out"
@@ -27,6 +28,9 @@ object ApiRoutes {
     fun media(origin: String, key: String): String = join(origin, "$MEDIA/${key.trimStart('/')}")
 
     fun messageAttachment(origin: String): String = join(origin, MESSAGE_ATTACHMENT)
+
+    /** Optional device-token register/unregister. Not required for login or messaging. */
+    fun push(origin: String): String = join(origin, PUSH)
 
     /**
      * Participant media. The id is a message id, never a storage key and never

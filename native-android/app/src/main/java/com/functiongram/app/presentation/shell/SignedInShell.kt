@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,6 +38,8 @@ import com.functiongram.app.presentation.ui.FgErrorState
 import com.functiongram.app.presentation.ui.FgLoading
 import com.functiongram.app.presentation.ui.FunctionGramShell
 import com.functiongram.app.presentation.ui.ShellPage
+import com.functiongram.app.push.PushDestination
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 fun SignedInShell(
@@ -48,6 +51,9 @@ fun SignedInShell(
     feed: FeedRepository,
     directory: DirectoryRepository,
     preferences: DevicePreferences,
+    pendingLink: StateFlow<PushDestination?>,
+    onLinkHandled: () -> Unit,
+    onNotificationsEnabled: (Boolean) -> Unit,
 ) {
     var selectedId by rememberSaveable { mutableStateOf(ShellDestination.HOME.id) }
     var createOpen by rememberSaveable { mutableStateOf(false) }
@@ -69,6 +75,27 @@ fun SignedInShell(
         }
     }
     val selfLookup = sessionState.shell?.me?.username?.takeIf { it.isNotBlank() } ?: viewerId
+    val pending by pendingLink.collectAsStateWithLifecycle()
+    LaunchedEffect(sessionState.shell?.flags?.notifications) {
+        val shell = sessionState.shell ?: return@LaunchedEffect
+        onNotificationsEnabled(shell.flags.notifications)
+    }
+    LaunchedEffect(pending, sessionState.status, flags, selfLookup) {
+        val destination = pending ?: return@LaunchedEffect
+        val shellReady = sessionState.status == ScreenStatus.Ready && sessionState.shell != null
+        when (val decision = ShellDeepLink.decide(destination, flags, shellReady, selfLookup)) {
+            ShellDeepLink.Decision.Waiting -> Unit
+            ShellDeepLink.Decision.Blocked -> onLinkHandled()
+            is ShellDeepLink.Decision.Open -> {
+                settingsOpen = false
+                profileLookup = decision.applied.profileLookup
+                messagePeer = decision.applied.messagePeer
+                messageTitle = decision.applied.messageTitle
+                decision.applied.selectedId?.let { selectedId = it }
+                onLinkHandled()
+            }
+        }
+    }
 
     BackHandler(enabled = settingsOpen || profileLookup != null) {
         when {
