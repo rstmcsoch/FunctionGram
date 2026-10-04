@@ -28,6 +28,8 @@ test('Phase 9 role matrix grants moderators content hiding but not account promo
  assert.equal(hasPermission('moderator','users.read'),false);
  assert.equal(hasPermission('moderator','users.manage'),false);
  assert.equal(hasPermission('moderator','roles.manage'),false);
+ assert.equal(hasPermission('admin','users.delete'),false);
+ assert.equal(hasPermission('owner','users.delete'),true);
  assert.equal(hasPermission('admin','roles.manage'),false);
  assert.equal(hasPermission('owner','roles.manage'),true);
  assert.equal(hasPermission('owner','audit.read'),true);

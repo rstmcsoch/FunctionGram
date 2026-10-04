@@ -18,7 +18,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
   if (id === actor.userId) actions = ['signout','resetPassword'];
   else if (user.role === 'owner' || (['admin','moderator'].includes(user.role) && actor.role !== 'owner')) actions = [];
   else if (user.deleted_at != null) actions = actor.role==='owner'?['restore']:[];
-  else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
+  else actions = actions.filter(action => action !== 'restore' && !(action === 'verify' && user.emailVerified) && !(['promote','promoteModerator'].includes(action) && (actor.role !== 'owner' || user.role !== 'user')) && !(action === 'demote' && (actor.role !== 'owner' || !['admin','moderator'].includes(user.role))) && !(action === 'unban' && !user.banned) && !(action === 'delete' && actor.role !== 'owner') && (actor.role==='owner'||!['promote','promoteModerator','demote'].includes(action)));
   // Epoch-millisecond values (such as a messaging suspension end) must reach Date as numbers:
   // `new Date('1790919078634')` is an Invalid Date, while date strings still parse as before.
   const date = (value: unknown) => new Date(typeof value === 'number' ? value : String(value)).toLocaleString('en-IN', { timeZone: 'UTC' }) + ' UTC';
