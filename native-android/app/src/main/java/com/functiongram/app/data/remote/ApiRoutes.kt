@@ -26,6 +26,42 @@ object ApiRoutes {
 
     fun media(origin: String, key: String): String = join(origin, "$MEDIA/${key.trimStart('/')}")
 
+    fun messageAttachment(origin: String): String = join(origin, MESSAGE_ATTACHMENT)
+
+    /**
+     * Participant media. The id is a message id, never a storage key and never
+     * an absolute URL. Callers must not pass a value taken from an arbitrary host.
+     */
+    fun messageMedia(origin: String, messageId: String): String {
+        require(messageId.isNotBlank() && messageId.length <= 100) { "Invalid message id." }
+        require(!messageId.contains('/') && !messageId.contains('\\') && !messageId.contains("..")) {
+            "Invalid message id."
+        }
+        require('?' !in messageId && '#' !in messageId && ':' !in messageId) { "Invalid message id." }
+        return join(origin, "$MESSAGE_MEDIA/$messageId")
+    }
+
+    /** `GET /api/social?conversations=<filter>&limit=`. Filter names are the server's. */
+    fun conversations(origin: String, filter: String = "all", limit: Int = 100): String {
+        val safe = if (filter in CONVERSATION_FILTERS) filter else "all"
+        val bounded = limit.coerceIn(1, 200)
+        return social(origin) + "?conversations=" + encode(safe) + "&limit=" + bounded
+    }
+
+    /** `GET /api/social?messages=<peer>&limit=` plus an optional cursor. */
+    fun thread(origin: String, peerId: String, limit: Int = 50, cursor: String? = null): String {
+        require(peerId.isNotBlank() && peerId.length <= 100) { "Invalid conversation." }
+        val bounded = limit.coerceIn(1, 100)
+        val base = social(origin) + "?messages=" + encode(peerId) + "&limit=" + bounded
+        if (cursor.isNullOrBlank()) return base
+        return base + "&cursor=" + encode(cursor)
+    }
+
+    private fun encode(value: String): String =
+        java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+
+    private val CONVERSATION_FILTERS = setOf("all", "unread", "archived", "favorites")
+
     private fun join(origin: String, path: String): String {
         val base = origin.trim().trimEnd('/')
         val suffix = if (path.startsWith("/")) path else "/$path"

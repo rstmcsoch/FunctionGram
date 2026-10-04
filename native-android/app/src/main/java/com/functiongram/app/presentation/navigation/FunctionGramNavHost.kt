@@ -15,6 +15,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.functiongram.app.data.auth.AuthSessionRepository
+import com.functiongram.app.data.messaging.MessagingRepository
 import com.functiongram.app.presentation.auth.AuthPhase
 import com.functiongram.app.presentation.auth.AuthViewModel
 import com.functiongram.app.presentation.auth.SignInRoute
@@ -24,7 +25,7 @@ import com.functiongram.app.presentation.theme.SystemBarIcons
 import com.functiongram.app.presentation.ui.FgLoading
 
 @Composable
-fun FunctionGramNavHost(repository: AuthSessionRepository) {
+fun FunctionGramNavHost(repository: AuthSessionRepository, messaging: MessagingRepository) {
     val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(repository))
     val state by viewModel.state.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -58,6 +59,8 @@ fun FunctionGramNavHost(repository: AuthSessionRepository) {
                     profile = state.profile,
                     busy = state.busy,
                     onSignOut = viewModel::signOut,
+                    messaging = messaging,
+                    viewerId = state.profile?.userId.orEmpty(),
                 )
             }
         }

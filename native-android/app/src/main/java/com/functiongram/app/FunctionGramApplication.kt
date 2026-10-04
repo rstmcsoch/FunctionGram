@@ -5,6 +5,8 @@ import com.functiongram.app.configuration.ApiEnvironment
 import com.functiongram.app.data.auth.AuthSessionRepository
 import com.functiongram.app.data.auth.EncryptedSessionStore
 import com.functiongram.app.data.auth.OkHttpAuthTransport
+import com.functiongram.app.data.messaging.MessagingRepository
+import com.functiongram.app.data.messaging.OkHttpMessagingRepository
 import com.functiongram.app.data.auth.SessionCookieJar
 import com.functiongram.app.data.remote.FunctionGramHttpClient
 import com.functiongram.app.security.AppSecurityState
@@ -17,6 +19,9 @@ import com.functiongram.app.security.toSnapshot
 
 class FunctionGramApplication : Application() {
     lateinit var authRepository: AuthSessionRepository
+        private set
+
+    lateinit var messagingRepository: MessagingRepository
         private set
 
     override fun onCreate() {
@@ -38,6 +43,7 @@ class FunctionGramApplication : Application() {
             transport = OkHttpAuthTransport(origin, http.okHttp()),
             jar = jar,
         )
+        messagingRepository = OkHttpMessagingRepository(origin, http.okHttp())
     }
 
     companion object {

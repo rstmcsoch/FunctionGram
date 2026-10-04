@@ -11,10 +11,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repository = (application as FunctionGramApplication).authRepository
+        val app = application as FunctionGramApplication
         setContent {
             FunctionGramTheme {
-                FunctionGramNavHost(repository)
+                FunctionGramNavHost(app.authRepository, app.messagingRepository)
             }
         }
     }
