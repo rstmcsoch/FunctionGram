@@ -48,6 +48,46 @@ object ApiRoutes {
         return social(origin) + "?conversations=" + encode(safe) + "&limit=" + bounded
     }
 
+    /**
+     * Public post media. The key must be the 36-character id the API stores.
+     * Callers must not pass an absolute URL or a message-media id.
+     */
+    fun publicMedia(origin: String, key: String): String {
+        require(key.length == 36 && MEDIA_KEY.matches(key)) { "Invalid media key." }
+        require('/' !in key && '\\' !in key && ':' !in key) { "Invalid media key." }
+        return media(origin, key)
+    }
+
+    /** `GET /api/social` bootstrap: features, story settings, and the first posts. */
+    fun homeFeed(origin: String): String = social(origin)
+
+    /** `GET /api/social?offset=` discovery page. The server clamps the offset. */
+    fun feedOffset(origin: String, offset: Int): String =
+        social(origin) + "?offset=" + offset.coerceIn(0, MAX_OFFSET)
+
+    /** `GET /api/social?following=1&offset=` signed-in following page. */
+    fun followingFeed(origin: String, offset: Int): String =
+        social(origin) + "?following=1&offset=" + offset.coerceIn(0, MAX_OFFSET)
+
+    /** `GET /api/social?post=<id>` returns a one-item array, or an empty array. */
+    fun singlePost(origin: String, id: String): String {
+        require(validResourceId(id)) { "Invalid post." }
+        return social(origin) + "?post=" + encode(id)
+    }
+
+    /** `GET /api/social?comments=<id>&limit=` plus an optional cursor. */
+    fun postComments(origin: String, postId: String, limit: Int = 30, cursor: String? = null): String {
+        require(validResourceId(postId)) { "Invalid post." }
+        val bounded = limit.coerceIn(1, 100)
+        val base = social(origin) + "?comments=" + encode(postId) + "&limit=" + bounded
+        if (cursor.isNullOrBlank()) return base
+        return base + "&cursor=" + encode(cursor)
+    }
+
+    /** `GET /api/social?reels=1&offset=` video page. */
+    fun reelsFeed(origin: String, offset: Int): String =
+        social(origin) + "?reels=1&offset=" + offset.coerceIn(0, MAX_OFFSET)
+
     /** `GET /api/social?messages=<peer>&limit=` plus an optional cursor. */
     fun thread(origin: String, peerId: String, limit: Int = 50, cursor: String? = null): String {
         require(peerId.isNotBlank() && peerId.length <= 100) { "Invalid conversation." }
@@ -60,7 +100,16 @@ object ApiRoutes {
     private fun encode(value: String): String =
         java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
+    private fun validResourceId(id: String): Boolean {
+        if (id.isBlank() || id.length > 100) return false
+        return id.none { char ->
+            char.isISOControl() || char == '/' || char == '\\' || char == '?' || char == '#' || char == ' '
+        }
+    }
+
     private val CONVERSATION_FILTERS = setOf("all", "unread", "archived", "favorites")
+    private val MEDIA_KEY = Regex("^[a-f0-9-]{36}$")
+    private const val MAX_OFFSET = 10_000
 
     private fun join(origin: String, path: String): String {
         val base = origin.trim().trimEnd('/')
