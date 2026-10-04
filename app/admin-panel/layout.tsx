@@ -45,7 +45,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return <div className="admin-shell admin-layout">
     <AdminThemeScope />
     <a className="admin-skip-link" href="#admin-main">Skip to main content</a>
-    <AdminNav groups={groups} wordmark="RSTMC" account={{ email: actor.email, role: actor.role, userId: actor.userId }} />
+    <AdminNav groups={groups} wordmark="RSTMC" account={{ email: actor.email, role: actor.role }} />
     <div className="admin-panel">
       <main id="admin-main" className="admin-main">{children}</main>
       <footer className="admin-footer"><p>© {new Date().getFullYear()} RSTMC.</p></footer>

@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 import { ADMIN_BASE_PATH } from "./lib/admin/config";
+import { ADMIN_SECURITY_HEADERS, BASELINE_SECURITY_HEADERS } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   // The embedded dev database must run unbundled (its filesystem layer reads
   // its own wasm assets at runtime). It is only used by `next dev` without a
   // DATABASE_URL; production deployments never touch it.
@@ -17,13 +19,15 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ['lucide-react', 'radix-ui', 'date-fns'],
   },
   async headers() {
-    return [ADMIN_BASE_PATH + '/:path*', '/api/admin/:path*'].map(source => ({
+    const baseline = ['/', '/:path*'].map(source => ({
       source,
-      headers: [
-        { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
-        { key: 'Cache-Control', value: 'private, no-store' },
-      ],
+      headers: BASELINE_SECURITY_HEADERS,
     }));
+    const admin = [ADMIN_BASE_PATH, ADMIN_BASE_PATH + '/:path*', '/api/admin/:path*'].map(source => ({
+      source,
+      headers: ADMIN_SECURITY_HEADERS,
+    }));
+    return [...baseline, ...admin];
   },
   serverExternalPackages: ["@electric-sql/pglite", "@libsql/kysely-libsql", "@libsql/client", "libsql"],
 };
