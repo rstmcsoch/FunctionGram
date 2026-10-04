@@ -145,10 +145,6 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     statements: VERIFICATION_TABLES,
   },
   {
-    // Compatibility migration for the Android push-token stack. This deliberately
-    // runs after main's existing 18–20 migrations so both diverged histories converge:
-    // older Android deployments that recorded migration 18 for push tokens still
-    // receive the media-trash column, and current main deployments receive tokens.
     version: 21,
     statements: [
       "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",

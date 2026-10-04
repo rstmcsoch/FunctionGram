@@ -1108,13 +1108,7 @@ export const tursoMessagingV17Statements: string[] = [
 ];
 
 
-/**
- * Migration 21: converge the main schema with the native Android push stack.
- *
- * Kept separate from migration 18 because the Android branch historically used
- * version 18 for device_push_tokens while main uses version 18 for trash_origin.
- * The additive trash_origin statement is already guarded by the migration runner.
- */
+/** Convergence migration for Android device push tokens (migration 21). */
 export const tursoPushTokenStatements: string[] = [
   `CREATE TABLE IF NOT EXISTS device_push_tokens (
     token TEXT PRIMARY KEY NOT NULL,
