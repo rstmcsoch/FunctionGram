@@ -1,6 +1,6 @@
 import type { QueryExecutor } from '../postgres';
 import { ADMIN_ROLES, type AdminRole } from './config';
-import { ADMIN_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, type AdminPermission } from './permissions';
+import { ADMIN_PERMISSIONS, ROLE_PERMISSIONS, type AdminPermission } from './permissions';
 import { AdminError } from './validation';
 
 export const ROLE_MATRIX_KEY = 'roles.matrix';
@@ -17,8 +17,8 @@ export type RoleMatrix = Record<Exclude<AdminRole, 'owner'>, AdminPermission[]>;
 
 export function defaultMatrix(): RoleMatrix {
   return {
-    admin: [...DEFAULT_ROLE_PERMISSIONS.admin],
-    moderator: [...DEFAULT_ROLE_PERMISSIONS.moderator],
+    admin: [...ROLE_PERMISSIONS.admin],
+    moderator: [...ROLE_PERMISSIONS.moderator],
   };
 }
 
@@ -77,9 +77,11 @@ export async function ensureRoleAnchors(db: QueryExecutor, email: string, userId
 }
 
 export function assertCanGrant(actorRole: AdminRole, grants: readonly AdminPermission[] | undefined, targetRole: 'admin' | 'moderator') {
-  const needed = targetRole === 'admin' ? 'roles.grantAdmin' : 'roles.grantModerator';
-  if (actorRole !== 'owner' && targetRole === 'admin') throw new AdminError('Only the owner can add or remove administrators.', 403);
-  if (!(grants ?? DEFAULT_ROLE_PERMISSIONS[actorRole]).includes(needed) && actorRole !== 'owner') {
+  if (actorRole === 'owner') return;
+  if (targetRole === 'admin') {
+    throw new AdminError('Only the owner can add or remove administrators.', 403);
+  }
+  if (!(grants ?? ROLE_PERMISSIONS[actorRole]).includes('roles.manage')) {
     throw new AdminError('Your role cannot change this account.', 403);
   }
 }
