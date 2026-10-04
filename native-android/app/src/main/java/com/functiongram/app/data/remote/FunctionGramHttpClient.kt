@@ -2,19 +2,23 @@ package com.functiongram.app.data.remote
 
 import com.functiongram.app.BuildConfig
 import com.functiongram.app.configuration.VariantMarker
+import com.functiongram.app.data.auth.SessionCookieInterceptor
+import com.functiongram.app.data.auth.SessionCookieJar
 import com.functiongram.app.security.EndpointResolver
-import com.functiongram.app.security.InMemorySessionCookieJar
 import okhttp3.ConnectionSpec
+import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * HTTP foundation aimed at the existing FunctionGram API.
+ * HTTP client aimed at the existing FunctionGram API.
+ * Auth cookies, when a jar is supplied, are added by [SessionCookieInterceptor].
  * Nothing in this type opens a database connection or a WebView.
  */
 class FunctionGramHttpClient(
     origin: String,
-    private val client: OkHttpClient = defaultClient(origin),
+    sessionJar: SessionCookieJar? = null,
+    private val client: OkHttpClient = defaultClient(origin, sessionJar),
 ) {
     private val origin: String = origin.trim().trimEnd('/')
 
@@ -33,8 +37,10 @@ class FunctionGramHttpClient(
 
     fun newCall(request: Request) = client.newCall(request)
 
+    fun okHttp(): OkHttpClient = client
+
     companion object {
-        fun defaultClient(origin: String): OkHttpClient {
+        fun defaultClient(origin: String, sessionJar: SessionCookieJar? = null): OkHttpClient {
             val normalized = origin.trim().trimEnd('/')
             EndpointResolver.assertAllowed(
                 origin = normalized,
@@ -46,12 +52,15 @@ class FunctionGramHttpClient(
             } else {
                 listOf(ConnectionSpec.CLEARTEXT)
             }
-            return OkHttpClient.Builder()
+            val builder = OkHttpClient.Builder()
                 .connectionSpecs(specs)
-                .cookieJar(InMemorySessionCookieJar())
+                .cookieJar(CookieJar.NO_COOKIES)
                 .addInterceptor(SameOriginHeaderInterceptor(normalized))
                 .addNetworkInterceptor(HttpsOnlyInterceptor())
-                .build()
+            if (sessionJar != null) {
+                builder.addInterceptor(SessionCookieInterceptor(sessionJar))
+            }
+            return builder.build()
         }
     }
 }
