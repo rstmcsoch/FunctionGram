@@ -5,9 +5,8 @@ import { validateFeatures } from '../features';
 import { validateAppearance } from '../appearance';
 import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from './config';
 
-export class AdminError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
-}
+import { AdminError } from './errors';
+export { AdminError };
 
 export function validateSetting(key: string, value: unknown): Settings[SettingKey] {
   if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new AdminError('Unknown setting.');

@@ -1,4 +1,4 @@
-import { AdminError } from './validation';
+import { AdminError } from './errors';
 import type { AdminActor, AdminRole } from './config';
 
 export const ADMIN_PERMISSIONS = [
