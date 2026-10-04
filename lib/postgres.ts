@@ -229,8 +229,7 @@ function isTursoDatabase() {
 // Remove stray spaces, new lines or quotes that are easy to paste by mistake.
 function cleanEnv(value: string | undefined) {
   if (!value) return undefined;
-  const cleaned = value.trim().replace(/^["']+|["']+$/g, '').trim();
-  return cleaned || undefined;
+  const cleaned = value.trim().replace(/^['"]+|['"]+$/g, '').trim();
 }
 
 // libSQL cannot take undefined or boolean args.
