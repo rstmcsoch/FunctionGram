@@ -20,6 +20,7 @@ export const ADMIN_PERMISSIONS = [
   'settings.read',
   'settings.manage',
   'features.primary',
+  'features.primary',
   'media.manage',
   'media.delete',
   'moderation.read',
