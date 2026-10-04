@@ -11,6 +11,7 @@ import { countDbTrip } from './perf';
 
 import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
 import { ROLE_TABLES } from './admin/role-matrix';
+import { VERIFICATION_TABLES } from './verification-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -138,6 +139,10 @@ export const DATABASE_MIGRATIONS: Migration[] = [
   {
     version: 19,
     statements: ROLE_TABLES,
+  },
+  {
+    version: 20,
+    statements: VERIFICATION_TABLES,
   },
 ];
 

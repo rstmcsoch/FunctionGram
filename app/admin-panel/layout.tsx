@@ -21,6 +21,7 @@ const navigation: { label: string; path: string; permission: AdminPermission; gr
   {label:'Labels',path:'/labels',permission:'settings.manage',group:'Site',hint:'Look and copy',icon:'Tags'},
   {label:'Safety',path:'/moderation',permission:'moderation.read',group:'Trust',hint:'Reports and access',icon:'ShieldAlert'},
   {label:'Audit',path:'/audit',permission:'audit.read',group:'Trust',hint:'Reports and access',icon:'ScrollText'},
+  {label:'Verification',path:'/verification',permission:'security.read',group:'Trust',hint:'Reports and access',icon:'ShieldCheck'},
   {label:'Security & roles',path:'/security',permission:'security.read',group:'Trust',hint:'Reports and access',icon:'ShieldCheck'},
   {label:'Communications',path:'/communications',permission:'messages.read',group:'Reach',hint:'Messages and numbers',icon:'Megaphone'},
   {label:'Analytics',path:'/analytics',permission:'analytics.read',group:'Reach',hint:'Messages and numbers',icon:'BarChart3'},

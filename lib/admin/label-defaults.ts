@@ -832,5 +832,18 @@ export const LABEL_DEFAULTS = {
   "media.typeDisabled": "This media type is currently disabled.",
   "media.tooLarge": "Choose a file smaller than {max} MB.",
   "media.maxItems": "Choose up to {max} photos, or one video.",
-  "media.hint": "Drag & drop works too · {types} · Up to {max} MB per file · {quota} MB per day · {items} photos per post"
+  "media.hint": "Drag & drop works too · {types} · Up to {max} MB per file · {quota} MB per day · {items} photos per post",
+  "verification.title": "Verification",
+  "verification.current_batch": "Current batch: {batch}",
+  "verification.none": "No batch yet. Blue, Grey, and Golden are the only names.",
+  "verification.apply": "Apply",
+  "verification.dialog": "Verification application",
+  "verification.step": "Step {step} of {total} · {batch}",
+  "verification.review": "Review {batch}. Answers stay with this application.",
+  "verification.terms": "I accept the terms and conditions",
+  "verification.batch_blue": "Blue",
+  "verification.batch_grey": "Grey",
+  "verification.batch_golden": "Golden",
+  "verification.submitted": "Submitted for {batch}",
+  "verification.failed": "Could not submit."
 } as const;

@@ -577,7 +577,9 @@ export function ProfileView({ profile, me, tab, setTab, posts, openPost, onCreat
         <div className="profile-info">
           <div className="profile-title">
             <h1>{profile.username}</h1>
-            {profile.is_demo !== 1 && <BadgeCheck className="verified-badge" aria-label={t("views.verified")} />}
+            {profile.verification_batch === 'blue' && <BadgeCheck className="verified-badge batch-blue" aria-label={t("verification.batch_blue")} />}
+            {profile.verification_batch === 'grey' && <BadgeCheck className="verified-badge batch-grey" aria-label={t("verification.batch_grey")} />}
+            {profile.verification_batch === 'golden' && <BadgeCheck className="verified-badge batch-golden" aria-label={t("verification.batch_golden")} />}
             {profile.is_private ? <span className="sample-label private-label" title={t("settings.private_account")}><Lock size={11} />{t("views.private")}</span> : null}
             {hasStory && <button className="secondary-button" onClick={openStory}>{t("stories.view_story")}</button>}
             {own ? (
