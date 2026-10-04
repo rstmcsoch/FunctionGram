@@ -14,8 +14,12 @@ type Desk = {
 export function VerificationDesk({ role, data }: { role: string; data: Desk }) {
   const router = useRouter();
   const owner = role === 'owner';
-  const [age, setAge] = useState(data.config.minAgeDays);
-  const [posts, setPosts] = useState(data.config.minPosts);
+  const eligible = data.eligible || [];
+  const pending = data.pending || [];
+  const privilege = data.privilege || [];
+  const counts = data.counts || { blue: 0, grey: 0, golden: 0, grey_pending: 0, golden_pending: 0 };
+  const [age, setAge] = useState(data.config?.minAgeDays ?? 30);
+  const [posts, setPosts] = useState(data.config?.minPosts ?? 3);
   const [reason, setReason] = useState('');
   const [emailCode, setEmailCode] = useState('');
   const [stepCode, setStepCode] = useState('');
@@ -33,8 +37,8 @@ export function VerificationDesk({ role, data }: { role: string; data: Desk }) {
 
   return <>
     <section className="admin-card"><h2>Overview</h2>
-      <p>Blue {Number(data.counts?.blue || 0)} · Grey {Number(data.counts?.grey || 0)} · Golden {Number(data.counts?.golden || 0)} · Grey pending {Number(data.counts?.grey_pending || 0)} · Golden pending {Number(data.counts?.golden_pending || 0)}</p>
-      <p>{data.privilege?.length ? `Privileged window open until ${new Date(Number(data.privilege[0].expires_at)).toISOString()}` : 'Grey/Golden privileged window is closed.'}</p>
+      <p>Blue {Number(counts.blue || 0)} · Grey {Number(counts.grey || 0)} · Golden {Number(counts.golden || 0)} · Grey pending {Number(counts.grey_pending || 0)} · Golden pending {Number(counts.golden_pending || 0)}</p>
+      <p>{privilege.length ? `Privileged window open until ${new Date(Number(privilege[0].expires_at)).toISOString()}` : 'Grey/Golden privileged window is closed.'}</p>
     </section>
     <section className="admin-card"><h2>Blue criteria</h2>
       <p>Eligible accounts are not verified until an admin or owner finalizes Blue. This form is disabled for admins.</p>
@@ -43,7 +47,7 @@ export function VerificationDesk({ role, data }: { role: string; data: Desk }) {
       <button className="admin-button" type="button" disabled={!owner} onClick={async () => { try { await post({ action: 'saveConfig', config: { minAgeDays: age, minPosts: posts }, reason: reason || 'Update Blue criteria' }); setMessage('Blue criteria saved.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Save failed.'); } }}>Save Blue rules</button>
     </section>
     <section className="admin-card"><h2>Eligible for Blue</h2>
-      <ul>{data.eligible.map(user => <li key={user.id}><label><input type="checkbox" checked={selected.includes(user.id)} onChange={() => setSelected(current => current.includes(user.id) ? current.filter(id => id !== user.id) : [...current, user.id])} /> {user.username} · {user.email} · {user.posts} posts</label></li>)}{!data.eligible.length && <li>No eligible accounts.</li>}</ul>
+      <ul>{eligible.map(user => <li key={user.id}><label><input type="checkbox" checked={selected.includes(user.id)} onChange={() => setSelected(current => current.includes(user.id) ? current.filter(id => id !== user.id) : [...current, user.id])} /> {user.username} · {user.email} · {user.posts} posts</label></li>)}{!eligible.length && <li>No eligible accounts.</li>}</ul>
       <button className="admin-button admin-primary" type="button" onClick={async () => { try { await post({ action: 'finalizeBlue', ids: selected, reason: reason || 'Finalize Blue' }); setMessage('Blue finalized for eligible accounts.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Blue failed.'); } }}>Finalize Blue</button>
     </section>
     <section className="admin-card"><h2>Grey and Golden</h2>
@@ -57,7 +61,7 @@ export function VerificationDesk({ role, data }: { role: string; data: Desk }) {
       <button className="admin-button admin-primary" type="button" onClick={async () => { try { await post({ action: 'assign', batch, ids: query.split(/[\s,]+/).filter(Boolean), reason: reason || 'Assign batch' }); setMessage('Submitted into the 48-hour review window.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Assign failed.'); } }}>Assign selected</button>
     </section>
     <section className="admin-card"><h2>48-hour review</h2>
-      <ul>{data.pending.map(item => <li key={item.id}><label><input type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /> {item.batch} · {item.profile_id} · until {new Date(Number(item.execute_at)).toISOString()}</label></li>)}{!data.pending.length && <li>No pending Grey or Golden assignments.</li>}</ul>
+      <ul>{pending.map(item => <li key={item.id}><label><input type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} /> {item.batch} · {item.profile_id} · until {new Date(Number(item.execute_at)).toISOString()}</label></li>)}{!pending.length && <li>No pending Grey or Golden assignments.</li>}</ul>
       <button className="admin-button" type="button" onClick={async () => { try { await post({ action: 'cancel', ids: selected, reason: reason || 'Stop assignment' }); setMessage('Selected assignments stopped.'); router.refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Cancel failed.'); } }}>Stop selected</button>
       {message && <p role="status">{message}</p>}
       <label>Reason<textarea value={reason} onChange={event => setReason(event.target.value)} /></label>

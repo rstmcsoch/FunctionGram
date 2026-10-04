@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createTursoFixture } from './support/turso-db';
-import { assignPrivileged, confirmPrivilege, finalizeBlue, finalizeDueTransactional, issuePrivilege, REVIEW_MS, PRIVILEGE_MS } from '../lib/verification';
+import { assignPrivileged, confirmPrivilege, ensureVerificationSchema, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, REVIEW_MS, PRIVILEGE_MS } from '../lib/verification';
 
 async function fixture() {
   const db = await createTursoFixture();
@@ -17,6 +17,19 @@ async function fixture() {
   for (let i = 0; i < 3; i++) await pool.query('INSERT INTO posts(id,author_id,media,created_at) VALUES($1,$2,\'[]\',$3)', [`p${i}`, 'ready', old]);
   return db;
 }
+
+test('verification desk loads even when verification tables are missing', async () => {
+  const { pool, close } = await fixture();
+  try {
+    for (const table of ['verification_documents', 'verification_privilege', 'verification_pending', 'verification_applications', 'verification_questions']) {
+      await pool.query(`DROP TABLE IF EXISTS ${table}`);
+    }
+    const desk = await overview(pool);
+    assert.deepEqual(desk.counts, { blue: 0, grey: 0, golden: 0, grey_pending: 0, golden_pending: 0 });
+    assert.equal(Array.isArray(desk.eligible), true);
+    await ensureVerificationSchema(pool);
+  } finally { await close(); }
+});
 
 test('Blue is not automatic, Grey needs a 2-hour window, and the 48-hour review can be finalized', async () => {
   const { pool, close } = await fixture();

@@ -1,13 +1,14 @@
 import { adminRoute } from '@/lib/admin/route';
 import { adminBody } from '@/lib/admin/body';
 import { getPool } from '@/lib/postgres';
-import { assignPrivileged, cancelPending, confirmPrivilege, eligibleBlue, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, saveConfig } from '@/lib/verification';
+import { assignPrivileged, cancelPending, confirmPrivilege, eligibleBlue, ensureVerificationSchema, finalizeBlue, finalizeDueTransactional, issuePrivilege, overview, saveConfig } from '@/lib/verification';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const GET = adminRoute(async () => {
   const pool = await getPool();
+  await ensureVerificationSchema(pool);
   await finalizeDueTransactional(pool);
   return Response.json(await overview(pool));
 }, 'security.read');

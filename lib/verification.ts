@@ -34,6 +34,21 @@ function hashCode(code: string) {
   return createHash('sha256').update(code).digest('hex');
 }
 
+export async function ensureVerificationSchema(db: QueryExecutor) {
+  for (const statement of VERIFICATION_TABLES) {
+    try { await db.query(statement); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/duplicate column|already exists/i.test(message)) throw error;
+    }
+  }
+}
+
+function plainNumber(value: unknown) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
 export async function saveConfig(pool: PoolLike, actorId: string, input: unknown, reason: string) {
   if (!reason.trim()) throw new AdminError('A reason is required.');
   const config = parseConfig(input);
@@ -186,6 +201,7 @@ export async function finalizeDueTransactional(pool: PoolLike, now = Date.now())
 }
 
 export async function overview(db: QueryExecutor) {
+  await ensureVerificationSchema(db);
   const now = Date.now();
   const due = (await db.query(`SELECT id,profile_id,batch FROM verification_pending WHERE status='pending' AND execute_at<=$1`, [now])).rows;
   for (const row of due) {
@@ -199,9 +215,15 @@ export async function overview(db: QueryExecutor) {
     (SELECT COUNT(*) FROM profiles WHERE verification_batch='golden') golden,
     (SELECT COUNT(*) FROM profiles WHERE verification_batch='blue') blue,
     (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='grey') grey_pending,
-    (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='golden') golden_pending`)).rows[0];
+    (SELECT COUNT(*) FROM verification_pending WHERE status='pending' AND batch='golden') golden_pending`)).rows[0] || {};
   const privilege = (await db.query('SELECT actor_id,expires_at FROM verification_privilege WHERE expires_at>$1', [Date.now()])).rows;
-  return { config: eligible.config, eligible: eligible.users, pending, counts, privilege, finalizedNow: due.map(row => row.id) };
+  return {
+    config: eligible.config,
+    eligible: eligible.users.map(user => ({ id: String(user.id), username: String(user.username), email: String(user.email || ''), posts: plainNumber(user.posts) })),
+    pending: pending.map(row => ({ id: String(row.id), profile_id: String(row.profile_id), batch: String(row.batch), requested_by: String(row.requested_by || ''), created_at: plainNumber(row.created_at), execute_at: plainNumber(row.execute_at), status: String(row.status) })),
+    counts: { blue: plainNumber(counts.blue), grey: plainNumber(counts.grey), golden: plainNumber(counts.golden), grey_pending: plainNumber(counts.grey_pending), golden_pending: plainNumber(counts.golden_pending) },
+    privilege: privilege.map(row => ({ actor_id: String(row.actor_id), expires_at: plainNumber(row.expires_at) })),
+  };
 }
 
 export async function submitApplication(pool: PoolLike, profileId: string, body: Record<string, unknown>) {
