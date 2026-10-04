@@ -1,6 +1,8 @@
 import { AdminError } from './errors';
 import type { AdminActor, AdminRole } from './config';
 
+// Compatibility surface for restored admin pages and APIs; keep these exports stable.
+
 export const ADMIN_PERMISSIONS = [
   'admin.access',
   'dashboard.read',
