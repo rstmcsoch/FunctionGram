@@ -107,16 +107,22 @@ export async function upload(file: File, t: Translator = defaultTranslator): Pro
   if(!config.allowedTypes.includes(file.type))throw new Error(t('media.typeDisabled'));
   if(file.size>config.maxFileMb*MIB)throw new Error(t('media.tooLarge',{max:config.maxFileMb}));
   const output=file;
-  const aspect=file.type.startsWith('image/')?await imageSize(file):await videoSize(file);
+  const aspectPromise=file.type.startsWith('image/')?imageSize(file):videoSize(file);
   if (devMode) {
     const form = new FormData();
     form.append("key", crypto.randomUUID());
     form.append("file", output);
-    const result = await request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t);
+    const [result, aspect] = await Promise.all([
+      request<{ url: string; type: string; aspect?:number|null }>("/api/dev-upload", form, t),
+      aspectPromise,
+    ]);
     return { ...result, aspect:result.aspect??aspect };
   }
   const key = crypto.randomUUID();
-  await uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) });
+  const [, aspect] = await Promise.all([
+    uploadToBlob(key, output, { access: "public", handleUploadUrl: "/api/upload", contentType: output.type, clientPayload: JSON.stringify({ size: output.size, type: output.type }) }),
+    aspectPromise,
+  ]);
   const completed = await request<{ url: string; type: string; aspect?:number|null }>("/api/upload/complete", { key }, t);
   return { ...completed, aspect:completed.aspect??aspect };
 }

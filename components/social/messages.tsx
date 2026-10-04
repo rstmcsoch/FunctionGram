@@ -104,6 +104,7 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   const [replyTo, setReplyTo] = useState<OutgoingMessage | null>(null);
   const [editingMessage, setEditingMessage] = useState<OutgoingMessage | null>(null);
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<OutgoingMessage | null>(null);
   const [activeRowMenu, setActiveRowMenu] = useState<string | null>(null);
   const [reactionPickerMessage, setReactionPickerMessage] = useState<string | null>(null);
 
@@ -379,27 +380,6 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
     node.scrollTop = node.scrollHeight;
   }, [messages.length]);
 
-  // The layout viewport does not shrink when the mobile keyboard opens, so the
-  // composer would sit underneath it. Track the covered strip and let CSS pin
-  // the thread above whichever of the dock or the keyboard is lower.
-  useEffect(() => {
-    const root = document.documentElement;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const apply = () => {
-      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      root.style.setProperty("--keyboard-inset", covered + "px");
-    };
-    apply();
-    vv.addEventListener("resize", apply);
-    vv.addEventListener("scroll", apply);
-    return () => {
-      vv.removeEventListener("resize", apply);
-      vv.removeEventListener("scroll", apply);
-      root.style.removeProperty("--keyboard-inset");
-    };
-  }, []);
-
   /* ---------------------------------------------------------------- */
   /*  Pagination, jump and highlight                                   */
   /* ---------------------------------------------------------------- */
@@ -443,7 +423,8 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
     };
     if (flash()) return;
     let cursor: string | null = olderCursor;
-    for (let page = 0; page < 10 && cursor; page += 1) {
+    for (let page = 0; page < 10; page += 1) {
+      if (!cursor) break;
       const loaded = await loadOlder(cursor);
       if (loaded.items.some(item => item.id === messageId) || flash()) {
         requestAnimationFrame(() => flash());
@@ -459,10 +440,11 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
   /*  Message actions                                                  */
   /* ---------------------------------------------------------------- */
 
-  const removeMessage = async (message: Message) => {
+  const removeForEveryone = async (message: Message) => {
     if (message.sender_id !== me.id) return;
     const snapshot = messagesRef.current;
     setMessages(current => current.filter(item => item.id !== message.id));
+    setPendingDelete(null);
     try {
       await request("/api/social", { action: "delete_message", id: message.id }, t);
       setPinned(current => current.filter(pin => pin.message_id !== message.id));
@@ -473,6 +455,29 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
       setMessages(snapshot);
       toast.error((e as Error).message);
     }
+  };
+
+  const hideForMe = async (message: Message) => {
+    const snapshot = messagesRef.current;
+    setMessages(current => current.filter(item => item.id !== message.id));
+    setPendingDelete(null);
+    try {
+      await request("/api/social", { action: "hide_message", id: message.id }, t);
+      setPinned(current => current.filter(pin => pin.message_id !== message.id));
+      void loadList();
+    } catch (e) {
+      setMessages(snapshot);
+      toast.error((e as Error).message);
+    }
+  };
+
+  /** Sender-only, and only inside the server's window. The API enforces this again. */
+  const canDeleteForEveryone = (message: Message) => {
+    if (message.sender_id !== me.id || message.pending) return false;
+    const age = Date.now() - message.created_at;
+    if (age > 24 * 60 * 60 * 1000) return false;
+    if (age <= 15 * 60 * 1000) return true;
+    return !message.read_at && !message.view_once_consumed;
   };
 
   /** Send text (or a reply), optimistically, with a real rollback. */
@@ -579,15 +584,18 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
     const category = forced || categoryFor(file);
     if (!category) { toast.error(t("messages.unsupported_file_type")); return; }
     const limit = limits[category] ?? (category === "voice" ? VOICE_LIMITS : null);
-    if (!limit) {
-      const policy = await readAttachmentPolicy(category);
-      if (!policy) { toast.error(t("messages.uploads_unavailable")); return; }
-      setLimits(current => ({ ...current, [category]: { maxBytes: policy.maxBytes, maxSeconds: policy.maxSeconds } }));
-      const problem = attachmentProblem(file, category, { maxBytes: policy.maxBytes });
-      if (problem) { toast.error(problemText(problem)); return; }
-    } else {
+    if (limit) {
       const problem = attachmentProblem(file, category, { maxBytes: limit.maxBytes });
       if (problem) { toast.error(problemText(problem)); return; }
+    } else if (!file.size) {
+      toast.error(t("messages.file_empty"));
+      return;
+    } else {
+      // Don't wait on a policy round trip before the bytes start moving.
+      // The server enforces the real cap; this only warms the next check.
+      void readAttachmentPolicy(category).then(policy => {
+        if (policy) setLimits(current => ({ ...current, [category]: { maxBytes: policy.maxBytes, maxSeconds: policy.maxSeconds } }));
+      });
     }
     await sendAttachment(file, file.name || defaultName(category), category);
   };
@@ -1299,63 +1307,69 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
 
                   {expired ? (
                     <div className="media-bubble unavailable"><Clock size={16} /> {t("messages.message_expired")}</div>
-                  ) : m.message_type === "text" || !m.message_type ? (
-                    <TextBody body={m.body} />
                   ) : (
-                    <MessageContent
-                      message={m}
-                      isMine={isMine}
-                      revealed={revealed[m.id] ?? null}
-                      onReveal={messageId => void revealViewOnce(messageId)}
-                      onOpenProfile={onProfile}
-                      onOpenPost={openPost}
-                    />
-                  )}
-                  {m.message_type === "text" && m.edited_at ? <span className="edited-indicator">{t("messages.edited")}</span> : null}
+                    <div className="message-cluster">
+                      <div className="message-main">
+                        {m.message_type === "text" || !m.message_type ? (
+                          <TextBody body={m.body} />
+                        ) : (
+                          <MessageContent
+                            message={m}
+                            isMine={isMine}
+                            revealed={revealed[m.id] ?? null}
+                            onReveal={messageId => void revealViewOnce(messageId)}
+                            onOpenProfile={onProfile}
+                            onOpenPost={openPost}
+                          />
+                        )}
+                        {m.message_type === "text" && m.edited_at ? <span className="edited-indicator">{t("messages.edited")}</span> : null}
 
-                  {reactionList.length > 0 && (
-                    <div className="reaction-strip">
-                      {reactionList.map(reaction => (
-                        <button key={reaction.emoji} type="button" className={"reaction-badge " + (reaction.mine ? "mine" : "")} onClick={event => { event.stopPropagation(); void toggleReaction(m.id, reaction.emoji); }} aria-label={t("messages.reaction_count", { emoji: reaction.emoji, count: reaction.count })}>
-                          {reaction.emoji}{reaction.count > 1 ? <span>{reaction.count}</span> : null}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                        {reactionList.length > 0 && (
+                          <div className="reaction-strip">
+                            {reactionList.map(reaction => (
+                              <button key={reaction.emoji} type="button" className={"reaction-badge " + (reaction.mine ? "mine" : "")} onClick={event => { event.stopPropagation(); void toggleReaction(m.id, reaction.emoji); }} aria-label={t("messages.reaction_count", { emoji: reaction.emoji, count: reaction.count })}>
+                                {reaction.emoji}{reaction.count > 1 ? <span>{reaction.count}</span> : null}
+                              </button>
+                            ))}
+                          </div>
+                        )}
 
-                  {reactionPickerMessage === m.id && (
-                    <div className="reaction-picker" onClick={event => event.stopPropagation()} role="group" aria-label={t("messages.add_a_reaction")}>
-                      {REACTION_EMOJIS.map(emoji => (
-                        <button key={emoji} type="button" className="reaction-option" onClick={() => void toggleReaction(m.id, emoji)} aria-label={t("messages.react_with", { emoji })}>{emoji}</button>
-                      ))}
-                    </div>
-                  )}
+                        {reactionPickerMessage === m.id && (
+                          <div className="reaction-picker" onClick={event => event.stopPropagation()} role="group" aria-label={t("messages.add_a_reaction")}>
+                            {REACTION_EMOJIS.map(emoji => (
+                              <button key={emoji} type="button" className="reaction-option" onClick={() => void toggleReaction(m.id, emoji)} aria-label={t("messages.react_with", { emoji })}>{emoji}</button>
+                            ))}
+                          </div>
+                        )}
 
-                  <span className="message-row-foot">
-                    <time title={new Date(m.created_at).toLocaleString()} suppressHydrationWarning>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                    {m.expires_at ? <Clock size={11} className="msg-status expiring" aria-label={t("messages.disappearing_messages")} /> : null}
-                    {isMine && !m.pending && statusIcon(m)}
-                    {flags.readReceipts && !m.pending && m.sender_id === me.id && m.read_at && <span className="message-seen" title={new Date(m.read_at).toLocaleString()}>{t("messages.seen")}</span>}
-                  </span>
+                        <span className="message-row-foot">
+                          <time title={new Date(m.created_at).toLocaleString()} suppressHydrationWarning>{m.pending ? t("messages.sending") : new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                          {m.expires_at ? <Clock size={11} className="msg-status expiring" aria-label={t("messages.disappearing_messages")} /> : null}
+                          {isMine && !m.pending && statusIcon(m)}
+                          {flags.readReceipts && !m.pending && m.sender_id === me.id && m.read_at && <span className="message-seen" title={new Date(m.read_at).toLocaleString()}>{t("messages.seen")}</span>}
+                        </span>
+                      </div>
 
-                  {!m.pending && (
-                    <button type="button" className="message-action-trigger" aria-label={t("messages.message_actions")} onClick={event => { event.stopPropagation(); setActiveActionMenu(activeActionMenu === m.id ? null : m.id); }}>
-                      <MoreHorizontal size={14} />
-                    </button>
-                  )}
-
-                  {/* Compact action menu: only the actions that are valid here. */}
-                  {activeActionMenu === m.id && (
-                    <div className="message-action-menu" onClick={event => event.stopPropagation()} role="menu" aria-label={t("messages.message_actions")}>
-                      {flags.messageReplies && !m.view_once && <button type="button" role="menuitem" onClick={() => { setReplyTo(m); setActiveActionMenu(null); input.current?.focus(); }}><Reply size={14} /> {t("messages.reply")}</button>}
-                      {flags.messageReactions && !m.view_once && <button type="button" role="menuitem" onClick={() => { setReactionPickerMessage(m.id); setActiveActionMenu(null); }}><SmilePlus size={14} /> {t("messages.react")}</button>}
-                      {m.body ? <button type="button" role="menuitem" onClick={() => { void copyMessage(m.body); setActiveActionMenu(null); }}><Copy size={14} /> {t("messages.copy")}</button> : null}
-                      {flags.messageForwarding && !m.view_once && <button type="button" role="menuitem" onClick={() => { setForwardMessage(m); setActiveActionMenu(null); }}><Forward size={14} /> {t("messages.forward")}</button>}
-                      {flags.messageSaving && <button type="button" role="menuitem" onClick={() => { void toggleSave(m); setActiveActionMenu(null); }}><Save size={14} /> {m.saved ? t("messages.unsave") : t("messages.save")}</button>}
-                      {flags.messagePinning && <button type="button" role="menuitem" onClick={() => { void togglePin(m.id); setActiveActionMenu(null); }}><Pin size={14} /> {isPinned ? t("messages.unpin") : t("messages.pin")}</button>}
-                      {flags.messageEditing && isMine && canEdit(m.created_at) && m.message_type === "text" && <button type="button" role="menuitem" onClick={() => { setEditingMessage(m); setBody(m.body); setActiveActionMenu(null); input.current?.focus(); }}><Edit3 size={14} /> {t("messages.edit")}</button>}
-                      {flags.messageDeletion && !m.pending && m.sender_id === me.id && <button type="button" role="menuitem" className="action-delete" onClick={() => { void removeMessage(m); setActiveActionMenu(null); }}><Trash2 size={14} /> {t("messages.delete")}</button>}
-                      {!isMine && flags.reports && <button type="button" role="menuitem" className="action-report" onClick={() => { setReportMessage(m); setActiveActionMenu(null); }}><AlertTriangle size={14} /> {t("messages.report")}</button>}
+                      {!m.pending && (
+                        <div className="message-tools">
+                          <button type="button" className="message-action-trigger" aria-label={t("messages.message_actions")} aria-expanded={activeActionMenu === m.id} onClick={event => { event.stopPropagation(); setActiveActionMenu(activeActionMenu === m.id ? null : m.id); }}>
+                            <MoreHorizontal size={14} />
+                          </button>
+                          {activeActionMenu === m.id && (
+                            <div className="message-action-menu" onClick={event => event.stopPropagation()} role="menu" aria-label={t("messages.message_actions")}>
+                              {flags.messageReplies && !m.view_once && <button type="button" role="menuitem" onClick={() => { setReplyTo(m); setActiveActionMenu(null); input.current?.focus(); }}><Reply size={14} /> {t("messages.reply")}</button>}
+                              {flags.messageReactions && !m.view_once && <button type="button" role="menuitem" onClick={() => { setReactionPickerMessage(m.id); setActiveActionMenu(null); }}><SmilePlus size={14} /> {t("messages.react")}</button>}
+                              {m.body ? <button type="button" role="menuitem" onClick={() => { void copyMessage(m.body); setActiveActionMenu(null); }}><Copy size={14} /> {t("messages.copy")}</button> : null}
+                              {flags.messageForwarding && !m.view_once && <button type="button" role="menuitem" onClick={() => { setForwardMessage(m); setActiveActionMenu(null); }}><Forward size={14} /> {t("messages.forward")}</button>}
+                              {flags.messageSaving && <button type="button" role="menuitem" onClick={() => { void toggleSave(m); setActiveActionMenu(null); }}><Save size={14} /> {m.saved ? t("messages.unsave") : t("messages.save")}</button>}
+                              {flags.messagePinning && <button type="button" role="menuitem" onClick={() => { void togglePin(m.id); setActiveActionMenu(null); }}><Pin size={14} /> {isPinned ? t("messages.unpin") : t("messages.pin")}</button>}
+                              {flags.messageEditing && isMine && canEdit(m.created_at) && m.message_type === "text" && <button type="button" role="menuitem" onClick={() => { setEditingMessage(m); setBody(m.body); setActiveActionMenu(null); input.current?.focus(); }}><Edit3 size={14} /> {t("messages.edit")}</button>}
+                              {flags.messageDeletion && !m.pending && <button type="button" role="menuitem" className="action-delete" onClick={() => { setPendingDelete(m); setActiveActionMenu(null); }}><Trash2 size={14} /> {t("messages.delete")}</button>}
+                              {!isMine && flags.reports && <button type="button" role="menuitem" className="action-report" onClick={() => { setReportMessage(m); setActiveActionMenu(null); }}><AlertTriangle size={14} /> {t("messages.report")}</button>}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1371,6 +1385,22 @@ export function Messages({ me, people, initialRecipient, maxLength, onProfile }:
         </div>
 
         {/* ---- Composer ---- */}
+        {pendingDelete ? (() => {
+          const m = pendingDelete;
+          return (
+            <div className="delete-sheet" role="presentation" onClick={() => setPendingDelete(null)}>
+              <div role="dialog" aria-modal="true" aria-label={t("messages.delete_message")} onClick={event => event.stopPropagation()}>
+                <strong>{t("messages.delete_message")}</strong>
+                <p>{t("messages.delete_confirm")}</p>
+                <button type="button" onClick={() => { void hideForMe(m); }}>{t("messages.delete_for_me")}</button>
+                {flags.messageDeletion && !m.pending && m.sender_id === me.id && canDeleteForEveryone(m) && (
+                  <button type="button" className="action-delete" onClick={() => { void removeForEveryone(m); }}>{t("messages.delete_for_everyone")}</button>
+                )}
+                <button type="button" onClick={() => setPendingDelete(null)}>{t("app.cancel")}</button>
+              </div>
+            </div>
+          );
+        })() : null}
         <form className="message-compose" onSubmit={event => { event.preventDefault(); if (editingMessage) void saveEdit(); else void send(); }}>
           {replyTo && (
             <div className="reply-compose-bar">

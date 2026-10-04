@@ -72,6 +72,28 @@ export default function RstmcApp({ initial, appearance: storedAppearance = DEFAU
   const [loadError, setLoadError] = useState(!initial);
   const [view, setView] = useState<View>(initialUsername ? "profile" : "home");
   useEffect(()=>{document.title=view==="home"?t("metadata.title",{site:storedAppearance.name}):t("metadata.sectionTitle",{site:storedAppearance.name,section:navigationLabel(t,view,t.text(view[0].toUpperCase()+view.slice(1)))});},[view,t,storedAppearance.name]);
+  // The on-screen keyboard shrinks the visual viewport. Record how much it
+  // covers so layout can scroll instead of squeezing the sidebar or dock.
+  // The class is what CSS keys off; the inset is only a measurement.
+  useEffect(() => {
+    const root = document.documentElement;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--keyboard-inset", covered + "px");
+      root.classList.toggle("keyboard-open", covered > 80);
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      root.style.removeProperty("--keyboard-inset");
+      root.classList.remove("keyboard-open");
+    };
+  }, []);
   const [profileId, setProfileId] = useState<string | null>(initialUsername || null);
   const [invalidProfile, setInvalidProfile] = useState(false);
   const [feedTab, setFeedTab] = useState("for-you");

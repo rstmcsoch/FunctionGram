@@ -11,7 +11,7 @@ import { visibleComment, visiblePost } from '@/lib/content-visibility';
 import { validateProfileUsername } from '@/lib/profile-url';
 import { loadSettings } from '@/lib/admin/core';
 import { getPool } from '@/lib/postgres';
-import { unsendMessage } from '@/lib/server';
+import { unsendMessage, hideMessageForViewer } from '@/lib/server';
 import { inspectMessageRestrictions,readMessagingPolicy,requireMessageBody,requireMessageQuota,requirePrivateRecipientAllowed } from '@/lib/messaging-policy';
 import {
   MAX_PINNED_MESSAGES,PRESENCE_TTL_MS,TYPING_TTL_MS,cleanupExpiredMessages,conversationArgs,conversationContent,conversationKey,
@@ -156,7 +156,7 @@ export async function GET(request:Request){
   }
   if(query.has('saved_messages')){
     const user=await identity(headers,true);
-    const r=await db().prepare('SELECT sm.*,m.body,m.sender_id,m.recipient_id,m.created_at message_created_at,m.message_type,m.media_url,m.media_mime,m.media_filename,m.sticker_id,p.username sender_username FROM saved_messages sm JOIN messages m ON m.id=sm.message_id JOIN profiles p ON p.id=m.sender_id WHERE sm.user_id=? AND m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) ORDER BY sm.created_at DESC LIMIT 100').bind(user,Date.now()).all();
+    const r=await db().prepare('SELECT sm.*,m.body,m.sender_id,m.recipient_id,m.created_at message_created_at,m.message_type,m.media_url,m.media_mime,m.media_filename,m.sticker_id,p.username sender_username FROM saved_messages sm JOIN messages m ON m.id=sm.message_id JOIN profiles p ON p.id=m.sender_id WHERE sm.user_id=? AND m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id=m.id AND h.user_id=?) ORDER BY sm.created_at DESC LIMIT 100').bind(user,Date.now(),user).all();
     return noStore(r.results);
   }
   // NOTE: an "enhanced inbox" filter block used to sit here, unreachable
@@ -490,6 +490,11 @@ export async function POST(request:Request){
       sticker_id:stickerId,shared_profile_id:sharedProfileId,post_id:postId,
       view_once:viewOnce,view_once_consumed:0,expires_at:expiresAt,
     });
+  }
+  if(action==='hide_message'){
+    // "Delete for me": the authenticated participant only. The other person
+    // keeps the message. Ownership is the session, never a body field.
+    return json(await hideMessageForViewer(user,id));
   }
   if(action==='delete_message'){
     // Ownership is enforced inside the statement (sender_id = the

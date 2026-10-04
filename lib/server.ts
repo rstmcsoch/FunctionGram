@@ -6,7 +6,7 @@ import {displayCounterColumns} from './counters';
 import { visiblePost, visibleComment, readablePost, livePost } from './content-visibility';
 import { getPool } from './postgres';
 import { db } from './server-db';
-import { acknowledgeDelivery, clearedBefore, conversationPredicate, readReceiptsVisibleTo, unreadTotal } from './messaging';
+import { acknowledgeDelivery, clearedBefore, conversationPredicate, notHiddenFor, readReceiptsVisibleTo, unreadTotal } from './messaging';
 import { ensureDemoSeed, publishReady } from './publish';
 import { ensureProfileRow } from './profiles';
 import { getAppUser } from '@/lib/auth';
@@ -315,8 +315,8 @@ export async function conversation(viewer:string,other:string,limit=50,cursor:[n
   // yields a `post_id` column, and libSQL keeps the FIRST of two same-named
   // result columns, so reusing the name would silently return the raw value.
   const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
-  const args:unknown[]=[viewer,viewer,viewer,viewer,now,cleared,cleared,viewer,other,other,viewer];
-  let sql=`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND (? IS NULL OR m.created_at>=?) AND ${conversationPredicate()}`;
+  const args:unknown[]=[viewer,viewer,viewer,viewer,now,cleared,cleared,viewer,viewer,other,other,viewer];
+  let sql=`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND (? IS NULL OR m.created_at>=?) AND ${notHiddenFor()} AND ${conversationPredicate()}`;
   if(cursor){sql+=' AND (m.created_at<? OR (m.created_at=? AND m.id<?))';args.push(cursor[0],cursor[0],cursor[1]);}
   sql+=' ORDER BY m.created_at DESC,m.id DESC LIMIT ?';args.push(boundedLimit+1);
   const rows=(await db().prepare(sql).bind(...args).all()).results as MessageRow[];
@@ -432,7 +432,7 @@ export async function inboxPreview(viewer:string,limit=200){
   // See `conversation`: the computed visibility column must not reuse the
   // `post_id` name that `m.*` already produces.
   const readable=`CASE WHEN EXISTS(SELECT 1 FROM posts p JOIN profiles a ON a.id=p.author_id WHERE p.id=m.post_id AND ${flags.stories?'TRUE':"p.kind!='story'"} AND ${flags.reels?'TRUE':"p.kind!='reel'"} AND ${readablePost()}) THEN ${flags.shares?'m.post_id':'NULL'} ELSE NULL END AS visible_post_id`;
-  const r=await db().prepare(`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,Date.now(),viewer,viewer,bounded).all();
+  const r=await db().prepare(`SELECT m.*,${readable} FROM messages m WHERE m.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) AND ${notHiddenFor()} AND (m.sender_id=? OR m.recipient_id=?) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).bind(viewer,viewer,viewer,viewer,Date.now(),viewer,viewer,viewer,bounded).all();
   return (r.results as MessageRow[]).map((row):MessageRow=>{const {visible_post_id:visible,...message}=row;return {...stripAssetKey(message),post_id:visible??null};});
 }
 
@@ -504,22 +504,43 @@ export async function messageSearch(viewer:string,term:string):Promise<Person[]>
 }
 
 /**
- * Unsend one message.
+ * Delete one message for everyone.
  *
- * A message belongs to its `sender_id`, so ownership is part of the DELETE
- * itself instead of a separate check: the statement only ever matches a row
- * the authenticated viewer sent. The other participant therefore cannot
- * remove it, and neither can anyone who edits the request — the viewer comes
- * from the server-side session, never from the request body.
- *
- * Anything that matches nothing (another participant's message, an unknown
- * id, an already-deleted row) is reported as not found, which keeps the
- * existence of a conversation private and leaves the original row untouched.
+ * Only the sender can do this, and only inside the window the product allows:
+ * the first 15 minutes whether or not the recipient has seen it, then until
+ * 24 hours only while it is still unseen. After that the row stays. The
+ * conditions live in the DELETE itself so a read that lands between the check
+ * and the write cannot slip through. A recipient, a stranger, or a forged
+ * sender id matches nothing and is reported as not found.
  */
+const UNSEND_OPEN_MS=15*60*1000;
+const UNSEND_LIMIT_MS=24*60*60*1000;
 export async function unsendMessage(viewer:string,messageId:string){
-  const result=await db().prepare('DELETE FROM messages WHERE id=? AND sender_id=?').bind(messageId,viewer).run();
-  if(!result.meta.changes)throw new AppError('Message not found.',404);
+  const now=Date.now();
+  const row=await db().prepare('SELECT created_at,read_at,view_once_consumed FROM messages WHERE id=? AND sender_id=?')
+    .bind(messageId, viewer)
+    .first<{created_at:number;read_at:number|null;view_once_consumed:number|null}>();
+  if(!row)throw new AppError('Message not found.',404);
+  const age=now-Number(row.created_at);
+  const seen=row.read_at!=null||Number(row.view_once_consumed||0)===1;
+  if(age>UNSEND_LIMIT_MS||(age>UNSEND_OPEN_MS&&seen))throw new AppError('This message can no longer be deleted for everyone.',403);
+  const result=await db().prepare('DELETE FROM messages WHERE id=? AND sender_id=? AND created_at>=? AND (created_at>=? OR (read_at IS NULL AND COALESCE(view_once_consumed,0)=0))').bind(messageId, viewer, now-UNSEND_LIMIT_MS, now-UNSEND_OPEN_MS).run();
+  if(!result.meta.changes)throw new AppError('This message can no longer be deleted for everyone.',403);
   return {ok:true};
+}
+
+/**
+ * Hide one message from the signed-in participant only.
+ *
+ * The row stays, so the other person still has it. Either participant may
+ * hide a message they can see; neither can hide the other's copy.
+ */
+export async function hideMessageForViewer(viewer:string,messageId:string){
+  const now=Date.now();
+  const row=await db().prepare('SELECT sender_id,recipient_id FROM messages WHERE id=? AND deleted_at IS NULL').bind(messageId,viewer).first<{sender_id:string;recipient_id:string}>();
+  if(!row||(row.sender_id!==viewer&&row.recipient_id!==viewer))throw new AppError('Message not found.',404);
+  await db().prepare('INSERT OR IGNORE INTO message_hidden (message_id,user_id,hidden_at) VALUES (?,?,?)').bind(messageId,viewer,now).run();
+  return {ok:true,scope:'me' as const};
 }
 
 function publicPosts(posts:Post[],flags:Flags):Post[]{return posts.map(post=>({...post,tagged_users:flags.tagging?post.tagged_users:[],comment_preview:flags.comments?post.comment_preview:null,display_comments:flags.comments?post.display_comments:null,display_likes:flags.likes?post.display_likes:null,saved:flags.saves?post.saved:0,liked:flags.likes?post.liked:0}));}

@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -119,6 +119,12 @@ export const DATABASE_MIGRATIONS: Migration[] = [
       'INSERT INTO admin_demo_seed_control(id,enabled) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET enabled=0',
       'DELETE FROM profiles WHERE is_demo=1',
     ],
+  },
+  {
+    // Per-user message hides ("delete for me") and the one-shot view-once
+    // serve marker. Both are libSQL/SQLite DDL: no PostgreSQL syntax.
+    version: 17,
+    statements: tursoMessagingV17Statements,
   },
 ];
 

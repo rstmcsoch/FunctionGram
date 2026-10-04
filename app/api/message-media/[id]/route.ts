@@ -79,26 +79,43 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       // View-once: only the recipient, and only around the single consumption.
       // The sender can never open their own view-once media through this route.
       //
-      // Consumption is a precondition for the bytes, not a side effect of
-      // fetching them: a client that could download the media without consuming
-      // the message would hold a permanent copy while the conversation still
-      // showed it as unopened. So the recipient has to open it (which is the
-      // atomic `consume_view_once` write) before the media element is served,
-      // and only for the short grace window that a single viewing needs.
+      // The first successful full response claims `served_at`. A second full
+      // fetch — a new tab, a reload, a repeated open — is refused even while a
+      // video player may still issue Range requests for that same viewing.
+      // Two parallel opens cannot both claim the row.
       if (Number(row.view_once || 0) === 1) {
         if (row.sender_id === viewer) throw new AppError('This media was sent to be viewed once by the recipient.', 403);
         if (Number(row.view_once_consumed || 0) === 0) {
           throw new AppError('Open this message in the chat to view it once.', 403);
         }
         const consumed = await db()
-          .prepare('SELECT consumed_at FROM view_once_state WHERE message_id=?')
+          .prepare('SELECT consumed_at,served_at FROM view_once_state WHERE message_id=?')
           .bind(id)
-          .first<{ consumed_at: number | null }>();
+          .first<{ consumed_at: number | null; served_at: number | null }>();
         const at = Number(consumed?.consumed_at || 0);
         if (!at || Date.now() - at > VIEW_ONCE_GRACE_MS) {
           throw new AppError('This message has already been viewed.', 410);
         }
+        const range = request.headers.get('range');
+        const servedAt = Number(consumed?.served_at || 0);
+        if (!servedAt) {
+          const claim = await db()
+            .prepare('UPDATE view_once_state SET served_at=? WHERE message_id=? AND served_at IS NULL')
+            .bind(Date.now(), id)
+            .run();
+          // A second full fetch loses the claim. A Range on that same viewing
+          // (a video player opening several ranges at once) is still allowed.
+          if (!claim.meta.changes && !range) throw new AppError('This message has already been viewed.', 410);
+        } else if (!range) {
+          throw new AppError('This message has already been viewed.', 410);
+        }
       }
+
+      const hidden = await db()
+        .prepare('SELECT 1 AS hidden FROM message_hidden WHERE message_id=? AND user_id=?')
+        .bind(id, viewer)
+        .first<{ hidden: number }>();
+      if (hidden) throw new AppError('Media not found.', 404);
 
       const asset = await db()
         .prepare("SELECT mime,size,blob_url,width,height FROM assets WHERE key=? AND status='ready' AND verified=1")
@@ -116,16 +133,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       if (/^local(-processed)?:/.test(asset.blob_url)) {
         return await serveLocal(asset.blob_url, key, mime, Number(asset.size || 0), disposition, request);
       }
-      return new Response(null, {
-        status: 307,
-        headers: {
-          Location: asset.blob_url,
-          // Private to the participant: a shared cache must not hand this to
-          // another account, and the CDN copy is immutable per key.
-          'Cache-Control': 'private, max-age=300',
-          ...disposition,
-        },
-      });
+      // Stream through this route. A redirect would put the storage host in
+      // the Location header, which is a permanent URL the browser can reopen
+      // outside FunctionGram — including after a view-once message is spent.
+      return await serveRemote(asset.blob_url, mime, disposition, request);
     } catch (error) {
       return fail(error);
     } finally {
@@ -215,4 +226,42 @@ async function serveLocal(
 
   const bytes = await fs.readFile(path);
   return new Response(new Uint8Array(bytes), { headers: { ...headers, 'Content-Length': String(total) } });
+}
+
+/**
+ * Proxy a stored object without revealing its URL.
+ *
+ * The browser only ever talks to this route. The storage host, path and query
+ * stay on the server. Range requests are forwarded so video can seek.
+ */
+async function serveRemote(
+  blobUrl: string,
+  mime: string,
+  disposition: Record<string, string>,
+  request: Request,
+): Promise<Response> {
+  let parsed: URL;
+  try {
+    parsed = new URL(blobUrl);
+  } catch {
+    throw new AppError('Media not found.', 404);
+  }
+  if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.blob.vercel-storage.com') || parsed.username || parsed.password) {
+    throw new AppError('Media not found.', 404);
+  }
+  const headers: Record<string, string> = {};
+  const range = request.headers.get('range');
+  if (range) headers.Range = range;
+  const upstream = await fetch(parsed, { headers, redirect: 'error', signal: AbortSignal.timeout(30000) });
+  if (!upstream.ok && upstream.status !== 206) throw new AppError('Media not found.', 404);
+  const out = new Headers();
+  out.set('Content-Type', upstream.headers.get('content-type') || mime);
+  out.set('Cache-Control', 'private, no-store');
+  out.set('Accept-Ranges', 'bytes');
+  const length = upstream.headers.get('content-length');
+  if (length) out.set('Content-Length', length);
+  const contentRange = upstream.headers.get('content-range');
+  if (contentRange) out.set('Content-Range', contentRange);
+  for (const [name, value] of Object.entries(disposition)) out.set(name, value);
+  return new Response(upstream.body, { status: upstream.status, headers: out });
 }

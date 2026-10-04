@@ -36,6 +36,8 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
   const [category, setCategory] = useState<EmojiCategory["id"]>(EMOJI_CATEGORIES[0].id);
   const [term, setTerm] = useState("");
   const panel = useRef<HTMLDivElement>(null);
+  const tabs = useRef<HTMLDivElement>(null);
+  const swipe = useRef<{ x: number; y: number } | null>(null);
 
   const emoji = useMemo(() => searchEmoji(term), [term]);
   const activeCategory = useMemo(
@@ -43,6 +45,11 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
     [category],
   );
   const searching = term.trim().length > 0;
+
+  useEffect(() => {
+    const active = tabs.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [category, searching]);
 
   // Escape closes the picker from anywhere inside it, and an outside pointer
   // press closes it too. Focus returns to the message field, which the caller
@@ -70,6 +77,15 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
 
   const choose = (picked: string) => onInsert(insertEmoji(value, picked, cursor));
 
+  const stepCategory = (direction: number) => {
+    if (searching) return;
+    const index = EMOJI_CATEGORIES.findIndex(item => item.id === category);
+    const next = EMOJI_CATEGORIES[index + direction];
+    if (!next) return;
+    setCategory(next.id);
+    setTerm("");
+  };
+
   return (
     <div className="emoji-picker" ref={panel} role="dialog" aria-label={t("emoji.picker")}>
       <header>
@@ -87,7 +103,7 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
         />
       </label>
       {!searching && (
-        <div className="emoji-categories" role="tablist" aria-label={t("emoji.categories")}>
+        <div className="emoji-categories" ref={tabs} role="tablist" aria-label={t("emoji.categories")}>
           {EMOJI_CATEGORIES.map(item => (
             <button
               key={item.id}
@@ -102,7 +118,24 @@ export function EmojiPicker({ value, cursor, onInsert, onClose }: {
           ))}
         </div>
       )}
-      <div className="emoji-scroll">
+      <div
+        className="emoji-scroll"
+        onTouchStart={event => {
+          const touch = event.changedTouches[0];
+          swipe.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+        }}
+        onTouchEnd={event => {
+          const start = swipe.current;
+          swipe.current = null;
+          const touch = event.changedTouches[0];
+          if (!start || !touch || searching) return;
+          const dx = touch.clientX - start.x;
+          const dy = touch.clientY - start.y;
+          if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+          stepCategory(dx < 0 ? 1 : -1);
+        }}
+        onTouchCancel={() => { swipe.current = null; }}
+      >
         {emoji.length ? (
           searching ? (
             <div className="emoji-grid" role="list" aria-label={t("emoji.results")}>

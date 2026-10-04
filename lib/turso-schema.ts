@@ -1085,3 +1085,23 @@ export const tursoMessagingV13Statements: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_conversation_state_other
    ON conversation_state(other_user_id, user_id)`,
 ];
+
+/**
+ * Migration 17: delete-for-me plus a one-shot view-once serve marker.
+ *
+ * `message_hidden` is per participant. Hiding a message inserts one row for
+ * the viewer and leaves the message row itself in place, so the other person
+ * still sees it. `view_once_state.served_at` records the single successful
+ * media response; a later full fetch is refused even inside the playback
+ * window that range requests still need.
+ */
+export const tursoMessagingV17Statements: string[] = [
+  `CREATE TABLE IF NOT EXISTS message_hidden (
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    hidden_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_message_hidden_user ON message_hidden(user_id, message_id)`,
+  `ALTER TABLE view_once_state ADD COLUMN served_at INTEGER`,
+];

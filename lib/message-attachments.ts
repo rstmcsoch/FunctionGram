@@ -305,7 +305,11 @@ export async function storeMessageAttachment(
   const category = attachmentCategory(mime);
   if (!category) throw new AdminError('That file type cannot be sent as a message.', 415);
 
-  const config = await readMediaConfig(pool);
+  const configPromise = readMediaConfig(pool);
+  // Duration parsing does not need the config. Start it now so a voice note
+  // or document is not measured only after the settings read returns.
+  const durationPromise = category === 'image' || category === 'video' ? null : attachmentDuration(bytes, mime);
+  const config = await configPromise;
   if (!config.enabled) throw new AdminError('Uploads are currently disabled.', 403);
   const limits = attachmentLimits(category, config);
   if (bytes.length > limits.maxBytes) {
@@ -326,7 +330,7 @@ export async function storeMessageAttachment(
     const processed = await processMedia(Buffer.from(bytes), mime, config);
     stored = { bytes: processed.bytes, mime: processed.mime, width: processed.width, height: processed.height, duration: processed.duration };
   } else {
-    let duration = await attachmentDuration(bytes, mime);
+    let duration = durationPromise ? await durationPromise : null;
     if (duration === null && typeof input.declaredDuration === 'number' && Number.isFinite(input.declaredDuration) && input.declaredDuration > 0) {
       // A live recording often has no duration metadata; the recorder's own
       // elapsed time is the fallback, and it is capped rather than trusted.

@@ -66,11 +66,18 @@ export async function POST(request: Request) {
 
       // Bounded before parsing: the largest accepted category is a document at
       // the administrator's per-file limit, and a voice note is smaller still.
+      // A known Content-Length under that ceiling can be parsed once. A missing
+      // or chunked length is still copied through the bounded reader first.
       const ceiling = Math.max(config.maxFileMb * MIB, 10 * MIB) + 65536;
-      const bytes = await readBounded(request.body, ceiling);
-      const form = await new Response(new Uint8Array(bytes), {
-        headers: { 'content-type': contentType },
-      }).formData();
+      const declaredLength = Number(request.headers.get('content-length') || '');
+      if (Number.isFinite(declaredLength) && declaredLength > ceiling) {
+        throw new AdminError('The file exceeds the current upload size limit.', 413);
+      }
+      const form = Number.isFinite(declaredLength) && declaredLength > 0
+        ? await request.formData()
+        : await new Response(new Uint8Array(await readBounded(request.body, ceiling)), {
+            headers: { 'content-type': contentType },
+          }).formData();
 
       const key = String(form.get('key') || '');
       const file = form.get('file');
@@ -85,10 +92,12 @@ export async function POST(request: Request) {
       else requireCategoryFeature(policy, inferCategory(declaredMime));
 
       const declaredDuration = Number(form.get('duration'));
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
+      if (fileBytes.byteLength > ceiling) throw new AdminError('The file exceeds the current upload size limit.', 413);
       const result = await finishMessageAttachment({
         key,
         owner,
-        bytes: new Uint8Array(await file.arrayBuffer()),
+        bytes: fileBytes,
         declaredMime,
         filename: file.name,
         declaredDuration: Number.isFinite(declaredDuration) && declaredDuration > 0 ? declaredDuration : null,

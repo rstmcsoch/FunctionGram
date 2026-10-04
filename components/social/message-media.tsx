@@ -38,6 +38,10 @@ export function MessageContent({ message, isMine, revealed, onReveal, onOpenProf
 }) {
   const type = message.message_type || "text";
 
+  if (message.pending && (type === "image" || type === "video" || type === "voice" || type === "file" || type === "gif")) {
+    return <SendingBubble message={message} />;
+  }
+
   if (message.view_once) {
     return (
       <ViewOnce message={message} isMine={isMine} revealed={revealed} onReveal={onReveal} />
@@ -88,6 +92,38 @@ function MediaFailure({ onRetry }: { onRetry?: () => void }) {
   );
 }
 
+function SendingBubble({ message }: { message: Message }) {
+  const t = useLabels();
+  const type = message.message_type || "file";
+  if (type === "image" || type === "video" || type === "gif") {
+    const raw = message.media_width && message.media_height ? message.media_width / message.media_height : type === "video" ? 16 / 9 : 4 / 3;
+    const aspect = Math.min(1.7, Math.max(0.72, raw));
+    return (
+      <div className="media-bubble sending-media" style={{ aspectRatio: String(aspect) }} role="status">
+        <span className="sending-shimmer" aria-hidden="true" />
+        <span>{type === "video" ? t("messages.sending_video") : type === "gif" ? t("messages.sending") : t("messages.sending_photo")}</span>
+      </div>
+    );
+  }
+  if (type === "voice") {
+    return (
+      <div className="media-bubble sending-file" role="status">
+        <Busy size={16} />
+        <span>{t("messages.sending_voice")}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="media-bubble sending-file" role="status">
+      <FileText size={18} aria-hidden="true" />
+      <span className="file-meta">
+        <strong>{message.media_filename || t("messages.attachment")}</strong>
+        <small>{t("messages.sending_document")}</small>
+      </span>
+    </div>
+  );
+}
+
 function ImageBubble({ message }: { message: Message }) {
   const t = useLabels();
   const [failed, setFailed] = useState(false);
@@ -95,6 +131,25 @@ function ImageBubble({ message }: { message: Message }) {
   const aspect = message.media_width && message.media_height ? message.media_width / message.media_height : null;
   if (!message.media_url) return <MediaFailure />;
   if (failed) return <MediaFailure onRetry={() => { setFailed(false); setAttempt(value => value + 1); }} />;
+  const picture = (
+    <img
+      key={attempt}
+      src={message.media_url}
+      alt={message.body || t("messages.shared_image") }
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+  // View-once must not offer a second navigation to the same bytes. The image
+  // element is the one fetch; a link would be another full request.
+  if (message.view_once) {
+    return (
+      <div className="media-bubble media-image" style={aspect ? { aspectRatio: String(aspect) } : undefined}>
+        {picture}
+      </div>
+    );
+  }
   return (
     <a
       className="media-bubble media-image"
@@ -104,14 +159,7 @@ function ImageBubble({ message }: { message: Message }) {
       aria-label={t("messages.open_photo")}
       style={aspect ? { aspectRatio: String(aspect) } : undefined}
     >
-      <img
-        key={attempt}
-        src={message.media_url}
-        alt={message.body || t("messages.shared_image") }
-        loading="lazy"
-        decoding="async"
-        onError={() => setFailed(true)}
-      />
+      {picture}
     </a>
   );
 }

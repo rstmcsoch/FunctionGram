@@ -237,6 +237,48 @@ test('the ownership query itself only ever removes the sender’s own row', asyn
   assert.equal(await message(fromBob), undefined);
 });
 
+test('delete for me hides the message from one person and leaves the row', async () => {
+  const id = await seed(alice, bob, 'hide from bob');
+  const hidden = await api(bob, { action: 'hide_message', id });
+  assert.equal(hidden.status, 200, JSON.stringify(hidden.data));
+  assert.equal(hidden.data.scope, 'me');
+  assert.ok(await message(id), 'delete for me does not remove the row');
+  const aliceThread = await api(alice, null, '?messages=' + encodeURIComponent(bob.id));
+  const bobThread = await api(bob, null, '?messages=' + encodeURIComponent(alice.id));
+  assert.equal(aliceThread.status, 200);
+  assert.equal(bobThread.status, 200);
+  assert.ok((aliceThread.data.items as { id: string }[]).some(item => item.id === id), 'the other participant still sees it');
+  assert.equal((bobThread.data.items as { id: string }[]).some(item => item.id === id), false, 'the hider no longer sees it');
+  assert.equal((await api(carol, { action: 'hide_message', id })).status, 404, 'a stranger cannot hide it');
+});
+
+test('delete for everyone follows the seen and time windows', async () => {
+  const minute = 60 * 1000;
+  const seenRecent = await seed(alice, bob, 'seen inside 15');
+  await pool.query('UPDATE messages SET created_at=?, read_at=? WHERE id=?', [Date.now() - 5 * minute, Date.now(), seenRecent]);
+  assert.equal((await api(alice, { action: 'delete_message', id: seenRecent })).status, 200, 'within 15 minutes even if seen');
+  assert.equal(await message(seenRecent), undefined);
+
+  const unseen = await seed(alice, bob, 'unseen after 15');
+  await pool.query('UPDATE messages SET created_at=?, read_at=?, view_once_consumed=? WHERE id=?', [Date.now() - 20 * minute, null, 0, unseen]);
+  assert.equal((await api(alice, { action: 'delete_message', id: unseen })).status, 200, 'after 15 minutes while unseen');
+  assert.equal(await message(unseen), undefined);
+
+  const seen = await seed(alice, bob, 'seen after 15');
+  await pool.query('UPDATE messages SET created_at=?, read_at=? WHERE id=?', [Date.now() - 20 * minute, Date.now(), seen]);
+  assert.equal((await api(alice, { action: 'delete_message', id: seen })).status, 403, 'seen after 15 minutes is refused');
+  assert.ok(await message(seen), 'a refused delete leaves the row');
+
+  const opened = await seed(alice, bob, 'view once counts as seen');
+  await pool.query('UPDATE messages SET created_at=?, read_at=?, view_once_consumed=? WHERE id=?', [Date.now() - 20 * minute, null, 1, opened]);
+  assert.equal((await api(alice, { action: 'delete_message', id: opened })).status, 403);
+  assert.ok(await message(opened));
+
+  const old = await seed(alice, bob, 'older than a day');
+  await pool.query('UPDATE messages SET created_at=?, read_at=? WHERE id=?', [Date.now() - 25 * 60 * minute, null, old]);
+  assert.equal((await api(alice, { action: 'delete_message', id: old })).status, 403, 'after 24 hours is refused');
+  assert.ok(await message(old));
+});
 test('the destructive action is only offered for the sender’s own messages', async () => {
   const messages = readFileSync(path.join(process.cwd(), 'components/social/messages.tsx'), 'utf8');
   // The Delete action in the action menu is gated on the sender.

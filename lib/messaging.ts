@@ -69,6 +69,15 @@ export function liveMessage(alias = 'm'): string {
 }
 
 /**
+ * "Delete for me": a row in `message_hidden` hides the message from one
+ * participant only. Binds the viewer id once. The other participant's copy
+ * is a different row in that table and is unaffected.
+ */
+export function notHiddenFor(alias = 'm'): string {
+  return `NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id=${alias}.id AND h.user_id=?)`;
+}
+
+/**
  * "Clear chat" for one participant: hide everything sent before the marker
  * without deleting a single row. Binds the viewer's nullable
  * `conversation_state.cleared_before` twice (test, then compare).
@@ -333,6 +342,7 @@ export async function conversationList(
       WHERE (m.sender_id=? OR m.recipient_id=?)
         AND m.deleted_at IS NULL
         AND (m.expires_at IS NULL OR m.expires_at>?)
+        AND ${notHiddenFor('m')}
     ),
     latest AS (SELECT * FROM scoped WHERE rn=1),
     unread AS (
@@ -342,6 +352,7 @@ export async function conversationList(
       WHERE u.recipient_id=? AND u.read_at IS NULL
         AND u.deleted_at IS NULL AND (u.expires_at IS NULL OR u.expires_at>?)
         AND (us.cleared_before IS NULL OR u.created_at>=us.cleared_before)
+        AND ${notHiddenFor('u')}
       GROUP BY u.sender_id
     )
     SELECT * FROM (
@@ -378,8 +389,8 @@ export async function conversationList(
   // Placeholder order follows the SQL text exactly.
   const args: unknown[] = [
     viewer, viewer,             // scoped: peer_id CASE, PARTITION BY CASE
-    viewer, viewer, now,        // scoped: sender OR recipient, expiry
-    viewer, viewer, now,        // unread: state join, recipient, expiry
+    viewer, viewer, now, viewer,  // scoped: sender OR recipient, expiry, hide
+    viewer, viewer, now, viewer,  // unread: state join, recipient, expiry, hide
     viewer,                     // is_self
     now,                        // mute expiry
     viewer,                     // conversation_state join
@@ -446,9 +457,10 @@ export async function unreadTotal(viewer: string, now = Date.now()): Promise<num
     .prepare(
       `SELECT COUNT(*) AS count FROM messages
        WHERE recipient_id=? AND sender_id<>? AND read_at IS NULL
-         AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>?)`,
+         AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>?)
+         AND ${notHiddenFor('messages')}`,
     )
-    .bind(viewer, viewer, now)
+    .bind(viewer, viewer, now, viewer)
     .first<{ count: number }>();
   const messages = Number(row?.count ?? 0);
   // A conversation explicitly marked unread contributes one even when every
@@ -463,9 +475,10 @@ export async function unreadTotal(viewer: string, now = Date.now()): Promise<num
            WHERE u.recipient_id=cs.user_id AND u.sender_id=cs.other_user_id
              AND u.read_at IS NULL AND u.deleted_at IS NULL
              AND (u.expires_at IS NULL OR u.expires_at>?)
+             AND ${notHiddenFor('u')}
          )`,
     )
-    .bind(viewer, now)
+    .bind(viewer, now, viewer)
     .first<{ count: number }>();
   return messages + Number(marked?.count ?? 0);
 }
@@ -560,7 +573,7 @@ export async function searchConversation(
 
   // One predicate, bound identically for the count and the page, so the
   // pagination total can never disagree with the rows.
-  const where = `${conversationPredicate()} AND ${liveMessage()} AND ${notClearedBefore()}
+  const where = `${conversationPredicate()} AND ${liveMessage()} AND ${notClearedBefore()} AND ${notHiddenFor()}
      AND (m.body LIKE ? ESCAPE '\\'
           OR COALESCE(m.media_filename,'') LIKE ? ESCAPE '\\'
           OR COALESCE(m.media_mime,'') LIKE ? ESCAPE '\\'
@@ -569,6 +582,7 @@ export async function searchConversation(
     ...conversationArgs(viewer, other),
     now,
     cleared, cleared,
+    viewer,
     pattern, pattern, pattern, pattern,
   ];
 
@@ -650,9 +664,9 @@ export async function conversationContent(
   const boundedLimit = Math.max(1, Math.min(60, Number(limit) || 24));
   const boundedOffset = Math.max(0, Math.min(100000, Number(offset) || 0));
   const cleared = await clearedBefore(viewer, other);
-  const where = `${conversationPredicate()} AND ${liveMessage()} AND ${notClearedBefore()}
+  const where = `${conversationPredicate()} AND ${liveMessage()} AND ${notClearedBefore()} AND ${notHiddenFor()}
      AND COALESCE(m.view_once,0)=0 AND ${contentPredicate(tab)}`;
-  const args: unknown[] = [...conversationArgs(viewer, other), now, cleared, cleared];
+  const args: unknown[] = [...conversationArgs(viewer, other), now, cleared, cleared, viewer];
 
   const countRow = await db()
     .prepare(`SELECT COUNT(*) AS total FROM messages m WHERE ${where}`)
@@ -710,10 +724,10 @@ export async function pinnedMessages(viewer: string, other: string, now = Date.n
               m.body AS body, m.message_type AS message_type, m.sender_id AS sender_id, m.created_at AS created_at,
               m.media_url AS media_url, m.media_filename AS media_filename, m.sticker_id AS sticker_id
        FROM message_pins mp JOIN messages m ON m.id=mp.message_id
-       WHERE mp.conversation_key=? AND ${liveMessage()}
+       WHERE mp.conversation_key=? AND ${liveMessage()} AND ${notHiddenFor()}
        ORDER BY mp.created_at DESC, mp.id DESC LIMIT ?`,
     )
-    .bind(key, now, MAX_PINNED_MESSAGES)
+    .bind(key, now, viewer, MAX_PINNED_MESSAGES)
     .all()).results as Record<string, unknown>[];
   const text = (value: unknown) => (value === null || value === undefined ? null : String(value));
   return rows.map(row => ({

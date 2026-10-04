@@ -82,6 +82,7 @@ test('an image message carries real, verified media and serves it to participant
   assert.ok(bytes.length > 1000, 'real image data, not an empty body');
   assert.deepEqual([bytes[0], bytes[1], bytes[2]], [0xff, 0xd8, 0xff], 'the bytes are a JPEG');
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('location'), null, 'the storage URL is not redirected to');
 
   // So does the sender, and so does the thread payload.
   assert.equal((await h.mediaRequest(alice, id)).status, 200);
@@ -371,6 +372,32 @@ test('view-once consumption is atomic under parallel requests', async () => {
   assert.equal(statuses.filter(status => status === 410).length, 2, 'the others are told it was already viewed');
   const states = await h.query('SELECT message_id FROM view_once_state WHERE message_id=?', [id]);
   assert.equal(states.rowCount, 1, 'one consumption record');
+});
+
+test('view-once bytes are served once and a second full fetch fails', async () => {
+  const { id } = await sendAttachment(alice, bob, 'image', realImageBytes(), 'image/jpeg', 'once.jpg', { view_once: true });
+  assert.equal((await h.api(bob, { action: 'consume_view_once', id })).status, 200);
+  const first = await h.mediaRequest(bob, id);
+  assert.equal(first.status, 200, 'the viewing itself can load');
+  assert.equal(first.headers.get('cache-control'), 'private, no-store');
+  assert.equal(first.headers.get('location'), null, 'no storage redirect');
+  const bytes = new Uint8Array(await first.arrayBuffer());
+  assert.deepEqual([bytes[0], bytes[1], bytes[2]], [0xff, 0xd8, 0xff]);
+  const again = await h.mediaRequest(bob, id);
+  assert.equal(again.status, 410, 'a second full fetch is refused');
+  assert.equal(again.headers.get('location'), null);
+  const ranged = await h.mediaRequest(bob, id, '', { range: 'bytes=0-15' });
+  assert.equal(ranged.status, 206, 'a range during the same viewing is still allowed');
+});
+
+test('parallel view-once media fetches cannot both return the file', async () => {
+  const { id } = await sendAttachment(alice, bob, 'image', realImageBytes(), 'image/jpeg', 'race-bytes.jpg', { view_once: true });
+  assert.equal((await h.api(bob, { action: 'consume_view_once', id })).status, 200);
+  const results = await Promise.all([h.mediaRequest(bob, id), h.mediaRequest(bob, id)]);
+  const statuses = results.map(result => result.status);
+  assert.equal(statuses.filter(status => status === 200).length, 1, `exactly one full fetch wins: ${JSON.stringify(statuses)}`);
+  assert.equal(statuses.filter(status => status === 410).length, 1, 'the other full fetch is refused');
+  for (const result of results) assert.equal(result.headers.get('location'), null);
 });
 
 test('media disappears with the message it belongs to', async () => {
