@@ -29,7 +29,7 @@ const ICONS = {
 
 export type AdminNavIcon = keyof typeof ICONS;
 export type AdminNavItem = { label: string; href: string; icon: AdminNavIcon; match: 'exact' | 'prefix' | 'none'; external?: boolean };
-export type AdminNavGroup = { label: string; items: AdminNavItem[] };
+export type AdminNavGroup = { label: string; hint?: string; items: AdminNavItem[] };
 
 const FOCUSABLE = 'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
@@ -123,7 +123,7 @@ export function AdminNav({ groups, wordmark, account }: {
       {brand}
       <nav className="admin-nav" aria-label="Admin navigation">
         {groups.map(group => <div key={group.label} className="admin-nav-group" role="group" aria-label={group.label}>
-          <p className="admin-nav-group-label">{group.label}</p>
+          <p className="admin-nav-group-label">{group.label}{group.hint && <span className="admin-nav-group-hint">{group.hint}</span>}</p>
           {group.items.map(item => {
             const Icon = ICONS[item.icon];
             return <Link
