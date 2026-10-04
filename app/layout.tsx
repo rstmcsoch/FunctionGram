@@ -4,7 +4,8 @@ import {LabelsProvider} from '@/components/social/labels';
 import type { Metadata } from 'next';
 import { appearanceCss } from '@/lib/appearance';
 import './globals.css';
-export const dynamic='force-dynamic';
+export const preferredRegion = 'bom1';
+export const revalidate = 300;
 // One settings read per request: the tree below asks for the appearance, the
 // labels and the media policy, and all three come from the same snapshot.
 export async function generateMetadata():Promise<Metadata>{
