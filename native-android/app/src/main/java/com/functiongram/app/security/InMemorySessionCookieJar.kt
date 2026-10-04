@@ -5,8 +5,10 @@ import okhttp3.CookieJar
 import okhttp3.HttpUrl
 
 /**
- * Process-memory cookie jar for a future Better Auth session.
- * Phase 1 does not sign in and does not persist cookies to disk.
+ * Process-memory cookie jar kept from the foundation phase.
+ * Sign-in uses [com.functiongram.app.data.auth.SessionCookieJar], which
+ * keeps cookies in memory and in the Keystore-backed store. This jar is
+ * not the auth session.
  */
 class InMemorySessionCookieJar : CookieJar {
     private val store = mutableMapOf<String, MutableList<Cookie>>()

@@ -20,13 +20,20 @@ export async function SocialHome({ initialUsername }: { initialUsername?: string
  // `identity()`, `featurePolicy()` and `publicAppearance()` are each resolved
  // once per request (request-scoped memoization), so the Admin Panel authority
  // check and the client shell reuse them instead of repeating the work.
- const viewer=await identity();
- const [policy,appearance]=await Promise.all([featurePolicy(viewer),publicAppearance()]);
+ // Appearance does not need the viewer. Resolve it in parallel with identity
+ // so a cold Turso hop is not paid twice before the first branch.
+ const [viewer,appearance]=await Promise.all([identity(),publicAppearance()]);
+ const policy=await featurePolicy(viewer);
  if(policy.config.maintenance.enabled&&!policy.admin)return <AccessScreen title={policy.config.maintenance.title} message={policy.config.maintenance.message} appearance={appearance} flags={{...policy.flags,signups:false}} maintenance/>;
  if(!viewer&&!policy.flags.guestBrowsing)return <AccessScreen title={t("page.sign_in_to_continue")} message={t("page.browsing_is_available_to_signed_in_members_")} appearance={appearance} flags={policy.flags} maintenance={false}/>;
- let initial:SocialData|null=null;
- try{initial=await bootstrap();}catch(error){console.error('Feed unavailable',error);}
- const [cmsPages,announcements,adminAccess]=await Promise.all([publicCmsFooterPages(),activePublicAnnouncements(!!viewer),adminPanelAuthority(viewer)]);
+ // Feed, footer pages, announcements and the admin-panel flag do not depend
+ // on each other. Waiting on them one after another was the warm-path stall.
+ const [initial,cmsPages,announcements,adminAccess]=await Promise.all([
+  bootstrap().catch((error)=>{console.error('Feed unavailable',error);return null as SocialData|null;}),
+  publicCmsFooterPages(),
+  activePublicAnnouncements(!!viewer),
+  adminPanelAuthority(viewer),
+ ]);
  // Only this boolean crosses to the browser: "may this account open the Admin
  // Panel?" It drives the destination chooser UI and grants nothing — the panel
  // re-checks role, two-factor, IP policy and session age on every request.

@@ -1,9 +1,9 @@
 package com.functiongram.app.domain.session
 
 /**
- * Session contract for later phases.
- * Better Auth issues the session from POST/GET /api/auth on the existing server.
- * This phase does not create accounts or store a session.
+ * Whether this device still has a Better Auth session cookie for the website.
+ * The cookie is issued by POST /api/auth/sign-in/email (or TOTP verification)
+ * and cleared by POST /api/auth/sign-out. This is not a second account system.
  */
 interface SessionGateway {
     fun hasSession(): Boolean

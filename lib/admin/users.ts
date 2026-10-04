@@ -4,6 +4,7 @@ import { authorizeAdmin, insertAudit, transaction } from './core';
 import { AdminError } from './validation';
 import { requirePermission } from './permissions';
 import { assertCanGrant } from './role-matrix';
+import { releaseAuthorityTwoFactor } from './session-policy';
 
 export const USER_ACTIONS = ['ban','unban','promote','promoteModerator','demote','signout','verify','delete','restore','resetPassword'] as const;
 export type UserAction = typeof USER_ACTIONS[number];
@@ -27,7 +28,7 @@ export async function changeUser(pool: PoolLike, actorId: string, input: UserCom
     if (command.confirmation !== target.email) throw new AdminError('Type the exact account email to confirm.');
     if (actorId === target.id && !['signout','resetPassword'].includes(command.action)) throw new AdminError('You cannot change your own account here.', 403);
     if (target.role === 'owner' && actorId !== target.id) throw new AdminError('Owner accounts are protected. Use reviewed out-of-band recovery if access is lost.', 403);
-    if (command.action === 'delete') requirePermission(actor, 'users.delete');
+    if (['delete','restore'].includes(command.action)) requirePermission(actor, 'users.delete');
     if (command.action === 'promote') assertCanGrant(actor.role, actor.permissions, 'admin');
     if (command.action === 'promoteModerator') assertCanGrant(actor.role, actor.permissions, 'moderator');
     if (command.action === 'demote') {
@@ -56,6 +57,7 @@ export async function changeUser(pool: PoolLike, actorId: string, input: UserCom
     const change = update[command.action];
     if (change) await db.query(`UPDATE "user" SET ${change[0]},"updatedAt"=now() WHERE id=$1`, [target.id, ...change[1]]);
     if (['ban','delete','demote','signout'].includes(command.action)) await db.query('DELETE FROM session WHERE "userId"=$1', [target.id]);
+    if (command.action === 'demote') await releaseAuthorityTwoFactor(db, target.id);
     if (command.action === 'delete') await db.query('UPDATE profiles SET deleted_at=$2 WHERE id=$1', [target.id, Date.now()]);
     if (command.action === 'restore') await db.query('UPDATE profiles SET deleted_at=NULL WHERE id=$1', [target.id]);
     const { rows: [after] } = await db.query('SELECT role,banned,"banReason","banExpires","emailVerified",deleted_at FROM "user" WHERE id=$1', [target.id]);

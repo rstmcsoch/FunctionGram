@@ -9,7 +9,7 @@ import { serializedPool } from './serialized-pool';
 import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
-import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements } from './turso-schema';
+import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements, tursoPushTokenStatements } from './turso-schema';
 import { ROLE_TABLES } from './admin/role-matrix';
 import { VERIFICATION_TABLES } from './verification-schema';
 
@@ -144,6 +144,13 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     version: 20,
     statements: VERIFICATION_TABLES,
   },
+  {
+    version: 21,
+    statements: [
+      "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
+      ...tursoPushTokenStatements,
+    ],
+  },
 ];
 
 /** `ALTER TABLE <table> ADD COLUMN <column>` — the only DDL that is not
@@ -222,7 +229,7 @@ function isTursoDatabase() {
 // Remove stray spaces, new lines or quotes that are easy to paste by mistake.
 function cleanEnv(value: string | undefined) {
   if (!value) return undefined;
-  const cleaned = value.trim().replace(/^["']+|["']+$/g, '').trim();
+  const cleaned = value.trim().replace(/^['"]+|['"]+$/g, '').trim();
   return cleaned || undefined;
 }
 
@@ -551,11 +558,18 @@ export async function ensureSchema() {
           )
         `);
 
+        // One round trip for the whole history. The previous loop issued one
+        // SELECT per migration on every cold isolate before the first HTML byte.
+        const appliedRows = await database.query(
+          'SELECT version FROM functiongram_migrations',
+        );
+        const appliedVersions = new Set(
+          appliedRows.rows.map(row => Number(row.version)),
+        );
         for (const migration of DATABASE_MIGRATIONS) {
-          const applied = await database.query(
-            'SELECT version FROM functiongram_migrations WHERE version = ?',
-            [migration.version],
-          );
+          const applied = {
+            rowCount: appliedVersions.has(migration.version) ? 1 : 0,
+          };
 
           if (!applied.rowCount) {
             if (hasAdditiveColumns(migration.statements)) {
