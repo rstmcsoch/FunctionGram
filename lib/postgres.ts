@@ -558,11 +558,18 @@ export async function ensureSchema() {
           )
         `);
 
+        // One round trip for the whole history. The previous loop issued one
+        // SELECT per migration on every cold isolate before the first HTML byte.
+        const appliedRows = await database.query(
+          'SELECT version FROM functiongram_migrations',
+        );
+        const appliedVersions = new Set(
+          appliedRows.rows.map(row => Number(row.version)),
+        );
         for (const migration of DATABASE_MIGRATIONS) {
-          const applied = await database.query(
-            'SELECT version FROM functiongram_migrations WHERE version = ?',
-            [migration.version],
-          );
+          const applied = {
+            rowCount: appliedVersions.has(migration.version) ? 1 : 0,
+          };
 
           if (!applied.rowCount) {
             if (hasAdditiveColumns(migration.statements)) {
