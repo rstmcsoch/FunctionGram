@@ -1,4 +1,5 @@
 import type { PoolLike } from '../postgres';
+import { flagIsTrue } from '../account-policy';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { AdminError } from './validation';
 import { requirePermission } from './permissions';
@@ -34,7 +35,11 @@ export async function changeUser(pool: PoolLike, actorId: string, input: UserCom
       else if (target.role === 'moderator') assertCanGrant(actor.role, actor.permissions, 'moderator');
     }
     if (['admin','moderator'].includes(target.role) && actor.role !== 'owner' && !(actor.role === 'admin' && target.role === 'moderator')) throw new AdminError('Only an owner can manage administrator accounts or grant roles.', 403);
-    if (['promote','promoteModerator'].includes(command.action) && (target.role !== 'user' || !target.emailVerified || target.banned || !target.twoFactorEnabled)) throw new AdminError('Verify the email, enable two-factor authentication, and unban the account before granting a role.');
+    if (['promote','promoteModerator'].includes(command.action)) {
+      if (target.role !== 'user') throw new AdminError('Choose a regular account to grant a role.');
+      if (!flagIsTrue(target.emailVerified)) throw new AdminError('Verify this email before granting a role.');
+      if (target.banned && (!target.banExpires || new Date(target.banExpires).getTime() > Date.now())) throw new AdminError('Unban this account before granting a role.');
+    }
     if (target.deleted_at != null && command.action !== 'restore') throw new AdminError('Restore this account before making other changes.');
     if (command.action === 'demote' && !['admin','moderator'].includes(target.role)) throw new AdminError('Choose an admin or moderator account to revoke.');
     if (command.action === 'resetPassword') {
