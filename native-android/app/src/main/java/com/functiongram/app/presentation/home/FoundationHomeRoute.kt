@@ -50,6 +50,12 @@ fun FoundationHomeRoute() {
             color = BrandInk,
         )
         Text(
+            text = "Package and signature checks are signals, not a guarantee that the app is unmodified.",
+            modifier = Modifier.padding(top = 12.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = BrandInk,
+        )
+        Text(
             text = ApiEnvironment.resolvedOrigin(),
             modifier = Modifier.padding(top = 16.dp),
             style = MaterialTheme.typography.bodyMedium,

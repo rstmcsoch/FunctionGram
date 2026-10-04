@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -12,13 +13,13 @@ android {
         applicationId = "com.functiongram.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-phase1"
+        versionCode = 2
+        versionName = "0.2.0-phase2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Pure Kotlin today. These ABIs are the supported native set for any
-        // future JNI dependency; the Phase 1 APK does not ship .so libraries.
+        // Pure Kotlin today. These ABIs match androidx.graphics:graphics-path.
+        // This app does not ship its own JNI.
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
@@ -30,17 +31,30 @@ android {
     buildTypes {
         debug {
             isDebuggable = true
-            versionNameSuffix = "-debug"
-            buildConfigField("String", "API_BASE_URL", "\"https://functiongram.vercel.app\"")
-        }
-        release {
             isMinifyEnabled = false
             isShrinkResources = false
+            isJniDebuggable = false
+            versionNameSuffix = "-debug"
+            buildConfigField("String", "API_BASE_URL", "\"https://functiongram.vercel.app\"")
+            // Empty in git. A local edit may point at http://localhost:<port> or another HTTPS host.
+            buildConfigField("String", "DEBUG_API_ORIGIN", "\"\"")
+            buildConfigField("String", "SIGNING_PROFILE", "\"debug\"")
+        }
+        release {
+            // Release is not a debuggable process. Debug endpoint overrides do not exist on this variant.
+            isDebuggable = false
+            isJniDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            // Skeleton only. AGP's debug keystore lets this phase assemble a minified APK.
+            // It is not a production signing key and must be replaced before any store upload.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
             buildConfigField("String", "API_BASE_URL", "\"https://functiongram.vercel.app\"")
+            buildConfigField("String", "SIGNING_PROFILE", "\"debug-keystore-not-production\"")
         }
     }
 
@@ -81,6 +95,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.navigation:navigation-compose:2.8.9")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
