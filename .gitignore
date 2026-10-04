@@ -1,4 +1,4 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/ for more about ignored files.
 
 # dependencies
 /node_modules
@@ -64,3 +64,9 @@ android/local.properties
 /native-android/app/build/
 /native-android/local.properties
 /native-android/.idea/
+
+# Native Android release signing. Never commit keystores or passwords.
+*.jks
+*.keystore
+keystore.properties
+**/keystore.properties
