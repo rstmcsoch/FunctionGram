@@ -14,7 +14,7 @@ class MainActivity : ComponentActivity() {
         val app = application as FunctionGramApplication
         setContent {
             FunctionGramTheme {
-                FunctionGramNavHost(app.authRepository, app.messagingRepository)
+                FunctionGramNavHost(app.authRepository, app.messagingRepository, app.feedRepository)
             }
         }
     }

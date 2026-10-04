@@ -5,6 +5,8 @@ import com.functiongram.app.configuration.ApiEnvironment
 import com.functiongram.app.data.auth.AuthSessionRepository
 import com.functiongram.app.data.auth.EncryptedSessionStore
 import com.functiongram.app.data.auth.OkHttpAuthTransport
+import com.functiongram.app.data.feed.FeedRepository
+import com.functiongram.app.data.feed.OkHttpFeedRepository
 import com.functiongram.app.data.messaging.MessagingRepository
 import com.functiongram.app.data.messaging.OkHttpMessagingRepository
 import com.functiongram.app.data.auth.SessionCookieJar
@@ -22,6 +24,9 @@ class FunctionGramApplication : Application() {
         private set
 
     lateinit var messagingRepository: MessagingRepository
+        private set
+
+    lateinit var feedRepository: FeedRepository
         private set
 
     override fun onCreate() {
@@ -44,6 +49,7 @@ class FunctionGramApplication : Application() {
             jar = jar,
         )
         messagingRepository = OkHttpMessagingRepository(origin, http.okHttp())
+        feedRepository = OkHttpFeedRepository(origin, http.okHttp())
     }
 
     companion object {

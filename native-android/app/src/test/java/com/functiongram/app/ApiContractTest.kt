@@ -60,5 +60,13 @@ class ApiContractTest {
             "https://functiongram.vercel.app/api/social?messages=peer-1&limit=50",
             ApiRoutes.thread(origin, "peer-1"),
         )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?offset=0",
+            ApiRoutes.feedOffset(origin, 0),
+        )
+        assertEquals(
+            "https://functiongram.vercel.app/api/social?reels=1&offset=0",
+            ApiRoutes.reelsFeed(origin, 0),
+        )
     }
 }
