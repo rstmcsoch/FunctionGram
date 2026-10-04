@@ -19,7 +19,12 @@ export function VerificationSettings() {
   const [info, setInfo] = useState<{ batches: { id: string; name: string; description: string }[]; batch: string | null; applications: { status: string; batch: string }[] } | null>(null);
   const [message, setMessage] = useState('');
 
-  useEffect(() => { void fetch('/api/verification').then(response => response.json()).then(setInfo).catch(() => undefined); }, []);
+  useEffect(() => {
+    void fetch('/api/verification')
+      .then(response => response.json())
+      .then(data => setInfo(data as { batches: { id: string; name: string; description: string }[]; batch: string | null; applications: { status: string; batch: string }[] }))
+      .catch(() => undefined);
+  }, []);
   const current = QUESTIONS[step];
   const summary = step >= QUESTIONS.length;
 
