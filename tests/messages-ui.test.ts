@@ -337,6 +337,16 @@ test('every stored message type is rendered by a bubble of its own', () => {
   assert.match(media, /t\("messages\.retry"\)/, 'and can be retried');
   assert.match(media, /referrerPolicy="no-referrer"/, 'a provider GIF is loaded without a referrer');
   assert.match(media, /loading="lazy"/, 'media is lazy');
+  // Photos open in an in-tab lightbox — never a new browser tab.
+  assert.match(media, /MessagePhotoLightbox/, 'a photo opens the in-tab lightbox');
+  assert.match(media, /onClick=\{\(\) => setLightboxOpen\(true\)\}/, 'clicking a photo opens the lightbox');
+  assert.doesNotMatch(code(media), /className="media-bubble media-image"[\s\S]*?target="_blank"/, 'a photo does not open in a new tab');
+  const lightbox = read('components/social/message-photo-lightbox.tsx');
+  assert.match(lightbox, /createPortal/, 'the lightbox portals over the page');
+  assert.match(lightbox, /Escape/, 'Escape closes the lightbox');
+  assert.match(lightbox, /ZoomIn|zoom_in/, 'zoom in is offered');
+  assert.match(lightbox, /ZoomOut|zoom_out/, 'zoom out is offered');
+  assert.doesNotMatch(code(lightbox), /window\.open|target="_blank"/, 'the lightbox never navigates away');
   // A share the reader may not see arrives without its identifier.
   assert.match(media, /if \(!message\.post_id\)/, 'a withheld post is handled');
   assert.match(media, /t\("messages\.shared_post_unavailable"\)/, 'and says so');
@@ -501,7 +511,7 @@ test('the UI states a reader can reach are all rendered', () => {
 
 test('every label key a messaging component renders exists in the registry', () => {
   const sources: [string, string][] = [
-    ['messages.tsx', messages], ['chat-info.tsx', chatInfo], ['message-media.tsx', media], ['gif-picker.tsx', gifPicker],
+    ['messages.tsx', messages], ['chat-info.tsx', chatInfo], ['message-media.tsx', media], ['gif-picker.tsx', gifPicker], ['message-photo-lightbox.tsx', read('components/social/message-photo-lightbox.tsx')],
   ];
   const registry = new Set(Object.keys(LABEL_DEFAULTS));
   let checked = 0;
