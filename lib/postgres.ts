@@ -10,6 +10,8 @@ import { postgresQuery, type SqlDialect } from './sql';
 import { countDbTrip } from './perf';
 
 import { tursoSchemaStatements, tursoIndexStatements, tursoMessagingUpgradeStatements, tursoMessagingV4Statements, tursoMessagingV13Statements, tursoMessagingV17Statements, tursoPushTokenStatements } from './turso-schema';
+import { ROLE_TABLES } from './admin/role-matrix';
+import { VERIFICATION_TABLES } from './verification-schema';
 
 export type QueryResultRow = PgQueryResultRow;
 
@@ -127,9 +129,31 @@ export const DATABASE_MIGRATIONS: Migration[] = [
     statements: tursoMessagingV17Statements,
   },
   {
-    // Optional Android device tokens. Idempotent CREATE TABLE. No Firebase credential is read.
+    // Media trash restore needs the prior status. Folded into the base assets
+    // CREATE for new databases; this additive column covers existing Turso DBs.
     version: 18,
-    statements: tursoPushTokenStatements,
+    statements: [
+      "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
+    ],
+  },
+  {
+    version: 19,
+    statements: ROLE_TABLES,
+  },
+  {
+    version: 20,
+    statements: VERIFICATION_TABLES,
+  },
+  {
+    // Compatibility migration for the Android push-token stack. This deliberately
+    // runs after main's existing 18–20 migrations so both diverged histories converge:
+    // older Android deployments that recorded migration 18 for push tokens still
+    // receive the media-trash column, and current main deployments receive tokens.
+    version: 21,
+    statements: [
+      "ALTER TABLE assets ADD COLUMN trash_origin TEXT NOT NULL DEFAULT 'ready'",
+      ...tursoPushTokenStatements,
+    ],
   },
 ];
 
