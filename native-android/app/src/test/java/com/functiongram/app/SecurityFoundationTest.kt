@@ -203,7 +203,12 @@ class SecurityFoundationTest {
         } else {
             assertFalse(com.functiongram.app.configuration.VariantMarker.ALLOWS_DEBUG_ENDPOINT)
             assertFalse(com.functiongram.app.configuration.VariantMarker.CLAIMS_DEBUGGABLE)
-            assertEquals("debug-keystore-not-production", BuildConfig.SIGNING_PROFILE)
+            when (BuildConfig.SIGNING_PROFILE) {
+                "release-keystore-required" -> Unit
+                "debug-keystore-not-production" ->
+                    assertTrue(BuildConfig.VERSION_NAME.endsWith("-nonprod"))
+                else -> throw AssertionError("Unexpected signing profile ${BuildConfig.SIGNING_PROFILE}")
+            }
             assertEquals(ApiEnvironment.PUBLIC_API_ORIGIN, ApiEnvironment.resolvedOrigin())
         }
     }
@@ -263,12 +268,44 @@ class SecurityFoundationTest {
         assertTrue(gradle.contains("isDebuggable = false"))
         assertTrue(gradle.contains("isMinifyEnabled = true"))
         assertTrue(gradle.contains("isShrinkResources = true"))
-        assertTrue(gradle.contains("signingConfigs.getByName(\"debug\")"))
-        assertFalse(gradle.contains("storePassword"))
-        assertFalse(gradle.contains("keyPassword"))
-        val release = gradle.substringAfter("release {").substringBefore("compileOptions")
+        assertTrue(gradle.contains("verifyReleaseSigning"))
+        assertTrue(gradle.contains("nonProductionRelease"))
+        assertTrue(gradle.contains("armeabi-v7a"))
+        assertTrue(gradle.contains("arm64-v8a"))
+        assertTrue(gradle.contains("x86_64"))
+        assertFalse(Regex("(?i)(store|key)password\\s*[=:]\\s*\"[^\"]+\"").containsMatchIn(gradle))
+        assertFalse(gradle.contains("BEGIN "))
+        val release = gradle.substringAfter("\n        release {").substringBefore("create(\"nonProductionRelease\")")
+        assertFalse(release.contains("getByName(\"debug\")"))
         assertFalse(release.contains("DEBUG_API_ORIGIN"))
+        assertTrue(release.contains("release-keystore-required"))
         assertTrue(gradle.contains("DEBUG_API_ORIGIN"))
+        val nonProd = gradle.substringAfter("create(\"nonProductionRelease\")")
+        assertTrue(nonProd.contains("signingConfigs.getByName(\"debug\")"))
+    }
+
+    @Test
+    fun signingInputsAreGitignoredAndExampleHasNoSecret() {
+        val nativeRoot = moduleDir().parentFile ?: error("native-android directory missing")
+        val repoRoot = nativeRoot.parentFile ?: error("repository root missing")
+        val nativeIgnore = File(nativeRoot, ".gitignore").readText()
+        assertTrue(nativeIgnore.contains("*.jks"))
+        assertTrue(nativeIgnore.contains("*.keystore"))
+        assertTrue(nativeIgnore.contains("keystore.properties"))
+        val rootIgnore = File(repoRoot, ".gitignore").readText()
+        assertTrue(rootIgnore.contains("*.jks"))
+        assertTrue(rootIgnore.contains("keystore.properties"))
+        val example = File(nativeRoot, "keystore.properties.example").readText()
+        listOf("storeFile", "storePassword", "keyAlias", "keyPassword").forEach { key ->
+            val line = example.lineSequence().first { it.startsWith("$key=") }
+            assertTrue(line.removePrefix("$key=").isBlank())
+        }
+        val script = File(nativeRoot, "scripts/verify-release-apk.sh").readText()
+        assertTrue(script.contains("PRODUCTION=\"false\""))
+        assertTrue(script.contains("FUNCTIONGRAM_PRODUCTION_CERT_SHA256"))
+        assertTrue(script.contains("exit 2"))
+        assertFalse(File(nativeRoot, "keystore.properties").exists())
+        assertTrue(ReleaseCertificatePin.sha256Hex.isEmpty())
     }
 
     @Test
@@ -301,7 +338,6 @@ class SecurityFoundationTest {
             File(moduleDir(), "src/main"),
             File(moduleDir(), "src/debug"),
             File(moduleDir(), "src/release"),
-            File(moduleDir(), "build.gradle.kts"),
             File(moduleDir(), "proguard-rules.pro"),
         )
         val hits = mutableListOf<String>()
@@ -319,6 +355,10 @@ class SecurityFoundationTest {
                 if (needle in code) hits += "${file.path}: $needle"
             }
         } }
+        val gradleText = File(moduleDir(), "build.gradle.kts").readText()
+        forbidden.filter { it != "storePassword" && it != "keyPassword" }.forEach { needle ->
+            if (needle in gradleText) hits += "build.gradle.kts: $needle"
+        }
         assertTrue(hits.joinToString("\n"), hits.isEmpty())
         assertFalse(File(moduleDir(), "google-services.json").exists())
         assertFalse(File(moduleDir().parentFile, "google-services.json").exists())
