@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download, Eye, EyeOff, FileText, Image as ImageIcon, Mic, Pause, Play, Share2, UserPlus } from "lucide-react";
+import { MessagePhotoLightbox } from "./message-photo-lightbox";
 import { Avatar, Busy } from "./common";
 import { useLabels } from "./labels";
 import { stickerById } from "@/lib/sticker-pack";
@@ -128,14 +129,16 @@ function ImageBubble({ message }: { message: Message }) {
   const t = useLabels();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const aspect = message.media_width && message.media_height ? message.media_width / message.media_height : null;
   if (!message.media_url) return <MediaFailure />;
   if (failed) return <MediaFailure onRetry={() => { setFailed(false); setAttempt(value => value + 1); }} />;
+  const alt = message.body || t("messages.shared_image");
   const picture = (
     <img
       key={attempt}
       src={message.media_url}
-      alt={message.body || t("messages.shared_image") }
+      alt={alt}
       loading="lazy"
       decoding="async"
       onError={() => setFailed(true)}
@@ -151,16 +154,24 @@ function ImageBubble({ message }: { message: Message }) {
     );
   }
   return (
-    <a
-      className="media-bubble media-image"
-      href={message.media_url}
-      target="_blank"
-      rel="noreferrer noopener"
-      aria-label={t("messages.open_photo")}
-      style={aspect ? { aspectRatio: String(aspect) } : undefined}
-    >
-      {picture}
-    </a>
+    <>
+      <button
+        type="button"
+        className="media-bubble media-image"
+        aria-label={t("messages.open_photo")}
+        style={aspect ? { aspectRatio: String(aspect) } : undefined}
+        onClick={() => setLightboxOpen(true)}
+      >
+        {picture}
+      </button>
+      {lightboxOpen ? (
+        <MessagePhotoLightbox
+          src={message.media_url}
+          alt={alt}
+          onClose={() => setLightboxOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }
 

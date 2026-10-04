@@ -367,6 +367,8 @@ export const LABEL_DEFAULTS = {
   "messages.file_empty": "That file is empty.",
   "messages.media_unavailable": "This media could not be loaded.",
   "messages.open_photo": "Open photo",
+  "messages.zoom_in": "Zoom in",
+  "messages.zoom_out": "Zoom out",
   "messages.open_in_conversation": "Open in conversation",
   "messages.load_more": "Load more",
   "messages.record_voice": "Record a voice message",
