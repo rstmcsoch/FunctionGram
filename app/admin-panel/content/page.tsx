@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireAdminPage } from '@/lib/admin/guard';
+import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
 import { getPool } from '@/lib/postgres';
 import { contentFilters, listContent } from '@/lib/admin/content';
 import { readSettings } from '@/lib/admin/settings';
@@ -9,7 +9,7 @@ import { hasPermission } from '@/lib/admin/permissions';
 import { PageHead } from '@/components/admin/page-head';
 
 export default async function Content({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
-  const actor=await requireAdminPage();let filter;
+  const actor=await requireAdminPage();assertAdminPagePermission(actor,'content.read');let filter;
   try{filter=contentFilters(await searchParams);}catch{return <section className="admin-card admin-state-card"><h1>Invalid content filters</h1><Link className="admin-button" data-tone="ghost" href={ADMIN_BASE_PATH+'/content'}>Clear filters</Link></section>;}
   const pool=await getPool();const [data,settings]=await Promise.all([listContent(pool,filter),actor.role==='moderator'?Promise.resolve(null):readSettings()]);const base=ADMIN_BASE_PATH+'/content';
   const pageLink=(page:number)=>base+'?'+new URLSearchParams(Object.fromEntries(Object.entries({...filter,page,flagged:filter.flagged?'1':''}).map(([k,v])=>[k,String(v)])));

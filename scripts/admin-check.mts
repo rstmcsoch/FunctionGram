@@ -60,7 +60,10 @@ if (process.argv[2] === 'seed') {
       if (who !== 'admin') assert.ok(!body.includes('A pulse on your community.'), 'Denied response must not contain panel markup');
       else if (route === ADMIN_BASE_PATH) {
         assert.match(body, /A pulse on your community./);
-        assert.match(body, /Applied migrations:[\s\S]*?1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12/);
+        // The registered Turso/libSQL history is 1-4 then 13..21; PostgreSQL
+        // phase numbers 5-12 are reserved and never applied on this dialect.
+        const migrationVersions = DATABASE_MIGRATIONS.map(migration => migration.version).join(', ');
+        assert.match(body, new RegExp(`Applied migrations:[\\s\\S]*?${migrationVersions.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
         assert.match(body, /noindex/);
       }
       assert.ok(!body.includes(secret), 'No server secret in responses');
@@ -81,23 +84,28 @@ if (process.argv[2] === 'seed') {
   assert.equal(sqlCheck.status,403,'The SQL tool remains owner-only over HTTP');
   const ownerSql=await fetch(origin+'/api/admin/system',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action:'readOnlySql',query:'SELECT 1',reason:'Local owner access check'})});
   const ownerResult=await ownerSql.json() as {rows:Record<string,unknown>[]};
-  assert.equal(ownerSql.status,200);assert.equal(ownerResult.rows[0]['?column?'],1);
+  // PostgreSQL names the column "?column?"; libSQL names it "1". Read the
+  // single selected value instead of depending on one dialect's label.
+  assert.equal(ownerSql.status,200);assert.equal(Object.values(ownerResult.rows[0])[0],1);
   for (const who of ['guest','regular']) {
     const response = await fetch(origin + '/api/admin', { method: 'POST', headers: { cookie: cookies[who] || '', origin, 'content-type': 'application/json' }, body: JSON.stringify({action:'verify',id:'regular',confirmation:'regular@example.test'}) });
     assert.equal(response.status,who === 'guest' ? 401 : 403);
   }
   const action = (name: string, extra = {}) => fetch(origin + '/api/admin', {method:'POST',headers:{cookie:cookies.admin,origin,'content-type':'application/json'},body:JSON.stringify({action:name,id:'regular',confirmation:'regular@example.test',reason:'HTTP regression test',...extra})});
+  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test',reason:'Local HTTP recovery check'})});
   assert.equal((await action('promote')).status,403,'Only owner grants roles');
   assert.equal((await action('ban',{confirmation:'wrong'})).status,400);
   assert.equal((await action('ban')).status,200);
   assert.equal((await fetch(origin + '/api/admin?resource=users',{headers:{cookie:cookies.regular}})).status,401,'Ban revokes active sessions');
   assert.equal((await action('unban')).status,200);
-  assert.equal((await action('delete')).status,200);
-  assert.equal((await action('restore')).status,200);
+  // Deleting and restoring accounts stays owner-only in the role matrix.
+  assert.equal((await action('delete')).status,403,'Only the owner deletes accounts');
+  assert.equal((await ownerAction('delete')).status,200);
+  assert.equal((await action('restore')).status,403,'Only the owner restores accounts');
+  assert.equal((await ownerAction('restore')).status,200);
   assert.equal((await action('verify')).status,200);
   const csv = await action('exportUsers',{limit:200}); assert.equal(csv.status,200); assert.match(csv.headers.get('content-type') || '',/text\/csv/);
   assert.equal((await fetch(origin + '/api/admin?resource=users&limit=201',{headers:{cookie:cookies.admin}})).status,400);
-  const ownerAction = (action: string) => fetch(origin+'/api/admin',{method:'POST',headers:{cookie:cookies.owner,origin,'content-type':'application/json'},body:JSON.stringify({action,id:'regular',confirmation:'regular@example.test',reason:'Local HTTP recovery check'})});
   assert.equal((await ownerAction('promote')).status,200);
   assert.equal((await action('ban')).status,403,'Admins cannot act on another administrator');
   assert.equal((await ownerAction('demote')).status,200);

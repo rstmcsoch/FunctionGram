@@ -3,8 +3,6 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
-import { getAuthTables } from 'better-auth/db';
-import { admin, twoFactor } from 'better-auth/plugins';
 import * as schema from '../lib/postgres-schema';
 import { serializedPool } from '../lib/serialized-pool';
 import {DATABASE_MIGRATIONS,type PoolLike} from '../lib/postgres';
@@ -30,7 +28,7 @@ test('Turso migrations are additive/idempotent and cover admin schema without Po
   const { createTursoFixture, TURSO_MIGRATION_VERSIONS } = await import('./support/turso-db');
   const first = await createTursoFixture();
   try {
-    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     // Re-applying every statement must stay safe on an already-migrated database.
     for (const migration of DATABASE_MIGRATIONS) {
       for (const sql of migration.statements) {
@@ -38,7 +36,7 @@ test('Turso migrations are additive/idempotent and cover admin schema without Po
         await first.pool.query(sql);
       }
     }
-    const tables = ['admin_audit_log','admin_message_controls','admin_notification_templates','admin_email_controls','admin_login_devices','admin_demo_seed_control','profile_moderation','assets','reports'];
+    const tables = ['admin_audit_log','admin_message_controls','admin_notification_templates','admin_email_controls','admin_login_devices','device_push_tokens','admin_demo_seed_control','profile_moderation','assets','reports'];
     for (const table of tables) {
       const { rows } = await first.pool.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [table]);
       assert.equal(rows.length, 1, table);

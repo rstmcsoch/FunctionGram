@@ -29,11 +29,11 @@ export async function changeUser(pool: PoolLike, actorId: string, input: UserCom
     if (actorId === target.id && !['signout','resetPassword'].includes(command.action)) throw new AdminError('You cannot change your own account here.', 403);
     if (target.role === 'owner' && actorId !== target.id) throw new AdminError('Owner accounts are protected. Use reviewed out-of-band recovery if access is lost.', 403);
     if (['delete','restore'].includes(command.action)) requirePermission(actor, 'users.delete');
-    if (command.action === 'promote') assertCanGrant(actor.role, undefined, 'admin');
-    if (command.action === 'promoteModerator') assertCanGrant(actor.role, undefined, 'moderator');
+    if (command.action === 'promote') assertCanGrant(actor.role, actor.permissions, 'admin');
+    if (command.action === 'promoteModerator') assertCanGrant(actor.role, actor.permissions, 'moderator');
     if (command.action === 'demote') {
-      if (target.role === 'admin') assertCanGrant(actor.role, undefined, 'admin');
-      else if (target.role === 'moderator') assertCanGrant(actor.role, undefined, 'moderator');
+      if (target.role === 'admin') assertCanGrant(actor.role, actor.permissions, 'admin');
+      else if (target.role === 'moderator') assertCanGrant(actor.role, actor.permissions, 'moderator');
     }
     if (['admin','moderator'].includes(target.role) && actor.role !== 'owner' && !(actor.role === 'admin' && target.role === 'moderator') && !(actorId === target.id && ['signout','resetPassword'].includes(command.action))) throw new AdminError('Only an owner can manage administrator accounts or grant roles.', 403);
     if (['promote','promoteModerator'].includes(command.action)) {

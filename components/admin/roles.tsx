@@ -77,7 +77,7 @@ export function RoleControls({
     </section>
     <section className="admin-card">
       <h2>Grant or revoke a role</h2>
-      <p>Type the exact email. The account must already exist, have a verified email, and have finished the panel two-factor setup. An admin can only appoint moderators. Moderators cannot appoint anyone.</p>
+      <p>Type the exact email. The account must already exist and have a verified email. Two-factor applies to the panel session performing the grant, never to the account receiving the role. An admin can only appoint moderators. Moderators cannot appoint anyone.</p>
       <form className="admin-detail" onSubmit={async event => {
         event.preventDefault(); setPendingMsg('');
         try { await post({ action: 'grantRole', email, role: grantRole, reason }); setPendingMsg('Role updated.'); setEmail(''); router.refresh(); }

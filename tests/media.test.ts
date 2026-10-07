@@ -35,7 +35,7 @@ test('migration 8 media columns exist in Turso schema and legacy Phase 8 is not 
  const {createTursoFixture,TURSO_MIGRATION_VERSIONS}=await import('./support/turso-db');
  const fixture=await createTursoFixture();
  try{
-  assert.deepEqual(TURSO_MIGRATION_VERSIONS,[1,2,3,4,13,14,15,16,17,18,19,20]);
+  assert.deepEqual(TURSO_MIGRATION_VERSIONS,[1,2,3,4,13,14,15,16,17,18,19,20,21]);
   const cols=(await fixture.pool.query('PRAGMA table_info(assets)')).rows.map(row=>String(row.name));
   for(const column of ['status','storage_owner','verified','source_retained_bytes','trash_origin'])assert.ok(cols.includes(column),column);
  }finally{await fixture.close();}

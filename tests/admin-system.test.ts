@@ -33,8 +33,10 @@ const DAY = 86_400_000;
 test('Turso system migrations preserve the explicit demo-seed switch and register after messaging upgrades', async () => {
   const { pool, close } = await fixture();
   try {
-    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20]);
-    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version, 20);
+    assert.deepEqual(TURSO_MIGRATION_VERSIONS, [1, 2, 3, 4, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    // 21 is the native-push convergence migration (assets.trash_origin replay +
+    // device_push_tokens), so it is the newest registered version.
+    assert.equal(DATABASE_MIGRATIONS.at(-1)?.version, 21);
     assert.equal(DATABASE_MIGRATIONS.find(item => item.version === 12), undefined);
     await pool.query('UPDATE admin_demo_seed_control SET enabled=0 WHERE id=1');
     // Replaying demo-control statements must not re-enable the switch.
@@ -44,7 +46,7 @@ test('Turso system migrations preserve the explicit demo-seed switch and registe
     assert.equal(Number((await pool.query('SELECT enabled FROM admin_demo_seed_control WHERE id=1')).rows[0].enabled), 0);
     const overview = await systemOverview(pool);
     assert.deepEqual(overview.missingMigrations, []);
-    assert.equal(overview.latestRegisteredMigration, 20);
+    assert.equal(overview.latestRegisteredMigration, 21);
   } finally {
     await close();
   }

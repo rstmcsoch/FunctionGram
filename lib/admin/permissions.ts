@@ -1,7 +1,9 @@
 import { AdminError } from './errors';
 import type { AdminActor, AdminRole } from './config';
 
-// Compatibility surface for restored admin pages and APIs; keep these exports stable.
+// The permission catalogue. Every entry is enforced on the server; the role
+// matrix may only select a subset of this list for `admin` and `moderator`.
+// `owner` always receives the whole catalogue.
 
 export const ADMIN_PERMISSIONS = [
   'admin.access',
@@ -19,7 +21,6 @@ export const ADMIN_PERMISSIONS = [
   'roles.grantModerator',
   'settings.read',
   'settings.manage',
-  'features.primary',
   'features.primary',
   'media.manage',
   'media.delete',
