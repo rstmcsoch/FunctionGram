@@ -1,4 +1,4 @@
-import {requireAdminPage} from '@/lib/admin/guard';
+import {assertAdminPagePermission,requireAdminPage} from '@/lib/admin/guard';
 import {getPool} from '@/lib/postgres';
 import {PERMISSION_LABELS, permissionsFor} from '@/lib/admin/permissions';
 import {parseAdminIpAllowlist} from '@/lib/admin/network';
@@ -9,7 +9,7 @@ import { listPendingDeletions, listStaff } from '@/lib/admin/roles';
 import { loadRoleMatrix } from '@/lib/admin/role-matrix';
 
 export default async function SecurityPage(){
- const actor=await requireAdminPage(),pool=await getPool();
+ const actor=await requireAdminPage();assertAdminPagePermission(actor,'security.read');const pool=await getPool();
  const [{rows:[user]},{rows:devices},{rows:[owners]},matrix]=await Promise.all([
   pool.query('SELECT "twoFactorEnabled" FROM "user" WHERE id=$1',[actor.userId]),
   pool.query('SELECT fingerprint_hash,first_seen,last_seen FROM admin_login_devices WHERE user_id=$1 ORDER BY last_seen DESC LIMIT 20',[actor.userId]),

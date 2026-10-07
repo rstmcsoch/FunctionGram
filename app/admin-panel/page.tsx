@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireAdminPage } from '@/lib/admin/guard';
+import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
 import { getPool } from '@/lib/postgres';
 import { ADMIN_BASE_PATH } from '@/lib/admin/config';
 import { dashboard } from '@/lib/admin/queries';
@@ -27,7 +27,7 @@ const sections = [
 ];
 
 export default async function AdminHome() {
-  const actor = await requireAdminPage();
+  const actor = await requireAdminPage(); assertAdminPagePermission(actor, 'dashboard.read');
   const db = await getPool();
   const [stats, migrations, settingsResult] = await Promise.all([
     dashboard(db),

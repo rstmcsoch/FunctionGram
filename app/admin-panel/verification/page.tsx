@@ -1,11 +1,11 @@
-import { requireAdminPage } from '@/lib/admin/guard';
+import { assertAdminPagePermission, requireAdminPage } from '@/lib/admin/guard';
 import { getPool } from '@/lib/postgres';
 import { PageHead } from '@/components/admin/page-head';
 import { overview } from '@/lib/verification';
 import { VerificationDesk } from '@/components/admin/verification';
 
 export default async function VerificationPage() {
-  const actor = await requireAdminPage();
+  const actor = await requireAdminPage(); assertAdminPagePermission(actor, 'security.read');
   let data: Awaited<ReturnType<typeof overview>> | null = null;
   let message: string | null = null;
   try {
