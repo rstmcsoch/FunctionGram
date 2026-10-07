@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { flagIsTrue } from '../account-policy';
 import type { PoolLike, QueryExecutor } from '../postgres';
 import { authorizeAdmin, insertAudit, transaction } from './core';
 import { requirePermission } from './permissions';
@@ -33,8 +34,8 @@ export async function grantRoleByEmail(pool: PoolLike, actorId: string, body: Re
   if (!reason) throw new AdminError('A reason is required.');
   return transaction(pool, async db => {
     const actor = await authorizeAdmin(db, actorId);
-    const { rows: [target] } = await db.query('SELECT id,email,role,"emailVerified","twoFactorEnabled",banned,deleted_at FROM "user" WHERE lower(email)=$1 FOR UPDATE', [email]);
-    if (!target) throw new AdminError('No account uses that email. They must register, verify the email, and enable two-factor authentication first.', 404);
+    const { rows: [target] } = await db.query('SELECT id,email,role,"emailVerified",banned,deleted_at FROM "user" WHERE lower(email)=$1 FOR UPDATE', [email]);
+    if (!target) throw new AdminError('No account uses that email. They must register and verify the email first.', 404);
     if (target.id === actor.userId) throw new AdminError('You cannot change your own role here.', 403);
     if (target.role === 'owner') throw new AdminError('Owner accounts are protected.', 403);
     if (role === 'user') {
@@ -44,8 +45,11 @@ export async function grantRoleByEmail(pool: PoolLike, actorId: string, body: Re
     } else {
       assertCanGrant(actor.role, actor.permissions, role);
       if (target.role !== 'user' && target.role !== role) throw new AdminError('Demote this account before granting a different role.');
-      if (!target.emailVerified || !target.twoFactorEnabled || target.banned || target.deleted_at != null) {
-        throw new AdminError('The account must verify its email, finish the panel two-factor setup, and be active before the role is granted.');
+      // Two-factor belongs to the Admin Panel session performing the grant
+      // (enforced by the guard), never to the account receiving the role: a
+      // normal user does not need an administrator factor before becoming one.
+      if (!flagIsTrue(target.emailVerified) || target.banned || target.deleted_at != null) {
+        throw new AdminError('The account must verify its email and be active before the role is granted.');
       }
     }
     if (actor.role === 'admin' && target.role === 'admin') throw new AdminError('An admin cannot add or remove another admin.', 403);

@@ -35,16 +35,22 @@ test('Phase 9 role matrix grants moderators content hiding but not account promo
  assert.equal(hasPermission('owner','audit.read'),true);
 });
 
-test('only owners grant roles; grants require exact target email, reason, and a verified ordinary account',async()=>{
+test('role grants follow the effective matrix: owners grant anything, admins grant only moderators, moderators grant nothing',async()=>{
  const {db,pool}=await fixture();try{
   const command={action:'promoteModerator' as const,id:'target',confirmation:'target@example.test',reason:'Trusted moderation work',expires:null};
   await assert.rejects(changeUser(pool,'moderator',command),{status:403});
-  await assert.rejects(changeUser(pool,'admin',command),{status:403});
+  // The admin column of the role matrix keeps roles.grantModerator, so an admin
+  // may appoint moderators (PR #75 behaviour); administrator grants stay
+  // owner-only and the matrix can never widen that.
+  await changeUser(pool,'admin',command);
+  assert.equal((await pool.query('SELECT role FROM "user" WHERE id=\'target\'')).rows[0].role,'moderator');
+  assert.equal((await pool.query("SELECT action FROM admin_audit_log WHERE target_id='target'")).rows[0].action,'users.promoteModerator');
+  await pool.query('UPDATE "user" SET role=\'user\' WHERE id=\'target\'');
+  await assert.rejects(changeUser(pool,'admin',{...command,action:'promote'}),{status:403});
   await assert.rejects(changeUser(pool,'owner',{...command,confirmation:'wrong@example.test'}),{status:400});
   await assert.rejects(changeUser(pool,'owner',{...command,reason:''}),{status:400});
   await changeUser(pool,'owner',command);
   assert.equal((await pool.query('SELECT role FROM "user" WHERE id=\'target\'')).rows[0].role,'moderator');
-  assert.equal((await pool.query("SELECT action FROM admin_audit_log WHERE target_id='target'")).rows[0].action,'users.promoteModerator');
   await pool.query('UPDATE "user" SET role=\'user\' WHERE id=\'target\'');
   await pool.query('UPDATE "user" SET "emailVerified"=false WHERE id=\'target\'');
   await assert.rejects(changeUser(pool,'owner',command),{status:400});
@@ -83,9 +89,16 @@ test('optional admin IP allowlist supports exact IPv4/IPv6 and CIDRs; invalid po
  assert.equal(isAdminIpAllowed(new Headers({'x-real-ip':'2001:db8::45'}),policy),true);
  assert.equal(isAdminIpAllowed(new Headers({'x-real-ip':'::ffff:192.0.2.14'}),policy),true);
  assert.equal(isAdminIpAllowed(new Headers(),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
- assert.equal(isAdminIpAllowed(new Headers({'x-forwarded-for':'192.0.2.14, 10.0.0.2'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),true);
+ // A client-supplied x-forwarded-for hop must never satisfy the allowlist;
+ // only the edge-appended x-vercel-forwarded-for chain decides it.
+ assert.equal(isAdminIpAllowed(new Headers({'x-forwarded-for':'192.0.2.14, 10.0.0.2'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
+ assert.equal(isAdminIpAllowed(new Headers({'x-vercel-forwarded-for':'198.51.100.9, 192.0.2.14'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),true);
+ assert.equal(isAdminIpAllowed(new Headers({'x-vercel-forwarded-for':'192.0.2.14, 198.51.100.9'}),{ADMIN_IP_ALLOWLIST:'192.0.2.14'}),false);
  assert.throws(()=>assertAdminIpAllowed(new Headers({'x-real-ip':'192.0.2.14'}),{ADMIN_IP_ALLOWLIST:'not-an-ip'}),{status:503});
- assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===10)?.statements,schema.adminHardeningUpgradeStatements);
+ // Hardening DDL ships inside the Turso registry; the legacy PostgreSQL
+ // phase number 10 is not reused as a libSQL migration.
+ assert.equal(DATABASE_MIGRATIONS.find(migration=>migration.version===10),undefined);
+ assert.ok(DATABASE_MIGRATIONS.some(migration=>migration.statements.some(sql=>/admin_login_devices/.test(sql))));
 });
 
 test('new admin devices store only HMAC fingerprints, audit once, and trigger safe notices',async()=>{
@@ -115,7 +128,10 @@ test('audit viewer filters historical rows, CSV neutralizes formulas, and old re
  const {db,pool}=await fixture();try{
   await insertAudit(pool,{userId:'owner',email:'=SUM(1,1)',role:'owner'},{action:'users.demote',targetType:'user',targetId:'target-1',before:{role:'admin'},after:{role:'user'},reason:'Role review'});
   await insertAudit(pool,{userId:'admin',email:'admin@example.test',role:'admin'},{action:'content.hide',targetType:'posts',targetId:'post-1',reason:'Safety review'});
-  const filtered=await listAudit(pool,{action:'users.',actor:'SUM',targetType:'user',targetId:'target',from:'2026-09-29',to:'2026-10-01',page:1,limit:50});
+  // The rows were just written with Date.now(), so the window must be derived
+ // from the current UTC day instead of a fixed calendar range.
+ const day=new Date().toISOString().slice(0,10);
+ const filtered=await listAudit(pool,{action:'users.',actor:'SUM',targetType:'user',targetId:'target',from:day,to:day,page:1,limit:50});
   assert.equal(filtered.total,1);assert.equal(filtered.rows[0].action,'users.demote');
   assert.throws(()=>auditFilters({from:'2026-02-30'}),/valid UTC dates/);
   const csv=await exportAuditCsv(pool,{action:'users.',actor:'',targetType:'',targetId:'',from:'',to:'',q:'',page:1,limit:50});

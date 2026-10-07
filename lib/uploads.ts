@@ -4,7 +4,7 @@ import {head,del,put} from '@vercel/blob';
 import {getPool,type PoolLike,localDevDatabase} from './postgres';
 import {transaction} from './admin/core';
 import {AdminError} from './admin/validation';
-import {checkUploadInput,readMediaConfig,MEDIA_LOCK} from './media-policy';
+import {checkUploadInput,readMediaConfig} from './media-policy';
 import type {MediaConfig} from './media-config';
 import {MIB} from './media-config';
 import {processMedia,readBounded,type ProcessedMedia} from './media-processing';

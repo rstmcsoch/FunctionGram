@@ -76,12 +76,20 @@ export async function ensureRoleAnchors(db: QueryExecutor, email: string, userId
   }
 }
 
+/**
+ * One source of truth for who may change a role.
+ *
+ * `grants` is the actor's *effective* permission set (the role matrix value
+ * attached by `authorizeAdmin`), never a hard-coded default: an owner who
+ * removes `roles.grantModerator` from the admin column must actually remove
+ * that ability. Owner-only administration stays absolute — adding or removing
+ * an administrator is never delegated by the matrix.
+ */
 export function assertCanGrant(actorRole: AdminRole, grants: readonly AdminPermission[] | undefined, targetRole: 'admin' | 'moderator') {
+  const needed = targetRole === 'admin' ? 'roles.grantAdmin' : 'roles.grantModerator';
   if (actorRole === 'owner') return;
-  if (targetRole === 'admin') {
-    throw new AdminError('Only the owner can add or remove administrators.', 403);
-  }
-  if (!(grants ?? ROLE_PERMISSIONS[actorRole]).includes('roles.manage')) {
+  if (targetRole === 'admin') throw new AdminError('Only the owner can add or remove administrators.', 403);
+  if (!(grants ?? ROLE_PERMISSIONS[actorRole]).includes(needed)) {
     throw new AdminError('Your role cannot change this account.', 403);
   }
 }
